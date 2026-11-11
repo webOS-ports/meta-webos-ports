@@ -17,6 +17,45 @@ SRC_URI += "file://0005-wispr-treat-HTTP-204-as-a-successful-online-check.patch"
 
 SRC_URI += "file://0006-service-expose-the-access-point-behind-a-WiFi-service.patch"
 
+# DHCPHostname in main.conf (connman-conf): send a generic host name in DHCP
+# instead of the machine name.
+SRC_URI += "file://0007-dhcp-add-DHCPHostname-to-send-a-generic-host-name.patch"
+
+# WiFiMACRandomization in main.conf (connman-conf): join each Wi-Fi network
+# with a stable address of its own, scan from random ones, fall back to the
+# hardware address where the driver refuses. UseDeviceMACAddress per service
+# opts a network out.
+SRC_URI += "file://0008-wifi-give-every-network-its-own-stable-MAC-address.patch"
+
+# A user Connect held while the agent asks for a passphrase was never
+# answered when the retry failed at once, so every later Connect on that
+# network got InProgress until connmand restarted.
+SRC_URI += "file://0009-service-answer-a-held-Connect-when-the-retry-after-in.patch"
+# Ethernet.Address kept the address the link had when connmand first saw
+# it, so a network joined with its own address showed the hardware one.
+SRC_URI += "file://0010-ipconfig-follow-the-MAC-address-of-the-link.patch"
+
+# A saved service's "Modified" time could load an hour off: mktime() was
+# given an uninitialised tm_isdst.
+SRC_URI += "file://0011-util-let-mktime-work-out-DST-in-util_iso8601_to_time.patch"
+
+# A scan while connected could drop Wi-Fi: MediaTek's wlan_drv_gen2 reports
+# the associated BSS with its IEs cut short, RSN missing, so gsupplicant
+# saw WPA2 turn into WEP and removed the connected network.
+SRC_URI += "file://0012-gsupplicant-keep-the-connected-network-on-a-security.patch"
+
+# Enabling or disabling cellular switched Modem.Online, so mobile data off
+# took calls and SMS down too, and connman fought the telephony service
+# (airplane mode, per-SIM power) over the radio. Now it only switches data.
+SRC_URI += "file://0013-ofono-let-cellular-enable-disable-switch-mobile-data.patch"
+
+# A saved Wi-Fi network whose automatic reconnect failed stayed in the
+# failure state, which auto-connect skips, so a few seconds of an access
+# point not answering could leave the device offline until the user
+# connected by hand. Retry with back-off, except after failures that point
+# at the passphrase or the AP refusing the station.
+SRC_URI += "file://0014-service-retry-a-saved-Wi-Fi-network-after-a-failed-a.patch"
+
 # See connman-vpn.service.d/luneos-caps.conf for why: upstream's
 # CapabilityBoundingSet on connman-vpn.service is missing CAP_SYS_ADMIN and
 # CAP_DAC_OVERRIDE, which the l2tp plugin's client-side pppd needs to open

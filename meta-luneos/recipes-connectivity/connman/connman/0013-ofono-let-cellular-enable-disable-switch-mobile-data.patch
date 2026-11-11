@@ -1,0 +1,190 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 10 Nov 2026 11:10:55 +0100
+Subject: [PATCH] ofono: let cellular enable/disable switch mobile data, not
+ the radio
+
+Enabling or disabling the cellular technology set Modem.Online on every
+modem, and the cellular device was powered whenever Online was true. So
+turning mobile data off took the radio down with it, and with it calls
+and SMS; and anything else that switches the radio (airplane mode, a
+per-SIM power switch) was overridden the next time connman enabled or
+disabled cellular, or started with cellular disabled in its settings.
+
+On webOS the telephony service owns Modem.Online: it implements
+airplane mode and the per-SIM power switches and reapplies them at
+startup. connman driving the same property makes the two disagree,
+which shows up as both modems going offline after a connman restart
+with cellular disabled.
+
+Treat the cellular device the way Sailfish OS's ofono plugin does:
+enable and disable only say whether connman offers mobile data. Leave
+Modem.Online alone, keep no cellular network while disabled, and offer
+the networks again on enable if the modem is attached. While the radio
+is offline the modem cannot attach, and cm_update_attached() already
+removes the networks.
+
+For the same reason connman no longer powers the modems down when it
+stops. ofono drops Online with Powered, so every connman restart left
+both modems offline: the old connmand switched them off on its way out
+and the new one only switched them back on.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS-specific: the telephony service owns the modem's Online state]
+---
+ plugins/ofono.c | 79 ++++++++++++++++++++++---------------------------
+ 1 file changed, 35 insertions(+), 44 deletions(-)
+
+diff --git a/plugins/ofono.c b/plugins/ofono.c
+index 2deb67d..567c0d3 100644
+--- a/plugins/ofono.c
++++ b/plugins/ofono.c
+@@ -148,6 +148,9 @@ struct modem_data {
+ 
+ 	bool set_powered;
+ 
++	/* mobile data is enabled in connman */
++	bool enabled;
++
+ 	/* ConnectionManager Interface */
+ 	bool attached;
+ 	bool cm_powered;
+@@ -644,17 +647,6 @@ static int context_set_active(struct modem_data *modem,
+ 	return err;
+ }
+ 
+-static int modem_set_online(struct modem_data *modem, dbus_bool_t online)
+-{
+-	DBG("%s online %d", modem->path, online);
+-
+-	return set_property(modem, NULL, modem->path,
+-				OFONO_MODEM_INTERFACE,
+-				"Online", DBUS_TYPE_BOOLEAN,
+-				&online,
+-				NULL);
+-}
+-
+ static int cm_set_powered(struct modem_data *modem, dbus_bool_t powered)
+ {
+ 	int err;
+@@ -1040,7 +1032,6 @@ static bool try_create_device(struct modem_data *modem)
+ 	}
+ 
+ 	modem->device = device;
+-	connman_device_set_powered(modem->device, modem->online);
+ 
+ 	/*
+ 	 * The order in which the LTE and Connection Manager interfaces
+@@ -1090,6 +1081,11 @@ static void add_network(struct modem_data *modem,
+ 	if (context->network)
+ 		return;
+ 
++	if (!modem->enabled) {
++		DBG("mobile data disabled, no network");
++		return;
++	}
++
+ 	context->network = connman_network_create(context->path,
+ 					CONNMAN_NETWORK_TYPE_CELLULAR);
+ 	if (!context->network)
+@@ -2125,11 +2121,6 @@ static gboolean modem_changed(DBusConnection *conn, DBusMessage *message,
+ 		modem->online = online;
+ 
+ 		DBG("%s Online %d", modem->path, modem->online);
+-
+-		if (!modem->device)
+-			return TRUE;
+-
+-		connman_device_set_powered(modem->device, modem->online);
+ 	} else if (g_str_equal(key, "Interfaces")) {
+ 		uint8_t new_interfaces = extract_interfaces(&value);
+ 		uint8_t old_interfaces = modem->interfaces;
+@@ -2249,18 +2240,6 @@ static void add_modem(const char *path, DBusMessageIter *prop)
+ 	modem_update_interfaces(modem, 0, modem->interfaces);
+ }
+ 
+-static void modem_power_down(gpointer key, gpointer value, gpointer user_data)
+-{
+-	struct modem_data *modem = value;
+-
+-	DBG("%s", modem->path);
+-
+-	if (modem->ignore)
+-		return;
+-
+-	modem_set_powered(modem, FALSE);
+-}
+-
+ static void remove_modem(gpointer data)
+ {
+ 	struct modem_data *modem = data;
+@@ -2534,28 +2513,43 @@ static void modem_remove(struct connman_device *device)
+ 	DBG("%s device %p", modem->path, device);
+ }
+ 
++/*
++ * Enabling or disabling the cellular technology turns mobile data on or off.
++ * It does not touch Modem.Online: the radio belongs to whoever implements
++ * airplane mode and the per-SIM power switches (on webOS, the telephony
++ * service), and switching it from here took calls and SMS down with mobile
++ * data, and fought that owner over the radio.
++ *
++ * While mobile data is disabled no cellular network is offered. While the
++ * radio is offline the modem is not registered and cannot attach, and
++ * cm_update_attached() removes the networks; they come back on attach.
++ */
+ static int modem_enable(struct connman_device *device)
+ {
+ 	struct modem_data *modem = connman_device_get_data(device);
+ 
+-	DBG("%s device %p", modem->path, device);
++	DBG("%s device %p online %d", modem->path, device, modem->online);
+ 
+-	if (modem->online)
+-		return 0;
++	modem->enabled = true;
+ 
+-	return modem_set_online(modem, TRUE);
++	/* Offer the networks now if the modem is already attached */
++	if (modem->attached &&
++			has_interface(modem->interfaces, OFONO_API_NETREG))
++		netreg_get_properties(modem);
++
++	return 0;
+ }
+ 
+ static int modem_disable(struct connman_device *device)
+ {
+ 	struct modem_data *modem = connman_device_get_data(device);
+ 
+-	DBG("%s device %p", modem->path, device);
++	DBG("%s device %p online %d", modem->path, device, modem->online);
+ 
+-	if (!modem->online)
+-		return 0;
++	modem->enabled = false;
++	remove_all_networks(modem);
+ 
+-	return modem_set_online(modem, FALSE);
++	return 0;
+ }
+ 
+ static struct connman_device_driver modem_driver = {
+@@ -2715,13 +2709,10 @@ static void ofono_exit(void)
+ 
+ 	if (modem_hash) {
+ 		/*
+-		 * We should probably wait for the SetProperty() reply
+-		 * message, because ...
+-		 */
+-		g_hash_table_foreach(modem_hash, modem_power_down, NULL);
+-
+-		/*
+-		 * ... here we will cancel the call.
++		 * The modems are left powered: the telephony service owns
++		 * the radio, and powering them down took them offline for
++		 * good (ofono drops Online with Powered) on every connman
++		 * restart.
+ 		 */
+ 		g_hash_table_destroy(modem_hash);
+ 		modem_hash = NULL;
