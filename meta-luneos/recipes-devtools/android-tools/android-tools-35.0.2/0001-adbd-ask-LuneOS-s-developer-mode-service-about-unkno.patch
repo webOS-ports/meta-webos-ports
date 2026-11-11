@@ -1,0 +1,902 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 30 Oct 2026 09:42:11 +0100
+Subject: [PATCH] adbd: ask LuneOS's developer mode service about unknown hosts
+
+adbd 35 leaves the question whether to let a host in to libadbd_auth,
+which on Android talks to the system server's AdbDebuggingManager:
+it sends "CK", "DC", "WE" and "WF" packets that LuneOS's developer mode
+service does not know. That service answers on the protocol adbd 5.1.1
+used: adbd sends "PK<key> <user@host>" and reads "OK" or "NO".
+
+This libadbd_auth, in place of upstream's, speaks that protocol:
+
+- /run/adbd/auth is made by adbd itself (there is no Android init to
+  pass a socket in), 0600 in a directory only root may enter (0700,
+  checked and mended through one O_NOFOLLOW fd). Connections from anyone
+  but root are closed (SO_PEERCRED). The newest connection is the
+  service; one that restarted is asked the open question again.
+- One question at a time, at most 16 hosts waiting. Every connection of
+  the same key gets the user's answer to it.
+- No answer within 75 s (the service's own limit is 60 s), or no
+  service at all, refuses the host. An answer that arrives later, or
+  after the host went, is never taken for the next question's: the
+  service is disconnected then.
+- Only a host's key is sent: a 2048-bit adb RSA key and a comment
+  without control characters; anything else is refused unasked.
+- Saved keys are read from /var/lib/adbd/adb_keys, which the service
+  writes. The file has to be a regular file owned by adbd's user that
+  nobody else may write, of at most 1 MiB, and is not followed if it is
+  a link. Lines that are not keys are skipped with a log line each.
+  Keys are logged by fingerprint only.
+
+adbd's own auth.cpp checks the signature against those keys with
+BoringSSL; the 5.1.1 fix for a mincrypt RSA_verify() that went to
+OpenSSL's function of that name is not needed here.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [LuneOS-specific: replaces libadbd_auth for the LuneOS developer mode service]
+---
+ debian/system/adbd.mk                         |   3 +-
+ .../libs/adbd_auth/adbd_auth_luneos.cpp       | 780 ++++++++++++++++++
+ .../native/libs/adbd_auth/adbd_auth_luneos.h  |  50 ++
+ 3 files changed, 832 insertions(+), 1 deletion(-)
+ create mode 100644 frameworks/native/libs/adbd_auth/adbd_auth_luneos.cpp
+ create mode 100644 frameworks/native/libs/adbd_auth/adbd_auth_luneos.h
+
+diff --git a/debian/system/adbd.mk b/debian/system/adbd.mk
+index a3f88f1..6431a36 100644
+--- a/debian/system/adbd.mk
++++ b/debian/system/adbd.mk
+@@ -42,7 +42,8 @@ LIBADBD_fs_SRC_FILES := \
+ LIBDIAGNOSE_USB_SRC_FILES = diagnose_usb/diagnose_usb.cpp
+ LIBASYNCIO_SRC_FILES = libasyncio/AsyncIO.cpp
+ 
+-LIBADBD_AUTH_SRC_FILES = libs/adbd_auth/adbd_auth.cpp
++# LuneOS: adbd asks org.webosports.service.devmode, not Android's framework.
++LIBADBD_AUTH_SRC_FILES = libs/adbd_auth/adbd_auth_luneos.cpp
+ 
+ LOCAL_SRC_FILES := \
+   $(ADBD_SRC_FILES) \
+diff --git a/frameworks/native/libs/adbd_auth/adbd_auth_luneos.cpp b/frameworks/native/libs/adbd_auth/adbd_auth_luneos.cpp
+new file mode 100644
+index 0000000..9fd79cd
+--- /dev/null
++++ b/frameworks/native/libs/adbd_auth/adbd_auth_luneos.cpp
+@@ -0,0 +1,780 @@
++/*
++ * Copyright (C) 2026 Herman van Hazendonk
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++/*
++ * libadbd_auth for LuneOS, in place of adbd_auth.cpp.
++ *
++ * On Android adbd's questions go to the framework (UsbDebuggingManager)
++ * over the "adbd" socket init hands it, and the keys are in /adb_keys and
++ * /data/misc/adb/adb_keys. LuneOS has neither. Here:
++ *
++ * - The keys the user allowed "always" are in /var/lib/adbd/adb_keys,
++ *   root's only, written by the developer mode service
++ *   (org.webosports.service.devmode). The file is read again for every
++ *   host, so a key Settings revoked is asked about again. A line that is
++ *   not a key is skipped with a line in the journal; the key itself is
++ *   never logged.
++ *
++ * - adbd makes its socket itself, /run/adbd/auth, 0600 in a directory only
++ *   root may enter, and lets only root connect (SO_PEERCRED). The developer
++ *   mode service connects to it, is sent "PK<base64 key> <user@host>" for
++ *   a host that is not in adb_keys, asks the user in the shell, and answers
++ *   "OK" or "NO". That is the protocol adbd 5.1.1 spoke with LuneOS's
++ *   patch, unchanged: Android's later "CK", "DC", "WE" and "WF"
++ *   notifications are not sent, as the service would take them for keys.
++ *
++ * - One question is open at a time, as on Android. Only an answer to the
++ *   question sent on that connection counts. A question nobody answers in
++ *   ADBD_AUTH_PROMPT_TIMEOUT_MS is refused, also when the service is not
++ *   there at all; the service gives the user 60 s, so normally it is the
++ *   one that says no first. A refused host stays "unauthorized" and is
++ *   asked about again when it connects again.
++ */
++
++#ifndef ANDROID_BASE_UNIQUE_FD_DISABLE_IMPLICIT_CONVERSION
++#define ANDROID_BASE_UNIQUE_FD_DISABLE_IMPLICIT_CONVERSION
++#endif
++
++#include "include/adbd_auth.h"
++#include "adbd_auth_luneos.h"
++
++#include <errno.h>
++#include <fcntl.h>
++#include <string.h>
++#include <sys/epoll.h>
++#include <sys/eventfd.h>
++#include <sys/socket.h>
++#include <sys/stat.h>
++#include <sys/types.h>
++#include <sys/un.h>
++#include <unistd.h>
++
++#include <algorithm>
++#include <atomic>
++#include <chrono>
++#include <deque>
++#include <mutex>
++#include <optional>
++#include <string>
++#include <string_view>
++#include <vector>
++
++#include <android-base/logging.h>
++#include <android-base/macros.h>
++#include <android-base/thread_annotations.h>
++#include <android-base/unique_fd.h>
++#include <openssl/base64.h>
++#include <openssl/sha.h>
++
++using android::base::unique_fd;
++
++#ifndef ADBD_KEYS_PATH
++#define ADBD_KEYS_PATH "/var/lib/adbd/adb_keys"
++#endif
++#ifndef ADBD_AUTH_SOCKET_DIR
++#define ADBD_AUTH_SOCKET_DIR "/run/adbd"
++#endif
++#define ADBD_AUTH_SOCKET_PATH ADBD_AUTH_SOCKET_DIR "/auth"
++// Who may answer; another uid only in the tests.
++#ifndef ADBD_AUTH_PEER_UID
++#define ADBD_AUTH_PEER_UID 0
++#endif
++// Longer than the developer mode service's own 60 s, so that it is normally
++// the service that refuses a question the user leaves open.
++#ifndef ADBD_AUTH_PROMPT_TIMEOUT_MS
++#define ADBD_AUTH_PROMPT_TIMEOUT_MS 75000
++#endif
++
++static constexpr uint32_t kAuthVersion = 1;
++
++namespace {
++
++// mincrypt's RSAPublicKey, as adb sends and stores keys (crypto_utils'
++// ANDROID_PUBKEY_ENCODED_SIZE): modulus size in words, n0inv, the modulus
++// and R^2 (little-endian), the exponent.
++constexpr size_t kKeyEncodedSize = 4 + 4 + 256 + 256 + 4;
++constexpr uint32_t kModulusWords = 64;
++// The base64 of a key is 700 characters; with a comment a line is longer,
++// but never this long.
++constexpr size_t kMaxLine = 8192;
++// adb_keys grows by one line per computer the user allowed "always".
++constexpr size_t kMaxKeysFile = size_t{1024} * 1024;
++// adbd's MAX_PAYLOAD_V1: no key a host sends is longer.
++constexpr size_t kMaxPromptKey = 4096;
++// Hosts that may wait for their question at once.
++constexpr size_t kMaxPending = 16;
++
++uint32_t Le32(const uint8_t* p) {
++    return static_cast<uint32_t>(p[0]) | static_cast<uint32_t>(p[1]) << 8 |
++           static_cast<uint32_t>(p[2]) << 16 | static_cast<uint32_t>(p[3]) << 24;
++}
++
++// The decoded key of a key line's first field, or nothing.
++std::optional<std::vector<uint8_t>> DecodeKey(std::string_view line) {
++    std::string_view b64 = line.substr(0, line.find_first_of(" \t"));
++    if (b64.empty() || b64.size() > 2 * kKeyEncodedSize) {
++        return std::nullopt;
++    }
++    size_t max_len = 0;
++    if (!EVP_DecodedLength(&max_len, b64.size())) {
++        return std::nullopt;
++    }
++    std::vector<uint8_t> raw(max_len);
++    size_t len = 0;
++    if (!EVP_DecodeBase64(raw.data(), &len, raw.size(),
++                          reinterpret_cast<const uint8_t*>(b64.data()), b64.size()) ||
++        len != kKeyEncodedSize) {
++        return std::nullopt;
++    }
++    raw.resize(len);
++    // A 2048-bit modulus (top bit set), odd, and an exponent adb uses.
++    const uint8_t* modulus = raw.data() + 8;
++    uint32_t exponent = Le32(raw.data() + 8 + 256 + 256);
++    if (Le32(raw.data()) != kModulusWords || (modulus[0] & 1) == 0 || (modulus[255] & 0x80) == 0 ||
++        (exponent != 3 && exponent != 65537)) {
++        return std::nullopt;
++    }
++    return raw;
++}
++
++// What a host sent as its key, before anyone is asked about it: a key,
++// then at most a comment of printable characters (no control characters,
++// which would end or split the line the service reads).
++bool IsPromptableKey(std::string_view key) {
++    if (key.size() > kMaxPromptKey) {
++        return false;
++    }
++    for (char c : key) {
++        unsigned char u = static_cast<unsigned char>(c);
++        if ((u < 0x20 && u != '\t') || u == 0x7f) {
++            return false;
++        }
++    }
++    return adbd_auth_luneos::ClassifyKeyLine(key) == adbd_auth_luneos::KeyLine::kKey;
++}
++
++struct Prompt {
++    uint64_t id;
++    std::string key;
++    void* arg;
++    std::chrono::steady_clock::time_point deadline;
++};
++
++// The socket the developer mode service connects to, or -1 when it cannot
++// be made; then nobody can be asked, and only keys in adb_keys get in.
++unique_fd CreateListener() {
++    if (mkdir(ADBD_AUTH_SOCKET_DIR, 0700) != 0 && errno != EEXIST) {
++        PLOG(ERROR) << "adbd_auth: cannot make " ADBD_AUTH_SOCKET_DIR;
++        return unique_fd();
++    }
++    // Not a directory of ours, or a link to one: someone else's. Looked at
++    // and mended through the one fd, so it is the same directory.
++    unique_fd dfd(open(ADBD_AUTH_SOCKET_DIR, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
++    struct stat st;
++    if (dfd.get() < 0 || fstat(dfd.get(), &st) != 0 || !S_ISDIR(st.st_mode) ||
++        st.st_uid != geteuid() || ((st.st_mode & 07777) != 0700 && fchmod(dfd.get(), 0700) != 0)) {
++        LOG(ERROR) << "adbd_auth: " ADBD_AUTH_SOCKET_DIR " is not a directory only adbd's user "
++                      "can enter; nobody can be asked";
++        return unique_fd();
++    }
++
++    unique_fd fd(socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0));
++    if (fd.get() < 0) {
++        PLOG(ERROR) << "adbd_auth: cannot make the socket";
++        return unique_fd();
++    }
++    struct sockaddr_un addr;
++    memset(&addr, 0, sizeof(addr));
++    addr.sun_family = AF_UNIX;
++    static_assert(sizeof(ADBD_AUTH_SOCKET_PATH) <= sizeof(addr.sun_path), "socket path too long");
++    memcpy(addr.sun_path, ADBD_AUTH_SOCKET_PATH, sizeof(ADBD_AUTH_SOCKET_PATH));
++
++    // One left from an adbd that did not exit cleanly.
++    if (unlinkat(dfd.get(), "auth", 0) != 0 && errno != ENOENT) {
++        PLOG(ERROR) << "adbd_auth: cannot remove the old " ADBD_AUTH_SOCKET_PATH;
++        return unique_fd();
++    }
++    // Made 0600 rather than chmod()ed to it afterwards. umask is the
++    // process's, but this runs from adbd_auth_init(), before adbd has any
++    // other thread that makes files.
++    mode_t old_umask = umask(0177);
++    int ret = bind(fd.get(), reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr));
++    umask(old_umask);
++    if (ret != 0) {
++        PLOG(ERROR) << "adbd_auth: cannot bind " ADBD_AUTH_SOCKET_PATH;
++        return unique_fd();
++    }
++    if (listen(fd.get(), 4) != 0) {
++        PLOG(ERROR) << "adbd_auth: cannot listen on " ADBD_AUTH_SOCKET_PATH;
++        return unique_fd();
++    }
++    return fd;
++}
++
++}  // namespace
++
++namespace adbd_auth_luneos {
++
++KeyLine ClassifyKeyLine(std::string_view line) {
++    if (line.find('\0') != std::string_view::npos) {
++        return KeyLine::kNotText;
++    }
++    if (line.size() > kMaxLine) {
++        return KeyLine::kTooLong;
++    }
++    if (!line.empty() && line.back() == '\r') {
++        line.remove_suffix(1);
++    }
++    size_t start = line.find_first_not_of(" \t");
++    if (start == std::string_view::npos) {
++        return KeyLine::kBlank;
++    }
++    // adbd reads the key from the start of the line.
++    if (start != 0) {
++        return KeyLine::kNotAKey;
++    }
++    return DecodeKey(line) ? KeyLine::kKey : KeyLine::kNotAKey;
++}
++
++std::string Fingerprint(std::string_view key_line) {
++    auto raw = DecodeKey(key_line);
++    if (!raw) {
++        return "";
++    }
++    uint8_t digest[SHA256_DIGEST_LENGTH];
++    SHA256(raw->data(), raw->size(), digest);
++    size_t len = 0;
++    if (!EVP_EncodedLength(&len, sizeof(digest))) {
++        return "";
++    }
++    std::string b64(len, '\0');
++    size_t n = EVP_EncodeBlock(reinterpret_cast<uint8_t*>(b64.data()), digest, sizeof(digest));
++    b64.resize(n);
++    while (!b64.empty() && b64.back() == '=') {
++        b64.pop_back();
++    }
++    return "SHA256:" + b64;
++}
++
++}  // namespace adbd_auth_luneos
++
++struct AdbdAuthContext {
++    using Clock = std::chrono::steady_clock;
++    static constexpr uint64_t kEpollListener = 0;
++    static constexpr uint64_t kEpollEventFd = 1;
++    // + the connection's generation, so an event for a connection that was
++    // replaced in the same round is told from one for its successor.
++    static constexpr uint64_t kEpollFramework = 2;
++
++  public:
++    explicit AdbdAuthContext(AdbdAuthCallbacksV1* callbacks)
++        : callbacks_(*callbacks), timeout_(ADBD_AUTH_PROMPT_TIMEOUT_MS) {
++        epoll_fd_.reset(epoll_create1(EPOLL_CLOEXEC));
++        if (epoll_fd_.get() == -1) {
++            PLOG(FATAL) << "adbd_auth: failed to create epoll fd";
++        }
++        event_fd_.reset(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
++        if (event_fd_.get() == -1) {
++            PLOG(FATAL) << "adbd_auth: failed to create eventfd";
++        }
++        listen_fd_ = CreateListener();
++    }
++
++    AdbdAuthContext(const AdbdAuthContext& copy) = delete;
++    AdbdAuthContext(AdbdAuthContext&& move) = delete;
++    AdbdAuthContext& operator=(const AdbdAuthContext& copy) = delete;
++    AdbdAuthContext& operator=(AdbdAuthContext&& move) = delete;
++
++    uint64_t NextId() { return next_id_++; }
++
++    void Run() EXCLUDES(mutex_) {
++        if (listen_fd_.get() != -1) {
++            AddToEpoll(listen_fd_.get(), EPOLLIN, kEpollListener);
++        } else {
++            LOG(ERROR) << "adbd_auth: no socket; a host not in " ADBD_KEYS_PATH " is refused";
++        }
++        AddToEpoll(event_fd_.get(), EPOLLIN, kEpollEventFd);
++
++        while (true) {
++            int timeout_ms;
++            {
++                std::lock_guard<std::mutex> lock(mutex_);
++                if (stopping_) {
++                    return;
++                }
++                timeout_ms = MsUntilDeadline();
++            }
++            struct epoll_event events[4];
++            int rc = epoll_wait(epoll_fd_.get(), events, arraysize(events), timeout_ms);
++            if (rc == -1) {
++                if (errno == EINTR) {
++                    continue;
++                }
++                PLOG(FATAL) << "adbd_auth: epoll_wait failed";
++            }
++
++            std::vector<Prompt> allowed;
++            {
++                std::lock_guard<std::mutex> lock(mutex_);
++                for (int i = 0; i < rc; ++i) {
++                    HandleEvent(events[i], &allowed);
++                }
++                Expire();
++                Dispatch();
++                UpdateFrameworkEvents();
++            }
++            // Outside the lock: adbd's callback only queues work on its own
++            // thread, but it is not ours to know that.
++            for (const auto& p : allowed) {
++                callbacks_.key_authorized(p.arg, p.id);
++            }
++        }
++    }
++
++    void Stop() EXCLUDES(mutex_) {
++        std::lock_guard<std::mutex> lock(mutex_);
++        stopping_ = true;
++        Interrupt();
++    }
++
++    uint64_t PromptUser(std::string_view public_key, void* arg) EXCLUDES(mutex_) {
++        uint64_t id = NextId();
++        if (!IsPromptableKey(public_key)) {
++            LOG(WARNING) << "adbd_auth: a host sent something that is not an adb key; refused";
++            return id;
++        }
++        std::lock_guard<std::mutex> lock(mutex_);
++        if (listen_fd_.get() == -1) {
++            LOG(WARNING) << "adbd_auth: host " << adbd_auth_luneos::Fingerprint(public_key)
++                         << " refused: there is no socket to ask on";
++            return id;
++        }
++        if (pending_.size() >= kMaxPending) {
++            LOG(WARNING) << "adbd_auth: host " << adbd_auth_luneos::Fingerprint(public_key)
++                         << " refused: " << pending_.size() << " hosts are waiting already";
++            return id;
++        }
++        LOG(INFO) << "adbd_auth: host " << adbd_auth_luneos::Fingerprint(public_key)
++                  << " is not known; asking (id " << id << ")";
++        pending_.push_back(Prompt{id, std::string(public_key), arg, {}});
++        Interrupt();
++        return id;
++    }
++
++    // The host went before it was answered: its question is dropped. If it
++    // was sent, the service is disconnected too, so that it withdraws the
++    // question from the screen and an answer it may already have written
++    // cannot be taken for the next question's.
++    void NotifyDisconnected(uint64_t id) EXCLUDES(mutex_) {
++        std::lock_guard<std::mutex> lock(mutex_);
++        if (dispatched_ && dispatched_->id == id) {
++            LOG(INFO) << "adbd_auth: host " << id << " went before it was answered";
++            if (sent_) {
++                DisconnectFramework();
++            }
++            dispatched_.reset();
++            Interrupt();
++        }
++        pending_.erase(std::remove_if(pending_.begin(), pending_.end(),
++                                      [id](const Prompt& p) { return p.id == id; }),
++                       pending_.end());
++    }
++
++  private:
++    void AddToEpoll(int fd, uint32_t events, uint64_t data) {
++        struct epoll_event event;
++        memset(&event, 0, sizeof(event));
++        event.events = events;
++        event.data.u64 = data;
++        CHECK_EQ(0, epoll_ctl(epoll_fd_.get(), EPOLL_CTL_ADD, fd, &event));
++    }
++
++    void Interrupt() {
++        uint64_t value = 1;
++        ssize_t rc = write(event_fd_.get(), &value, sizeof(value));
++        // EAGAIN only when the counter is full, and then a wake-up is due anyway.
++        if (rc != static_cast<ssize_t>(sizeof(value)) && errno != EAGAIN) {
++            PLOG(FATAL) << "adbd_auth: write to eventfd failed";
++        }
++    }
++
++    int MsUntilDeadline() REQUIRES(mutex_) {
++        if (!dispatched_) {
++            return -1;
++        }
++        auto left = std::chrono::duration_cast<std::chrono::milliseconds>(dispatched_->deadline -
++                                                                          Clock::now());
++        // Rounded up, so the wake-up is not a millisecond early.
++        return static_cast<int>(std::clamp<int64_t>(left.count() + 1, 0, INT32_MAX));
++    }
++
++    void HandleEvent(const struct epoll_event& event, std::vector<Prompt>* allowed)
++            REQUIRES(mutex_) {
++        switch (event.data.u64) {
++            case kEpollListener:
++                Accept();
++                return;
++            case kEpollEventFd: {
++                uint64_t count;
++                if (read(event_fd_.get(), &count, sizeof(count)) < 0 && errno != EAGAIN) {
++                    PLOG(FATAL) << "adbd_auth: failed to read from eventfd";
++                }
++                return;
++            }
++            default:
++                break;
++        }
++        if (framework_fd_.get() == -1 || event.data.u64 != kEpollFramework + generation_) {
++            return;  // a connection that is gone already
++        }
++        if (event.events & (EPOLLIN | EPOLLHUP | EPOLLERR)) {
++            ReadFramework(allowed);
++        }
++        if (framework_fd_.get() != -1 && (event.events & EPOLLOUT)) {
++            Flush();
++        }
++    }
++
++    void Accept() REQUIRES(mutex_) {
++        unique_fd fd(accept4(listen_fd_.get(), nullptr, nullptr, SOCK_CLOEXEC | SOCK_NONBLOCK));
++        if (fd.get() == -1) {
++            if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR &&
++                errno != ECONNABORTED) {
++                PLOG(ERROR) << "adbd_auth: accept failed";
++            }
++            return;
++        }
++        // Only root answers for the user. The directory keeps everyone else
++        // out already; this keeps them out should it ever be opened up.
++        struct ucred cred;
++        socklen_t len = sizeof(cred);
++        if (getsockopt(fd.get(), SOL_SOCKET, SO_PEERCRED, &cred, &len) != 0 ||
++            len != sizeof(cred) || cred.uid != static_cast<uid_t>(ADBD_AUTH_PEER_UID)) {
++            LOG(WARNING) << "adbd_auth: refused a connection that is not root's";
++            return;
++        }
++        // The newest connection is the service: one that restarted is let
++        // back in, and the one it left behind is closed.
++        DisconnectFramework();
++        framework_fd_ = std::move(fd);
++        ++generation_;
++        AddToEpoll(framework_fd_.get(), EPOLLIN, kEpollFramework + generation_);
++        LOG(INFO) << "adbd_auth: the developer mode service connected";
++    }
++
++    // A question that was sent is sent again to the next connection.
++    void DisconnectFramework() REQUIRES(mutex_) {
++        if (framework_fd_.get() == -1) {
++            return;
++        }
++        epoll_ctl(epoll_fd_.get(), EPOLL_CTL_DEL, framework_fd_.get(), nullptr);
++        framework_fd_.reset();
++        in_.clear();
++        out_.clear();
++        sent_ = false;
++    }
++
++    void ReadFramework(std::vector<Prompt>* allowed) REQUIRES(mutex_) {
++        char buf[256];
++        ssize_t rc = read(framework_fd_.get(), buf, sizeof(buf));
++        if (rc < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
++            return;
++        }
++        if (rc <= 0) {
++            if (rc < 0) {
++                PLOG(WARNING) << "adbd_auth: read from the developer mode service failed";
++            }
++            LOG(INFO) << "adbd_auth: the developer mode service disconnected";
++            DisconnectFramework();
++            return;
++        }
++        in_.append(buf, static_cast<size_t>(rc));
++        // Answers are two characters each.
++        size_t i = 0;
++        for (; i + 2 <= in_.size(); i += 2) {
++            std::string_view answer(in_.data() + i, 2);
++            if (answer == "OK" || answer == "NO") {
++                Answer(answer == "OK", allowed);
++            } else {
++                LOG(ERROR) << "adbd_auth: the developer mode service sent something that is "
++                              "not an answer; disconnected";
++                DisconnectFramework();
++                return;
++            }
++        }
++        in_.erase(0, i);
++    }
++
++    // The user's answer to the question open, with the same answer for any
++    // other connection of the same computer that is waiting.
++    void Answer(bool allow, std::vector<Prompt>* allowed) REQUIRES(mutex_) {
++        if (!dispatched_ || !sent_ || !out_.empty()) {
++            LOG(WARNING) << "adbd_auth: an answer to no question; ignored";
++            return;
++        }
++        Prompt p = std::move(*dispatched_);
++        dispatched_.reset();
++        sent_ = false;
++        LOG(INFO) << "adbd_auth: host " << adbd_auth_luneos::Fingerprint(p.key)
++                  << (allow ? " allowed" : " refused") << " (id " << p.id << ")";
++        auto same = std::stable_partition(pending_.begin(), pending_.end(),
++                                          [&p](const Prompt& q) { return q.key != p.key; });
++        if (allow) {
++            allowed->push_back(std::move(p));
++            std::move(same, pending_.end(), std::back_inserter(*allowed));
++        }
++        pending_.erase(same, pending_.end());
++    }
++
++    void Expire() REQUIRES(mutex_) {
++        if (!dispatched_ || Clock::now() < dispatched_->deadline) {
++            return;
++        }
++        LOG(WARNING) << "adbd_auth: host " << adbd_auth_luneos::Fingerprint(dispatched_->key)
++                     << " refused: "
++                     << (framework_fd_.get() == -1 ? "the developer mode service is not there"
++                                                   : "nobody answered")
++                     << " in " << timeout_.count() << " ms (id " << dispatched_->id << ")";
++        // Should the service answer now after all, the answer cannot be
++        // taken for the next question's.
++        if (sent_) {
++            DisconnectFramework();
++        }
++        dispatched_.reset();
++    }
++
++    void Dispatch() REQUIRES(mutex_) {
++        if (!dispatched_ && !pending_.empty()) {
++            dispatched_ = std::move(pending_.front());
++            pending_.pop_front();
++            // The wait starts now, whether or not the service is there.
++            dispatched_->deadline = Clock::now() + timeout_;
++            sent_ = false;
++        }
++        if (dispatched_ && !sent_ && framework_fd_.get() != -1) {
++            out_ = "PK" + dispatched_->key;
++            sent_ = true;
++            Flush();
++        }
++    }
++
++    void Flush() REQUIRES(mutex_) {
++        while (!out_.empty()) {
++            ssize_t rc = send(framework_fd_.get(), out_.data(), out_.size(), MSG_NOSIGNAL);
++            if (rc < 0) {
++                if (errno == EINTR) {
++                    continue;
++                }
++                if (errno != EAGAIN && errno != EWOULDBLOCK) {
++                    PLOG(WARNING) << "adbd_auth: write to the developer mode service failed";
++                    DisconnectFramework();
++                }
++                return;
++            }
++            out_.erase(0, static_cast<size_t>(rc));
++        }
++    }
++
++    void UpdateFrameworkEvents() REQUIRES(mutex_) {
++        if (framework_fd_.get() == -1) {
++            return;
++        }
++        struct epoll_event event;
++        memset(&event, 0, sizeof(event));
++        event.events = out_.empty() ? EPOLLIN : (EPOLLIN | EPOLLOUT);
++        event.data.u64 = kEpollFramework + generation_;
++        CHECK_EQ(0, epoll_ctl(epoll_fd_.get(), EPOLL_CTL_MOD, framework_fd_.get(), &event));
++    }
++
++    unique_fd epoll_fd_;
++    unique_fd event_fd_;
++    unique_fd listen_fd_;
++
++    std::atomic<uint64_t> next_id_{0};
++    const AdbdAuthCallbacksV1 callbacks_;
++
++    const std::chrono::milliseconds timeout_;
++
++    std::mutex mutex_;
++    bool stopping_ GUARDED_BY(mutex_) = false;
++    unique_fd framework_fd_ GUARDED_BY(mutex_);
++    uint64_t generation_ GUARDED_BY(mutex_) = 0;
++    std::string in_ GUARDED_BY(mutex_);
++    std::string out_ GUARDED_BY(mutex_);
++    std::optional<Prompt> dispatched_ GUARDED_BY(mutex_);
++    // Whether dispatched_ went to the connection there is now.
++    bool sent_ GUARDED_BY(mutex_) = false;
++    std::deque<Prompt> pending_ GUARDED_BY(mutex_);
++};
++
++namespace adbd_auth_luneos {
++
++void Stop(AdbdAuthContext* ctx) {
++    ctx->Stop();
++}
++
++}  // namespace adbd_auth_luneos
++
++namespace {
++
++// The lines of adb_keys that are keys, each without its '\n' or '\r'.
++// A file adbd's user does not own, or that others may write, is not read:
++// only the developer mode service, as root, writes it.
++void ReadKeys(bool (*callback)(void*, const char*, size_t), void* opaque) {
++    const char* path = ADBD_KEYS_PATH;
++    // O_NONBLOCK: a FIFO in its place is not waited on (and then not read).
++    unique_fd fd(open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NOCTTY | O_NONBLOCK));
++    if (fd.get() == -1) {
++        if (errno != ENOENT) {
++            PLOG(ERROR) << "adbd_auth: cannot read " << path;
++        }
++        return;
++    }
++    struct stat st;
++    if (fstat(fd.get(), &st) != 0 || !S_ISREG(st.st_mode)) {
++        LOG(ERROR) << "adbd_auth: " << path << " is not a file; not read";
++        return;
++    }
++    if (st.st_uid != geteuid()) {
++        LOG(ERROR) << "adbd_auth: " << path << " does not belong to adbd's user; not read";
++        return;
++    }
++    if ((st.st_mode & (S_IWGRP | S_IWOTH)) != 0) {
++        LOG(ERROR) << "adbd_auth: " << path << " may be written by others; not read";
++        return;
++    }
++    if (st.st_size < 0 || static_cast<uint64_t>(st.st_size) > kMaxKeysFile) {
++        LOG(ERROR) << "adbd_auth: " << path << " is larger than " << kMaxKeysFile
++                   << " bytes; not read";
++        return;
++    }
++    std::string content;
++    char buf[4096];
++    while (true) {
++        ssize_t rc = read(fd.get(), buf, sizeof(buf));
++        if (rc < 0 && errno == EINTR) {
++            continue;
++        }
++        if (rc < 0) {
++            PLOG(ERROR) << "adbd_auth: cannot read " << path;
++            return;
++        }
++        if (rc == 0) {
++            break;
++        }
++        content.append(buf, static_cast<size_t>(rc));
++        if (content.size() > kMaxKeysFile) {
++            LOG(ERROR) << "adbd_auth: " << path << " grew past " << kMaxKeysFile
++                       << " bytes; not read";
++            return;
++        }
++    }
++
++    std::string_view rest(content);
++    for (size_t lineno = 1; !rest.empty(); ++lineno) {
++        size_t nl = rest.find('\n');
++        std::string_view line = rest.substr(0, nl);
++        rest.remove_prefix(nl == std::string_view::npos ? rest.size() : nl + 1);
++
++        using adbd_auth_luneos::KeyLine;
++        switch (adbd_auth_luneos::ClassifyKeyLine(line)) {
++            case KeyLine::kKey:
++                if (line.back() == '\r') {
++                    line.remove_suffix(1);
++                }
++                if (!callback(opaque, line.data(), line.size())) {
++                    return;
++                }
++                break;
++            case KeyLine::kBlank:
++                break;
++            case KeyLine::kNotText:
++                LOG(WARNING) << path << ":" << lineno << ": not a line of text, skipped";
++                break;
++            case KeyLine::kTooLong:
++                LOG(WARNING) << path << ":" << lineno << ": too long for an adb key, skipped";
++                break;
++            case KeyLine::kNotAKey:
++                LOG(WARNING) << path << ":" << lineno << ": not an adb key, skipped";
++                break;
++        }
++    }
++}
++
++}  // namespace
++
++AdbdAuthContext* adbd_auth_new(AdbdAuthCallbacks* callbacks) {
++    if (callbacks->version == 1) {
++        return new AdbdAuthContext(reinterpret_cast<AdbdAuthCallbacksV1*>(callbacks));
++    }
++    LOG(ERROR) << "adbd_auth: received unknown AdbdAuthCallbacks version " << callbacks->version;
++    return nullptr;
++}
++
++void adbd_auth_delete(AdbdAuthContext* ctx) {
++    delete ctx;
++}
++
++void adbd_auth_run(AdbdAuthContext* ctx) {
++    ctx->Run();
++}
++
++void adbd_auth_get_public_keys(AdbdAuthContext* ctx,
++                               bool (*callback)(void* opaque, const char* public_key, size_t len),
++                               void* opaque) {
++    UNUSED(ctx);
++    ReadKeys(callback, opaque);
++}
++
++// A host that got in with a saved key: nothing to tell the service.
++uint64_t adbd_auth_notify_auth(AdbdAuthContext* ctx, const char* public_key, size_t len) {
++    UNUSED(public_key, len);
++    return ctx->NextId();
++}
++
++void adbd_auth_notify_disconnect(AdbdAuthContext* ctx, uint64_t id) {
++    ctx->NotifyDisconnected(id);
++}
++
++void adbd_auth_prompt_user(AdbdAuthContext* ctx, const char* public_key, size_t len,
++                           void* opaque) {
++    adbd_auth_prompt_user_with_id(ctx, public_key, len, opaque);
++}
++
++uint64_t adbd_auth_prompt_user_with_id(AdbdAuthContext* ctx, const char* public_key, size_t len,
++                                       void* opaque) {
++    return ctx->PromptUser(std::string_view(public_key, len), opaque);
++}
++
++// adb over Wi-Fi (TLS pairing) is not offered on LuneOS.
++uint64_t adbd_auth_tls_device_connected(AdbdAuthContext* ctx, AdbTransportType type,
++                                        const char* public_key, size_t len) {
++    UNUSED(type, public_key, len);
++    return ctx->NextId();
++}
++
++void adbd_auth_tls_device_disconnected(AdbdAuthContext* ctx, AdbTransportType type, uint64_t id) {
++    UNUSED(ctx, type, id);
++}
++
++uint32_t adbd_auth_get_max_version() {
++    return kAuthVersion;
++}
++
++bool adbd_auth_supports_feature(AdbdAuthFeature feature) {
++    UNUSED(feature);
++    return false;
++}
+diff --git a/frameworks/native/libs/adbd_auth/adbd_auth_luneos.h b/frameworks/native/libs/adbd_auth/adbd_auth_luneos.h
+new file mode 100644
+index 0000000..3dc9833
+--- /dev/null
++++ b/frameworks/native/libs/adbd_auth/adbd_auth_luneos.h
+@@ -0,0 +1,50 @@
++/*
++ * Copyright (C) 2026 Herman van Hazendonk
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++#pragma once
++
++/*
++ * LuneOS's libadbd_auth (adbd_auth_luneos.cpp): the parts the tests use
++ * besides adbd_auth.h. adbd itself uses adbd_auth.h only.
++ */
++
++#include <string>
++#include <string_view>
++
++#include "include/adbd_auth.h"
++
++namespace adbd_auth_luneos {
++
++// What one line of adb_keys is.
++enum class KeyLine {
++    kKey,      // an adb RSA key, maybe followed by a comment
++    kBlank,    // empty or white space only: skipped silently
++    kNotText,  // has a NUL in it
++    kTooLong,  // longer than any key line can be
++    kNotAKey,  // anything else
++};
++
++// `line` without its '\n'; a '\r' before it is allowed.
++KeyLine ClassifyKeyLine(std::string_view line);
++
++// "SHA256:<base64 of the SHA-256 of the decoded key>" (as ssh-keygen -l and
++// the developer mode service print it) for a key line, "" for anything else.
++std::string Fingerprint(std::string_view key_line);
++
++// Makes adbd_auth_run() return, for the tests; adbd never stops it.
++void Stop(AdbdAuthContext* ctx);
++
++}  // namespace adbd_auth_luneos
