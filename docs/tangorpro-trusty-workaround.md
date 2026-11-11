@@ -37,6 +37,13 @@ which reads every vendor fstab, including `fstab.persist`. The public tablet
 archive is dated 16 September. A fresh build should include the newer mount
 code before deciding whether the bypass remains necessary.
 
+There is a separate firmware compatibility problem: the public archive's README
+says its boot images were built against `BP4A.251205.006` and warns not to flash
+them on CP-series Android 17 firmware. The date in the archive name does not
+establish compatibility. Adding this rootfs rule does not fix that mismatch;
+matching boot images and a stock recovery image are still required before a
+hardware test. Do not run the old archive's installer on a CP3A tablet.
+
 `tools/check-tangorpro-persist.py` is a separate, read-only diagnostic for a
 running LuneOS host. It checks that the exact mount point has a writable ext4 or
 f2fs filesystem, that its backing block device matches the persist partition,
