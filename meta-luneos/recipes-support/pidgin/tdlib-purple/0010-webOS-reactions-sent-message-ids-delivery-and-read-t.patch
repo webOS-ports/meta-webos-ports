@@ -1,10 +1,13 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Herman van Hazendonk <github.com@herrie.org>
 Date: Tue, 20 Oct 2026 16:28:16 +0200
-Subject: [PATCH] webOS: reactions, sent-message ids and delivery/read ticks
+Subject: [PATCH] webOS: reactions, sent-message ids, delivery and read ticks,
+ and replies as quote cards
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
+
+* Reactions, sent-message ids and delivery/read ticks
 
 The webOS Messaging app shows reactions as badges on message rows, lets the
 user react, and shows single/double ticks on outgoing messages. All three
@@ -43,31 +46,146 @@ conversation data and custom signals the transport registers:
 Not for upstream: the signals and conversation-data keys are a private
 contract with the webOS transport.
 
+* Replies as quote cards, and real replies when sending
+
+Received replies: upstream folds the message replied to into the body as
+"<b>&gt; Name wrote:</b>\n&gt; text" HTML. The webOS Messaging app renders
+a quote card above the reply instead, from structured data. So, in place of
+quoteMessage(), extractQuotedMessage() returns the original's author and
+single-lined text, and showMessageText() stashes them on the conversation as
+"webos-quoted-text", "webos-quoted-from" and "webos-quoted-id" (the
+original's "<chatId>:<messageId>" key) right before the message is handed
+on, alongside the "webos-msg-id" stash, for both IMs and group chats.
+
+Sent replies: when the user replies to a message, the transport stashes
+"webos-reply-to" (the target's key) on the conversation right before
+serv_send_im/serv_chat_send. tgprpl_send_im and tgprpl_chat_send read and
+clear it, and the message id is passed down through sendMessage/
+sendGroupMessage to transmitMessage(), which sets
+inputMessageReplyToMessage on the first part of the message only, so a
+message split into several parts does not reply several times. Other
+Telegram clients then show it as a real reply.
+
+Message ids and quotes are stashed for the Messaging app only
+(isWebosUi()): other front-ends get nothing stashed on the conversation,
+which serv_got_im would otherwise find made before it, and keep the
+quote in the text as before.
+
 Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
 Upstream-Status: Inappropriate [webOS specific]
 ---
- receiving.cpp    |  68 +++++++++++++++++++++++++---
- receiving.h      |   8 +++-
- td-client.cpp    | 113 +++++++++++++++++++++++++++++++++++++++++++++++
- td-client.h      |   4 ++
- tdlib-purple.cpp |  38 ++++++++++++++++
- 5 files changed, 225 insertions(+), 6 deletions(-)
+ client-utils.cpp |  22 +++++++-
+ client-utils.h   |   2 +-
+ receiving.cpp    | 129 ++++++++++++++++++++++++++++++++++++++++++-----
+ receiving.h      |  10 +++-
+ td-client.cpp    | 121 ++++++++++++++++++++++++++++++++++++++++++--
+ td-client.h      |   8 ++-
+ tdlib-purple.cpp |  63 +++++++++++++++++++++--
+ 7 files changed, 329 insertions(+), 26 deletions(-)
 
-diff --git a/receiving.cpp b/receiving.cpp
-index e429ffa..ab27bfd 100644
---- a/receiving.cpp
-+++ b/receiving.cpp
-@@ -416,7 +416,8 @@ void sendConversationReadReceipts(TdAccountData &account, PurpleConversation *co
+diff --git a/client-utils.cpp b/client-utils.cpp
+index c453be8..88df7da 100644
+--- a/client-utils.cpp
++++ b/client-utils.cpp
+@@ -1506,7 +1506,7 @@ static size_t getAlbumSize(const std::vector<MessagePart> &parts, size_t first)
  }
  
+ int transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiver,
+-                    TdAccountData &account, TdTransceiver::ResponseCb response)
++                    TdAccountData &account, TdTransceiver::ResponseCb response, int64_t replyToMsgId)
+ {
+     std::vector<MessagePart> parts;
+     parseMessage(message, parts, account);
+@@ -1530,6 +1530,7 @@ int transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiv
+         }
+     }
+ 
++    bool first = true;
+     for (size_t i = 0; i < parts.size(); i++) {
+         const MessagePart &input = parts[i];
+         if (input.attachment.attachment) {
+@@ -1539,21 +1540,40 @@ int transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiv
+                 auto sendMessageRequest = td::td_api::make_object<td::td_api::sendMessage>();
+                 sendMessageRequest->chat_id_ = chatId.value();
+                 sendMessageRequest->input_message_content_ = makeAttachment(input);
++                if (replyToMsgId != 0 && first) {
++                    auto replyTo = td::td_api::make_object<td::td_api::inputMessageReplyToMessage>();
++                    replyTo->message_id_ = replyToMsgId;
++                    sendMessageRequest->reply_to_ = std::move(replyTo);
++                }
+                 requestId = transceiver.sendQuery(std::move(sendMessageRequest), response);
+             } else {
+                 auto sendAlbumRequest = td::td_api::make_object<td::td_api::sendMessageAlbum>();
+                 sendAlbumRequest->chat_id_ = chatId.value();
+                 for (size_t j = i; j < i + albumSize; j++)
+                     sendAlbumRequest->input_message_contents_.push_back(makeAttachment(parts[j]));
++                if (replyToMsgId != 0 && first) {
++                    auto replyTo = td::td_api::make_object<td::td_api::inputMessageReplyToMessage>();
++                    replyTo->message_id_ = replyToMsgId;
++                    sendAlbumRequest->reply_to_ = std::move(replyTo);
++                }
+                 requestId = transceiver.sendQuery(std::move(sendAlbumRequest), response);
+             }
+             account.addPendingRequest<SendMessageRequest>(requestId, chatId, nullptr);
++            first = false;
+             i += albumSize - 1;
+             continue;
+         }
+ 
+         td::td_api::object_ptr<td::td_api::sendMessage> sendMessageRequest = td::td_api::make_object<td::td_api::sendMessage>();
+         sendMessageRequest->chat_id_ = chatId.value();
++        // webOS native reply: set a real reply_to on the FIRST part only (a multi-part send shouldn't
++        // reply N times). Built by field name: TDLib keeps adding fields to inputMessageReplyToMessage.
++        if (replyToMsgId != 0 && first) {
++            auto replyTo = td::td_api::make_object<td::td_api::inputMessageReplyToMessage>();
++            replyTo->message_id_ = replyToMsgId;
++            sendMessageRequest->reply_to_ = std::move(replyTo);
++        }
++        first = false;
+         char *tempFileName = NULL;
+         bool  hasImage     = false;
+ 
+diff --git a/client-utils.h b/client-utils.h
+index 4824508..d220f76 100644
+--- a/client-utils.h
++++ b/client-utils.h
+@@ -129,7 +129,7 @@ struct ParsedEdit {
+ ParsedEdit parseEdit(const char *message, const TdAccountData &account);
+ bool isSameFormattedText(const td::td_api::formattedText &a, const td::td_api::formattedText &b);
+ int  transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiver,
+-                     TdAccountData &account, TdTransceiver::ResponseCb response);
++                     TdAccountData &account, TdTransceiver::ResponseCb response, int64_t replyToMsgId = 0);
+ 
+ void requestRecoveryEmailConfirmation(PurpleConnection *gc, const char *emailInfo);
+ 
+diff --git a/receiving.cpp b/receiving.cpp
+index 9efa25c..f7ca38a 100644
+--- a/receiving.cpp
++++ b/receiving.cpp
+@@ -575,8 +575,21 @@ void sendConversationReadReceipts(TdAccountData &account, PurpleConversation *co
+     }
+ }
+ 
++// webOS replies: stash the quoted-original (text/from/id) on a conv, mirroring the webos-msg-id stash,
++// so the transport writes it onto the message row and the Messaging UI renders an inline quote card
++// instead of the "<b>&gt; ... wrote:</b>" HTML we used to fold into the body. No-op if not a reply.
++static void stashQuote(PurpleConversation *conv, const char *quotedId, const char *quotedText, const char *quotedFrom)
++{
++    if (conv == NULL || quotedText == NULL || *quotedText == '\0') return;
++    purple_conversation_set_data(conv, "webos-quoted-text", g_strdup(quotedText));
++    if (quotedFrom && *quotedFrom) purple_conversation_set_data(conv, "webos-quoted-from", g_strdup(quotedFrom));
++    if (quotedId && *quotedId) purple_conversation_set_data(conv, "webos-quoted-id", g_strdup(quotedId));
++}
++
  void showMessageTextIm(TdAccountData &account, const char *purpleUserName, const char *text,
 -                       const char *notification, time_t timestamp, PurpleMessageFlags flags)
 +                       const char *notification, time_t timestamp, PurpleMessageFlags flags,
-+                       const char *serviceMessageId)
++                       const char *serviceMessageId,
++                       const char *quotedId, const char *quotedText, const char *quotedFrom)
  {
      PurpleConversation *conv = NULL;
  
-@@ -425,10 +426,22 @@ void showMessageTextIm(TdAccountData &account, const char *purpleUserName, const
+@@ -585,10 +598,25 @@ void showMessageTextIm(TdAccountData &account, const char *purpleUserName, const
              // serv_got_im seems to work for messages sent from another client, but not for
              // echoed messages from this client. Therefore, this (code snippet from facebook plugin).
              conv = getImConversation(account.purpleAccount, purpleUserName);
@@ -76,48 +194,116 @@ index e429ffa..ab27bfd 100644
 +            if (serviceMessageId && *serviceMessageId) {
 +                purple_conversation_set_data(conv, "webos-msg-id", g_strdup(serviceMessageId));
 +            }
++            stashQuote(conv, quotedId, quotedText, quotedFrom);
              purple_conv_im_write(purple_conversation_get_im_data(conv),
                                   purple_account_get_name_for_display(account.purpleAccount),
                                   text, flags, timestamp);
          } else {
 +            // webOS reactions: stash this message's id on the conv BEFORE serv_got_im so the transport
 +            // stores it as serviceMessageId (read in incoming_message_cb); a later reaction update
-+            // targets it by "<chatId>:<messageId>".
-+            if (serviceMessageId && *serviceMessageId) {
++            // targets it by "<chatId>:<messageId>". Same conv is used for the reply-quote stash.
++            if ((serviceMessageId && *serviceMessageId) || (quotedText && *quotedText)) {
 +                conv = getImConversation(account.purpleAccount, purpleUserName);
-+                purple_conversation_set_data(conv, "webos-msg-id", g_strdup(serviceMessageId));
++                if (serviceMessageId && *serviceMessageId)
++                    purple_conversation_set_data(conv, "webos-msg-id", g_strdup(serviceMessageId));
++                stashQuote(conv, quotedId, quotedText, quotedFrom);
 +            }
              serv_got_im(purple_account_get_connection(account.purpleAccount), purpleUserName, text,
                          flags, timestamp);
              conv = getImConversation(account.purpleAccount, purpleUserName);
-@@ -451,7 +464,8 @@ void showMessageTextIm(TdAccountData &account, const char *purpleUserName, const
+@@ -611,7 +639,9 @@ void showMessageTextIm(TdAccountData &account, const char *purpleUserName, const
  
  static void showMessageTextChat(TdAccountData &account, const td::td_api::chat &chat,
                                  const TgMessageInfo &message, const char *text,
 -                                const char *notification, PurpleMessageFlags flags)
 +                                const char *notification, PurpleMessageFlags flags,
-+                                const char *serviceMessageId = NULL)
++                                const char *serviceMessageId = NULL,
++                                const char *quotedId = NULL, const char *quotedText = NULL, const char *quotedFrom = NULL)
  {
      // Again, doing what facebook plugin does
      int purpleId = account.getPurpleChatId(getId(chat));
-@@ -471,6 +485,13 @@ static void showMessageTextChat(TdAccountData &account, const td::td_api::chat &
-                 std::string who = message.incomingGroupchatSender.empty() ? "someone" : message.incomingGroupchatSender;
-                 if (!message.incomingGroupchatSenderId.empty())
+@@ -633,6 +663,16 @@ static void showMessageTextChat(TdAccountData &account, const td::td_api::chat &
                      who = message.incomingGroupchatSenderId + "\x1f" + who;
+                 else if (!message.incomingGroupchatSenderName.empty())
+                     who = message.incomingGroupchatSenderName;
 +                // webOS reactions: stash this message's id on the chat conv BEFORE serv_got_chat_in so
 +                // the transport stores it as serviceMessageId; a later reaction update targets it.
-+                if (serviceMessageId && *serviceMessageId) {
++                if ((serviceMessageId && *serviceMessageId) || (quotedText && *quotedText)) {
 +                    PurpleConversation *baseConv = conv ? purple_conv_chat_get_conversation(conv) : NULL;
-+                    if (baseConv)
-+                        purple_conversation_set_data(baseConv, "webos-msg-id", g_strdup(serviceMessageId));
++                    if (baseConv) {
++                        if (serviceMessageId && *serviceMessageId)
++                            purple_conversation_set_data(baseConv, "webos-msg-id", g_strdup(serviceMessageId));
++                        stashQuote(baseConv, quotedId, quotedText, quotedFrom);
++                    }
 +                }
                  serv_got_chat_in(purple_account_get_connection(account.purpleAccount), purpleId,
                                   who.c_str(), flags, text, message.timestamp);
              }
-@@ -660,20 +681,57 @@ void showMessageText(TdAccountData &account, const td::td_api::chat &chat, const
-     if (!newText.empty())
-         text = newText.c_str();
+@@ -655,7 +695,11 @@ static void showMessageTextChat(TdAccountData &account, const td::td_api::chat &
+         sendConversationReadReceipts(account, baseConv);
+ }
  
+-static std::string quoteMessage(const td::td_api::message *message, TdAccountData &account)
++// webOS replies: extract the quoted-original's author name + text (single-lined) as structured data,
++// instead of formatting them into "<b>&gt; ... wrote:</b>" HTML. Used to stash webos-quoted-* so the
++// Messaging UI renders an inline quote card above the reply.
++static void extractQuotedMessage(const td::td_api::message *message, TdAccountData &account,
++                                 std::string &outName, std::string &outText)
+ {
+     const td::td_api::user *originalAuthor = nullptr;
+     if (message)
+@@ -763,12 +807,8 @@ static std::string quoteMessage(const td::td_api::message *message, TdAccountDat
+     for (unsigned i = 0; i < text.size(); i++)
+         if (text[i] == '\n') text[i] = ' ';
+ 
+-    // TRANSLATOR: In-chat notification of a reply. Arguments will be username and the original text or description thereof. Please preserve the HTML.
+-    return formatMessage(_("<b>&gt; {0} wrote:</b>\n&gt; {1}"),
+-                         {escapeForDisplay(originalName),
+-                          message ? linkToMessage(account.purpleAccount, getChatId(*message), getId(*message),
+-                                                  escapeForDisplay(text))
+-                                  : escapeForDisplay(text)});
++    outName = originalName;
++    outText = text;
+ }
+ 
+ // The name a private chat's conversation goes by
+@@ -838,9 +878,29 @@ void showMessageText(TdAccountData &account, const td::td_api::chat &chat, const
+         flags = (PurpleMessageFlags) (flags | PURPLE_MESSAGE_DELAYED);
+ 
+     std::string newText;
++    // webOS replies: capture the quoted-original as structured data (stashed on the conv by the show*
++    // functions -> transport -> immessage -> an inline quote card) instead of folding "> ... wrote:"
++    // HTML into the body. quotedId == the original's serviceMessageId key so the UI can look it up.
++    // Other front-ends get the quote in the text, as before.
++    std::string quotedName, quotedText, quotedId;
++    if (message.repliedMessageId.valid()) {
++        extractQuotedMessage(message.repliedMessage.get(), account, quotedName, quotedText);
++        if (isWebosUi())
++            quotedId = std::to_string(getId(chat).value()) + ":" + std::to_string(message.repliedMessageId.value());
++        else {
++            const td::td_api::message *replied = message.repliedMessage.get();
++            if (text)
++                // TRANSLATOR: In-chat notification of a reply. Arguments will be username and the original text or description thereof. Please preserve the HTML.
++                newText = formatMessage(_("<b>&gt; {0} wrote:</b>\n&gt; {1}"),
++                                        {escapeForDisplay(quotedName),
++                                         replied ? linkToMessage(account.purpleAccount, getChatId(*replied), getId(*replied),
++                                                                 escapeForDisplay(quotedText))
++                                                 : escapeForDisplay(quotedText)});
++            quotedName.clear();
++            quotedText.clear();
++        }
++    }
+     if (text) {
+-        if (message.repliedMessageId.valid())
+-            newText = quoteMessage(message.repliedMessage.get(), account);
+         if (!message.forwardedFrom.empty()) {
+             if (!newText.empty())
+                 newText += "\n";
+@@ -865,25 +925,66 @@ void showMessageText(TdAccountData &account, const td::td_api::chat &chat, const
+ 
+     // Marks for the message's own text, not for a notice about it, which carries its id
+     MessageMarkScope markScope(text ? message.id : MessageId::invalid);
++
 +    // webOS reactions: a stable per-message key the transport stores as serviceMessageId. Telegram
 +    // message ids are unique only within a chat, so scope it with the chat id: "<chatId>:<messageId>".
 +    // A later updateMessageInteractionInfo emits reactions targeting this same key. Stash it for
@@ -125,29 +311,35 @@ index e429ffa..ab27bfd 100644
 +    // sentLocally) - the transport stores those as Outbox rows, so reactions can attach to them too.
 +    // Local echoes (sentLocally) are stored by the app's own send path, so we skip them.
 +    std::string serviceMessageId;
-+    if (message.id.valid() && (!message.outgoing || !message.sentLocally))
++    if (isWebosUi() && message.id.valid() && (!message.outgoing || !message.sentLocally))
 +        serviceMessageId = std::to_string(getId(chat).value()) + ":" + std::to_string(message.id.value());
 +    const char *svcMsgId = serviceMessageId.empty() ? NULL : serviceMessageId.c_str();
++    const char *qId   = quotedId.empty()   ? NULL : quotedId.c_str();
++    const char *qText = quotedText.empty() ? NULL : quotedText.c_str();
++    const char *qFrom = quotedName.empty() ? NULL : quotedName.c_str();
 +
      const td::td_api::user *privateUser = account.getUserByPrivateChat(chat);
      if (privateUser) {
          std::string userName = getPrivateChatPurpleName(account, *privateUser);
 -        showMessageTextIm(account, userName.c_str(), text, notification, message.timestamp, flags);
-+        showMessageTextIm(account, userName.c_str(), text, notification, message.timestamp, flags, svcMsgId);
++        showMessageTextIm(account, userName.c_str(), text, notification, message.timestamp, flags, svcMsgId, qId, qText, qFrom);
      }
  
      SecretChatId secretChatId = getSecretChatId(chat);
      if (secretChatId.valid()) {
          std::string userName = getSecretChatBuddyName(secretChatId);
 -        showMessageTextIm(account, userName.c_str(), text, notification, message.timestamp, flags);
-+        showMessageTextIm(account, userName.c_str(), text, notification, message.timestamp, flags, svcMsgId);
++        showMessageTextIm(account, userName.c_str(), text, notification, message.timestamp, flags, svcMsgId, qId, qText, qFrom);
      }
  
      if (getBasicGroupId(chat).valid() || getSupergroupId(chat).valid())
 -        showMessageTextChat(account, chat, message, text, notification, flags);
-+        showMessageTextChat(account, chat, message, text, notification, flags, svcMsgId);
-+}
-+
++        showMessageTextChat(account, chat, message, text, notification, flags, svcMsgId, qId, qText, qFrom);
+ 
+     if (logging && g_list_find(purple_get_conversations(), unloggedConv))
+         purple_conversation_set_logging(unloggedConv, TRUE);
+ }
+ 
 +// webOS reactions: turn a message's aggregated reaction summary into the "count<SP>emoji\n..." set
 +// the transport expects and emit it. See showReactions() declaration in receiving.h.
 +void showReactions(TdAccountData &account, int64_t chatId, int64_t messageId,
@@ -172,20 +364,24 @@ index e429ffa..ab27bfd 100644
 +    std::string targetId = std::to_string(chatId) + ":" + std::to_string(messageId);
 +    purple_signal_emit(purple_conversations_get_handle(), "webos-im-reaction-set",
 +                       account.purpleAccount, targetId.c_str(), serialized.c_str(), (const char *)NULL);
- }
- 
++}
++
  void showChatNotification(TdAccountData &account, const td::td_api::chat &chat,
+                           const char *notification, time_t timestamp, PurpleMessageFlags extraFlags)
+ {
 diff --git a/receiving.h b/receiving.h
-index ae61bb7..f78db8e 100644
+index c81729c..e624a68 100644
 --- a/receiving.h
 +++ b/receiving.h
-@@ -27,7 +27,13 @@ void sendConversationReadReceipts(TdAccountData &account, PurpleConversation *co
+@@ -30,7 +30,15 @@ void sendConversationReadReceipts(TdAccountData &account, PurpleConversation *co
  void showMessageText(TdAccountData &account, const td::td_api::chat &chat, const TgMessageInfo &message,
                       const char *text, const char *notification, uint32_t extraFlags = 0);
  void showMessageTextIm(TdAccountData &account, const char *purpleUserName, const char *text,
 -                       const char *notification, time_t timestamp, PurpleMessageFlags flags);
 +                       const char *notification, time_t timestamp, PurpleMessageFlags flags,
-+                       const char *serviceMessageId = NULL);
++                       const char *serviceMessageId = NULL,
++                       const char *quotedId = NULL, const char *quotedText = NULL,
++                       const char *quotedFrom = NULL);
 +// webOS reactions: push the aggregated reaction summary of one message to the transport
 +// ("webos-im-reaction-set" signal), which REPLACES that message's reaction badges. A NULL/empty
 +// interaction_info clears them. serviceMessageId is "<chatId>:<messageId>" (matching the stash).
@@ -195,10 +391,10 @@ index ae61bb7..f78db8e 100644
                            const char *notification, PurpleMessageFlags extraFlags = (PurpleMessageFlags)0);
  void showChatNotification(TdAccountData &account, const td::td_api::chat &chat,
 diff --git a/td-client.cpp b/td-client.cpp
-index ca02d60..32f1d26 100644
+index a572d8b..2b69868 100644
 --- a/td-client.cpp
 +++ b/td-client.cpp
-@@ -13,6 +13,30 @@
+@@ -14,6 +14,30 @@
  #include <stdlib.h>
  #include <algorithm>
  
@@ -229,9 +425,9 @@ index ca02d60..32f1d26 100644
  enum {
      // Typing notifications seems to be resent every 5-6 seconds, so 10s timeout hould be appropriate
      REMOTE_TYPING_NOTICE_TIMEOUT = 10,
-@@ -164,6 +188,28 @@ void PurpleTdClient::processUpdate(td::td_api::Object &update)
-             m_data.renameShownMessage(getChatId(*sendSucceeded.message_), getOldMessageId(sendSucceeded),
+@@ -181,6 +205,28 @@ void PurpleTdClient::processUpdate(td::td_api::Object &update)
                                        getId(*sendSucceeded.message_));
+             renameMessageMarks(m_data.purpleAccount, getOldMessageId(sendSucceeded), getId(*sendSucceeded.message_));
          }
 +        // webOS: the message the user sent FROM THE APP now has its real network id. Its Outbox row was
 +        // persisted with no serviceMessageId (the app can't know the id at send time), so emit the same
@@ -258,7 +454,7 @@ index ca02d60..32f1d26 100644
          break;
      }
  
-@@ -192,6 +238,11 @@ void PurpleTdClient::processUpdate(td::td_api::Object &update)
+@@ -209,6 +255,11 @@ void PurpleTdClient::processUpdate(td::td_api::Object &update)
          auto &interactionUpdate = static_cast<const td::td_api::updateMessageInteractionInfo &>(update);
          updateMessageReactions(m_data, getChatId(interactionUpdate), getMessageId(interactionUpdate),
                                 interactionUpdate.interaction_info_.get());
@@ -270,7 +466,7 @@ index ca02d60..32f1d26 100644
          break;
      }
  
-@@ -290,6 +341,16 @@ void PurpleTdClient::processUpdate(td::td_api::Object &update)
+@@ -316,6 +367,16 @@ void PurpleTdClient::processUpdate(td::td_api::Object &update)
          break;
      };
  
@@ -287,11 +483,12 @@ index ca02d60..32f1d26 100644
      default:
          purple_debug_misc(config::pluginId, "Incoming update: ignorig ID=%d\n", update.get_id());
          break;
-@@ -1285,6 +1346,58 @@ void PurpleTdClient::updateChatLastMessage(td::td_api::updateChatLastMessage &la
+@@ -2255,7 +2316,59 @@ void PurpleTdClient::updateChatLastMessage(td::td_api::updateChatLastMessage &la
      }
  }
  
-+void PurpleTdClient::sendReactionResponse(uint64_t requestId, td::td_api::object_ptr<td::td_api::Object> object)
+-int PurpleTdClient::sendMessage(const char *buddyName, const char *message)
++void PurpleTdClient::sendReactionResponse(uint64_t /*requestId*/, td::td_api::object_ptr<td::td_api::Object> object)
 +{
 +    if (object && object->get_id() == td::td_api::error::ID) {
 +        auto &err = static_cast<td::td_api::error &>(*object);
@@ -343,30 +540,69 @@ index ca02d60..32f1d26 100644
 +    }
 +}
 +
- int PurpleTdClient::sendMessage(const char *buddyName, const char *message)
++int PurpleTdClient::sendMessage(const char *buddyName, const char *message, int64_t replyToMsgId)
  {
      // Auth-input fallback: while waiting for a login code, 2FA password or display name (asked
+     // for through the "Telegram" chat because there is no request UI), take a message sent to that
+@@ -2310,7 +2423,7 @@ int PurpleTdClient::sendMessage(const char *buddyName, const char *message)
+     }
+ 
+     if (chat) {
+-        int ret = transmitMessage(getId(*chat), message, m_transceiver, m_data, &PurpleTdClient::sendMessageResponse);
++        int ret = transmitMessage(getId(*chat), message, m_transceiver, m_data, &PurpleTdClient::sendMessageResponse, replyToMsgId);
+         if (ret < 0)
+             return ret;
+         // Message shall not be echoed: tdlib will shortly present it as a new message and it will be displayed then
+@@ -3016,7 +3129,7 @@ bool PurpleTdClient::joinChat(const char *chatName)
+     return conv ? true : false;
+ }
+ 
+-int PurpleTdClient::sendGroupMessage(int purpleChatId, const char *message)
++int PurpleTdClient::sendGroupMessage(int purpleChatId, const char *message, int64_t replyToMsgId)
+ {
+     const td::td_api::chat *chat = m_data.getChatByPurpleId(purpleChatId);
+ 
+@@ -3026,7 +3139,7 @@ int PurpleTdClient::sendGroupMessage(int purpleChatId, const char *message)
+         purple_debug_misc(config::pluginId, "purple id %d (chat %s) is not a group we a member of\n",
+                              purpleChatId, chat->title_.c_str());
+     else {
+-        int ret = transmitMessage(getId(*chat), message, m_transceiver, m_data, &PurpleTdClient::sendMessageResponse);
++        int ret = transmitMessage(getId(*chat), message, m_transceiver, m_data, &PurpleTdClient::sendMessageResponse, replyToMsgId);
+         if (ret < 0)
+             return ret;
+         return 0;
 diff --git a/td-client.h b/td-client.h
-index 3e9beab..94868ba 100644
+index dc1c5e9..1dcc0c2 100644
 --- a/td-client.h
 +++ b/td-client.h
-@@ -27,6 +27,10 @@ public:
+@@ -37,7 +37,11 @@ public:
+     // store-teardown hook both build the paths through these so they always match exactly.
      static std::string getDatabaseDir(const char *username);
      static std::string getFilesDir(const char *username);
-     int  sendMessage(const char *buddyName, const char *message);
+-    int  sendMessage(const char *buddyName, const char *message);
++    int  sendMessage(const char *buddyName, const char *message, int64_t replyToMsgId = 0);
 +    // webOS reactions (SEND): add (remove=false) or remove (remove=true) MY `emoji` reaction on a
 +    // message via TDLib add/removeMessageReaction. Called from the webos-im-send-reaction handler.
 +    void sendReaction(int64_t chatId, int64_t messageId, const std::string &emoji, bool remove);
 +    void sendReactionResponse(uint64_t requestId, td::td_api::object_ptr<td::td_api::Object> object);
      void sendTyping(const char *buddyName, bool isTyping);
      void sendReadReceipts(PurpleConversation *conversation);
- 
+     // Fills a tab just opened with the chat's latest messages, as set; false if it is to be tried
+@@ -64,7 +68,7 @@ public:
+     void createGroup(const char *name, int type, const std::vector<std::string> &basicGroupMembers);
+     BasicGroupMembership getBasicGroupMembership(const char *purpleChatName);
+     void leaveGroup(const std::string &purpleChatName, bool deleteSupergroup);
+-    int  sendGroupMessage(int purpleChatId, const char *message);
++    int  sendGroupMessage(int purpleChatId, const char *message, int64_t replyToMsgId = 0);
+     void setGroupDescription(int purpleChatId, const char *description);
+     void kickUserFromChat(PurpleConversation *conv, const char *name);
+     // webOS: archive (true) / unarchive (false) the chat backing this conversation.
 diff --git a/tdlib-purple.cpp b/tdlib-purple.cpp
-index 3f0e9df..c392c63 100644
+index ab555e3..84272de 100644
 --- a/tdlib-purple.cpp
 +++ b/tdlib-purple.cpp
-@@ -324,6 +324,35 @@ conversation_updated_cb(PurpleConversation *conv, PurpleConvUpdateType type)
-     }
+@@ -479,6 +479,35 @@ static void conversationCreated(PurpleConversation *conv, void *data)
+     g_idle_add(fillConversation, info);
  }
  
 +// webOS reactions (SEND): the transport emits "webos-im-send-reaction" (registered process-wide) when
@@ -374,7 +610,7 @@ index 3f0e9df..c392c63 100644
 +// "<chatId>:<messageId>" (matching the composite serviceMessageId we stored). `removeFlag` is "1" to
 +// remove my `emoji` reaction, else add it (the emoji is always supplied, even on removal).
 +static void tgprpl_send_reaction_cb(PurpleAccount *account, const char *targetId, const char *emoji,
-+                                    const char *peer, const char *removeFlag, void *data)
++                                    const char * /*peer*/, const char *removeFlag, void * /*data*/)
 +{
 +    if (!account || !targetId || !*targetId) {
 +        return;
@@ -401,10 +637,10 @@ index 3f0e9df..c392c63 100644
  static void tgprpl_login (PurpleAccount *acct)
  {
      purple_debug_misc(config::pluginId, "version %s\n", config::versionString);
-@@ -336,6 +365,15 @@ static void tgprpl_login (PurpleAccount *acct)
- 
-     purple_signal_connect(purple_conversations_get_handle(), "conversation-updated",
-                           acct, PURPLE_CALLBACK(conversation_updated_cb), NULL);
+@@ -500,6 +529,15 @@ static void tgprpl_login (PurpleAccount *acct)
+                           acct, PURPLE_CALLBACK(conversationCreated), acct);
+     purple_signal_connect(purple_conversations_get_handle(), "chat-joined",
+                           acct, PURPLE_CALLBACK(conversationCreated), acct);
 +
 +    // Connect once (process-wide) to the transport's send-reaction signal; the callback filters to
 +    // Telegram accounts. The transport registers the signal at init, before any account logs in.
@@ -417,3 +653,51 @@ index 3f0e9df..c392c63 100644
  }
  
  static void tgprpl_close (PurpleConnection *gc)
+@@ -532,15 +570,31 @@ static bool sendEdit(PurpleTdClient *tdClient, PurpleConversation *conv, const c
+     return true;
+ }
+ 
++// webOS native reply: the transport stashes "webos-reply-to" = the reply target's serviceMessageId
++// ("<chatId>:<messageId>") on the conversation right before serv_send_im/serv_chat_send. Read the
++// messageId tail, clear the stash, and return it (0 if none) so the send can set a real tdlib reply_to.
++static int64_t readReplyToStash(PurpleConversation *conv)
++{
++    if (conv == NULL) return 0;
++    const char *stash = (const char *) purple_conversation_get_data(conv, "webos-reply-to");
++    if (stash == NULL || *stash == '\0') return 0;
++    const char *colon = strrchr(stash, ':');
++    int64_t msgId = colon ? g_ascii_strtoll(colon + 1, NULL, 10) : g_ascii_strtoll(stash, NULL, 10);
++    g_free((char *) stash);
++    purple_conversation_set_data(conv, "webos-reply-to", NULL);
++    return msgId;
++}
++
+ static int tgprpl_send_im (PurpleConnection *gc, const char *who, const char *message, PurpleMessageFlags flags)
+ {
+     PurpleTdClient *tdClient = static_cast<PurpleTdClient *>(purple_connection_get_protocol_data(gc));
+     purple_debug_misc(config::pluginId, "tgprpl_send_im to '%s' flags=0x%x\n", who, (unsigned)flags);
+     PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM, who,
+                                                                      purple_connection_get_account(gc));
++    int64_t replyToMsgId = readReplyToStash(conv);
+     if (sendEdit(tdClient, conv, message))
+         return 0;
+-    return tdClient->sendMessage(who, message);
++    return tdClient->sendMessage(who, message, replyToMsgId);
+ }
+ 
+ static unsigned int tgprpl_send_typing (PurpleConnection *gc, const char *who, PurpleTypingState typing)
+@@ -789,9 +843,12 @@ static int tgprpl_send_chat (PurpleConnection *gc, int id, const char *message,
+     purple_debug_misc(config::pluginId, "Sending group chat message: purple chat id %d, flags=0x%x\n",
+                       id, (unsigned)flags);
+     PurpleTdClient *tdClient = static_cast<PurpleTdClient *>(purple_connection_get_protocol_data(gc));
+-    if (sendEdit(tdClient, purple_find_chat(gc, id), message))
++    // webOS native reply: read the reply target the transport stashed on this chat conversation.
++    PurpleConversation *conv = purple_find_chat(gc, id);
++    int64_t replyToMsgId = readReplyToStash(conv);
++    if (sendEdit(tdClient, conv, message))
+         return 0;
+-    return tdClient->sendGroupMessage(id, message);
++    return tdClient->sendGroupMessage(id, message, replyToMsgId);
+ }
+ 
+ static void tgprpl_rename_buddy(PurpleConnection *gc, const char *who, const char *alias)

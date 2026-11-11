@@ -1,0 +1,904 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sun, 8 Nov 2026 19:47:42 +0100
+Subject: [PATCH] webOS: show a poll's votes in the Messaging app, and a
+ received mention in bold
+
+* Show a poll's votes in the Messaging app, and log a vote
+
+A Telegram poll reached the app without counts, so votes made
+elsewhere never showed. The app draws them from the poll token's
+"votes", one count for each option in the options' order, as
+purple-combined gives them for WhatsApp, rewriting the poll message
+in place, which the app takes for no edit by the sender.
+
+webos::pollToken takes the counts. A poll is shown with them, each
+option's voter_count, where TDLib lets us see them (poll.
+can_see_results): until we have voted, or unless the poll is closed or
+ours, TDLib 1.8.67 gives every count as 0 and can_see_results as false
+(PollManager::get_poll_object), and a 0 that is no count is not shown.
+"max" and the options stay as they were.
+
+A user's client hears of a change to a poll as updateMessageContent for
+each message carrying it (PollManager::notify_on_poll_update);
+updatePoll is for bots only (td_api.tl). Either way the poll is given
+again as a whole with "webos-im-edit" (account, serviceMessageId, text),
+the line of a forward kept in front of it as it was shown, and only
+where the text has changed: a pending answer, say, changes nothing the
+app shows. TdAccountData keeps, for each poll message shown, TDLib's id
+of the poll and the text given, so updatePoll finds the messages too.
+That a poll was closed is now told this way too, with its final counts,
+rather than as an edit notice followed by the poll once more. A poll
+still waiting to be shown takes the new content, to be shown as it is
+by then.
+
+Our own choice (pollOption.is_chosen) is not given: the app reads it
+from the message's myPollVote, which only the app writes, and the
+token has no place for it.
+
+The vote from the app ("webos-im-send-poll-vote", void, so every
+plug-in sees it and the protocol check picks ours) left no trace when
+it went well, nor did sendQuery say what it sent. It now logs that a
+vote was asked for which message, how many of the poll's options are
+voted for, and that TDLib took it, without the options' text.
+
+Unit tests in test/webos-commands-test.cpp and
+test/webos-receive-test.cpp.
+
+* Show a received mention in bold
+
+A Telegram message that names someone, by username ("@name") or by
+name with a link to them (textEntityTypeMention and
+textEntityTypeMentionName in td_api.tl), reached the Messaging app as
+plain text. Show it in bold, as purple-presage does for Signal, so
+mentions look the same on every service: getEntityMarkup gives both
+entity types <b>..</b>, so getMessageText marks them up as it does
+bold, nested with any other formatting. Offsets count UTF-16 code
+units, as before. Nothing is added to a mention by name, which shows
+the name as written, and a text to be sent keeps a mention plain.
+
+The quote a reply carries is left plain: the app shows it as text, and
+it is filled from the message's plain text.
+
+This is for the Messaging app only (isWebosUi()): other front-ends show
+a mention plain, as before.
+
+Unit tests in test/webos-mention-test.cpp and
+test/webos-commands-test.cpp.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ account-data.cpp             |  45 +++++++
+ account-data.h               |  20 +++
+ receiving.cpp                | 110 ++++++++++++---
+ receiving.h                  |   8 +-
+ td-client.cpp                |  16 ++-
+ tdlib-purple.cpp             |   2 +
+ test/CMakeLists.txt          |   1 +
+ test/webos-commands-test.cpp | 250 +++++++++++++++++++++++++++++++++++
+ test/webos-mention-test.cpp  | 109 +++++++++++++++
+ test/webos-receive-test.cpp  |  17 +++
+ webos-receive.cpp            |  11 +-
+ webos-receive.h              |   6 +-
+ 12 files changed, 569 insertions(+), 26 deletions(-)
+ create mode 100644 test/webos-mention-test.cpp
+
+diff --git a/account-data.cpp b/account-data.cpp
+index 03d581b..b23d750 100644
+--- a/account-data.cpp
++++ b/account-data.cpp
+@@ -1214,6 +1214,51 @@ void TdAccountData::renameShownMessage(ChatId chatId, MessageId oldId, MessageId
+     }
+ }
+ 
++// As many as the shown messages, the polls among which are fewer
++enum { MAX_POLL_MESSAGES = 10000 };
++
++bool TdAccountData::setPollText(ChatId chatId, MessageId messageId, int64_t pollId, const std::string &text)
++{
++    ShownMessageKey key(chatId, messageId);
++    auto it = m_pollMessages.find(key);
++    if (it == m_pollMessages.end()) {
++        it = m_pollMessages.emplace(key, PollMessage()).first;
++        m_pollMessageOrder.push_back(key);
++        while (m_pollMessageOrder.size() > MAX_POLL_MESSAGES) {
++            m_pollMessages.erase(m_pollMessageOrder.front());
++            m_pollMessageOrder.pop_front();
++        }
++    } else if ((it->second.pollId == pollId) && (it->second.text == text))
++        return false;
++    it->second.pollId = pollId;
++    it->second.text   = text;
++    return true;
++}
++
++std::string TdAccountData::getPollTextPrefix(ChatId chatId, MessageId messageId) const
++{
++    auto it = m_pollMessages.find(ShownMessageKey(chatId, messageId));
++    return (it != m_pollMessages.end()) ? it->second.prefix : std::string();
++}
++
++void TdAccountData::setPollTextPrefix(ChatId chatId, MessageId messageId, const std::string &prefix)
++{
++    auto it = m_pollMessages.find(ShownMessageKey(chatId, messageId));
++    if (it != m_pollMessages.end())
++        it->second.prefix = prefix;
++}
++
++std::vector<std::pair<ChatId, MessageId>> TdAccountData::getPollMessages(int64_t pollId) const
++{
++    std::vector<std::pair<ChatId, MessageId>> result;
++    for (const ShownMessageKey &key: m_pollMessageOrder) {
++        auto it = m_pollMessages.find(key);
++        if ((it != m_pollMessages.end()) && (it->second.pollId == pollId))
++            result.push_back(key);
++    }
++    return result;
++}
++
+ void TdAccountData::addPendingEdit(const PendingEdit &edit)
+ {
+     auto it = std::find_if(m_pendingEdits.begin(), m_pendingEdits.end(), [&edit](const PendingEdit &other) {
+diff --git a/account-data.h b/account-data.h
+index c7b606f..246b441 100644
+--- a/account-data.h
++++ b/account-data.h
+@@ -560,6 +560,18 @@ public:
+     MessageId                  getSentMessageId(ChatId chatId, MessageId messageId) const;
+     void                       addPendingEdit(const PendingEdit &edit);
+     bool                       extractPendingEdit(ChatId chatId, MessageId messageId, PendingEdit &edit);
++
++    // webOS: a poll message as given to the app - which poll it carries, by TDLib's id of it, and
++    // the text it was given - so that a change to the poll rewrites the message once, as it was
++    // shown. Returns false where the message has that text already.
++    bool                       setPollText(ChatId chatId, MessageId messageId, int64_t pollId,
++                                           const std::string &text);
++    // What came before the poll in the text of the message it was shown in: the line saying it was
++    // forwarded. Empty for a message not shown in this session.
++    std::string                getPollTextPrefix(ChatId chatId, MessageId messageId) const;
++    void                       setPollTextPrefix(ChatId chatId, MessageId messageId, const std::string &prefix);
++    // The messages carrying a poll, oldest first
++    std::vector<std::pair<ChatId, MessageId>> getPollMessages(int64_t pollId) const;
+ private:
+     TdAccountData(const TdAccountData &other) = delete;
+     TdAccountData &operator=(const TdAccountData &other) = delete;
+@@ -651,6 +663,14 @@ private:
+     std::map<ShownMessageKey, MessageId>    m_sentMessageIds;
+     std::deque<ShownMessageKey>             m_shownMessageOrder;
+     std::vector<PendingEdit>                m_pendingEdits;
++
++    struct PollMessage {
++        int64_t     pollId = 0;
++        std::string prefix;
++        std::string text;
++    };
++    std::map<ShownMessageKey, PollMessage> m_pollMessages;
++    std::deque<ShownMessageKey>            m_pollMessageOrder;
+ };
+ 
+ #endif
+diff --git a/receiving.cpp b/receiving.cpp
+index bd7fa48..78816a6 100644
+--- a/receiving.cpp
++++ b/receiving.cpp
+@@ -410,6 +410,16 @@ static bool getEntityMarkup(const td::td_api::TextEntityType &type, TextMarkup &
+         markup.open = QUOTE_BAR;
+         markup.quote = true;
+         return true;
++    case td::td_api::textEntityTypeMention::ID:
++    case td::td_api::textEntityTypeMentionName::ID:
++        // webOS: a mention of someone, by username or by name, in bold, as purple-presage shows one
++        // for Signal, so mentions look the same on every service in the Messaging app. Other
++        // front-ends show it plain, as before.
++        if (!isWebosUi())
++            return false;
++        markup.open = "<b>";
++        markup.close = "</b>";
++        return true;
+     default:
+         return false;
+     }
+@@ -865,6 +875,15 @@ PurpleConversation *getMessageConversation(TdAccountData &account, const td::td_
+     return NULL;
+ }
+ 
++// What goes before the text of a forwarded message: the line saying where it is from
++static std::string getForwardHeader(const TgMessageInfo &message)
++{
++    if (message.forwardedFrom.empty())
++        return std::string();
++    // TRANSLATOR: In-chat notification of forward. Argument will be a username. Please preserve the HTML.
++    return formatMessage(_("<b>Forwarded from {}:</b>"), escapeForDisplay(message.forwardedFrom)) + "\n";
++}
++
+ void showMessageText(TdAccountData &account, const td::td_api::chat &chat, const TgMessageInfo &message,
+                      const char *text, const char *notification, uint32_t extraFlags)
+ {
+@@ -910,15 +929,9 @@ void showMessageText(TdAccountData &account, const td::td_api::chat &chat, const
+         }
+     }
+     if (text) {
+-        if (!message.forwardedFrom.empty()) {
+-            if (!newText.empty())
+-                newText += "\n";
+-            // TRANSLATOR: In-chat notification of forward. Argument will be a username. Please preserve the HTML.
+-            newText += formatMessage(_("<b>Forwarded from {}:</b>"),
+-                                     escapeForDisplay(message.forwardedFrom));
+-        }
+         if (!newText.empty())
+             newText += "\n";
++        newText += getForwardHeader(message);
+         newText += text;
+     }
+     if (!newText.empty())
+@@ -1725,15 +1738,30 @@ static std::string makeGroupEventNotice(const td::td_api::chat &chat, const TgMe
+     return std::string();
+ }
+ 
+-// webOS: a poll as the Messaging app draws one, a list to vote on (webos-receive.h)
+-static void showWebosPoll(const td::td_api::chat &chat, const TgMessageInfo &messageInfo,
+-                          const td::td_api::poll &poll, TdAccountData &account)
++// webOS: a poll as the Messaging app draws one, a list to vote on (webos-receive.h), with how many
++// chose each option where TDLib lets us see that: before we have voted, it gives every count as 0
++// and can_see_results as false, and a 0 that is no count is not to be shown
++static std::string makeWebosPollToken(const td::td_api::poll &poll)
+ {
+     std::vector<std::string> options;
+-    for (const auto &option: poll.options_)
++    std::vector<int32_t>     votes;
++    for (const auto &option: poll.options_) {
+         options.push_back((option && option->text_) ? option->text_->text_ : std::string());
+-    std::string token = webos::pollToken(poll.question_ ? poll.question_->text_ : std::string(),
+-                                         options, poll.allows_multiple_answers_);
++        votes.push_back(option ? option->voter_count_ : 0);
++    }
++    return webos::pollToken(poll.question_ ? poll.question_->text_ : std::string(), options,
++                            poll.allows_multiple_answers_, poll.can_see_results_ ? &votes : nullptr);
++}
++
++static void showWebosPoll(const td::td_api::chat &chat, const TgMessageInfo &messageInfo,
++                          const td::td_api::poll &poll, TdAccountData &account)
++{
++    std::string token = makeWebosPollToken(poll);
++    // Kept, so that a change of the counts is given the app as a rewrite of this very text
++    if (messageInfo.id.valid()) {
++        account.setPollText(getId(chat), messageInfo.id, poll.id_, token);
++        account.setPollTextPrefix(getId(chat), messageInfo.id, getForwardHeader(messageInfo));
++    }
+     showMessageText(account, chat, messageInfo, token.c_str(), NULL);
+ }
+ 
+@@ -2928,23 +2956,58 @@ std::string webosServiceMessageId(int64_t chatId, int64_t messageId)
+     return std::to_string(chatId) + ":" + std::to_string(messageId);
+ }
+ 
++static void emitWebosEditSignal(TdAccountData &account, ChatId chatId, MessageId messageId,
++                                const std::string &newText)
++{
++    std::string id = webosServiceMessageId(chatId.value(), messageId.value());
++    purple_signal_emit(purple_conversations_get_handle(), "webos-im-edit",
++                       account.purpleAccount, id.c_str(), newText.c_str());
++}
++
++// A poll whose counts, or closing, changed is given again as a whole, where it is: the app takes
++// the rewrite of a poll for no edit. Nothing is given where the text is as it was; for a message
++// not shown in this session, the transport has it from before, without the line of a forward.
++static void rewriteWebosPoll(TdAccountData &account, ChatId chatId, MessageId messageId,
++                             const td::td_api::poll &poll)
++{
++    std::string token = makeWebosPollToken(poll);
++    if (!account.setPollText(chatId, messageId, poll.id_, token)) {
++        purple_debug_misc(config::pluginId, "Poll in message %" G_GINT64_FORMAT " is as it was\n",
++                          messageId.value());
++        return;
++    }
++    purple_debug_misc(config::pluginId, "Poll in message %" G_GINT64_FORMAT " rewritten, %s counts\n",
++                      messageId.value(), poll.can_see_results_ ? "with" : "without");
++    emitWebosEditSignal(account, chatId, messageId, account.getPollTextPrefix(chatId, messageId) + token);
++}
++
+ // webOS: the transport keeps every message it was given, from this session or before, by the
+ // serviceMessageId it came with; "webos-im-edit" (account, serviceMessageId, text) has it change
+-// that message's text where it is. Only text is: a caption or a replaced file is still told with a
+-// notice. Returns whether the edit was given that way.
++// that message's text where it is. Only text, and a poll, are: a caption or a replaced file is
++// still told with a notice. Returns whether the change was given that way.
+ static bool emitWebosEdit(TdAccountData &account, ChatId chatId, MessageId messageId,
+                           const td::td_api::MessageContent &content)
+ {
++    if (content.get_id() == td::td_api::messagePoll::ID) {
++        const auto &poll = static_cast<const td::td_api::messagePoll &>(content);
++        if (!poll.poll_)
++            return false;
++        rewriteWebosPoll(account, chatId, messageId, *poll.poll_);
++        return true;
++    }
+     if (content.get_id() != td::td_api::messageText::ID)
+         return false;
+     const auto &text = static_cast<const td::td_api::messageText &>(content);
+-    std::string id      = webosServiceMessageId(chatId.value(), messageId.value());
+-    std::string newText = text.text_ ? getMessageText(*text.text_) : std::string();
+-    purple_signal_emit(purple_conversations_get_handle(), "webos-im-edit",
+-                       account.purpleAccount, id.c_str(), newText.c_str());
++    emitWebosEditSignal(account, chatId, messageId, text.text_ ? getMessageText(*text.text_) : std::string());
+     return true;
+ }
+ 
++void updatePoll(TdAccountData &account, const td::td_api::poll &poll)
++{
++    for (const auto &message: account.getPollMessages(poll.id_))
++        rewriteWebosPoll(account, message.first, message.second, poll);
++}
++
+ void updateMessageContent(TdAccountData &account, ChatId chatId, MessageId messageId,
+                           td::td_api::object_ptr<td::td_api::MessageContent> content)
+ {
+@@ -2952,6 +3015,15 @@ void updateMessageContent(TdAccountData &account, ChatId chatId, MessageId messa
+         return;
+     // The Messaging app changes a message where it is; other front-ends are told with a notice
+     bool inPlace = isWebosUi() && emitWebosEdit(account, chatId, messageId, *content);
++    if (inPlace && (content->get_id() == td::td_api::messagePoll::ID)) {
++        // A poll is all given where it is, closing it too. One still waiting to be shown takes the
++        // new content, to be shown as it is by then: it needs nothing fetched for it.
++        IncomingMessage *pendingMessage = account.pendingMessages.findPendingMessage(chatId, messageId);
++        td::td_api::message *message = pendingMessage ? pendingMessage->message.get() : nullptr;
++        if (message && message->content_ && (message->content_->get_id() == td::td_api::messagePoll::ID))
++            message->content_ = std::move(content);
++        return;
++    }
+     // A message not shown in this session is in no conversation window to be corrected
+     ShownMessage *shownMessage = account.findShownMessage(chatId, messageId);
+     if (!shownMessage)
+diff --git a/receiving.h b/receiving.h
+index 5933f3c..6f311e0 100644
+--- a/receiving.h
++++ b/receiving.h
+@@ -7,8 +7,9 @@
+ 
+ std::string makeNoticeWithSender(const td::td_api::chat &chat, const TgMessageInfo &message,
+                                  const char *noticeText, PurpleAccount *account);
+-// As markup; custom emoji given in smileys, by id, are shown by their codes. Sendable, only the
+-// formatting that Pidgin's markup can send back, for editing it.
++// As markup; custom emoji given in smileys, by id, are shown by their codes, and a mention of
++// someone (webOS) in bold. Sendable, only the formatting that Pidgin's markup can send back, for
++// editing it.
+ std::string getMessageText(const td::td_api::formattedText &text,
+                            const std::map<int64_t, std::string> *smileys = nullptr, bool sendable = false);
+ // Into the image store, which takes the data, under the file's name, for Pidgin to offer when saving it
+@@ -111,6 +112,9 @@ const td::td_api::chat *findConversationChat(TdAccountData &account, PurpleConve
+ void updateMessageContent(TdAccountData &account, ChatId chatId, MessageId messageId,
+                           td::td_api::object_ptr<td::td_api::MessageContent> content);
+ void deleteMessages(TdAccountData &account, const td::td_api::updateDeleteMessages &update);
++// webOS: a poll changed (updatePoll, which TDLib gives bots only; a user gets updateMessageContent
++// for each message carrying it). Its messages shown in this session are rewritten with its counts.
++void updatePoll(TdAccountData &account, const td::td_api::poll &poll);
+ void updateMessageReactions(TdAccountData &account, ChatId chatId, MessageId messageId,
+                             const td::td_api::messageInteractionInfo *info);
+ void updateUnreadReactions(TdAccountData &account, td::td_api::updateMessageUnreadReactions &update);
+diff --git a/td-client.cpp b/td-client.cpp
+index 7236349..af94516 100644
+--- a/td-client.cpp
++++ b/td-client.cpp
+@@ -240,6 +240,14 @@ void PurpleTdClient::processUpdate(td::td_api::Object &update)
+         break;
+     }
+ 
++    case td::td_api::updatePoll::ID: {
++        auto &pollUpdate = static_cast<const td::td_api::updatePoll &>(update);
++        purple_debug_misc(config::pluginId, "Incoming update: poll\n");
++        if (pollUpdate.poll_)
++            updatePoll(m_data, *pollUpdate.poll_);
++        break;
++    }
++
+     case td::td_api::updateDeleteMessages::ID: {
+         auto &deleteUpdate = static_cast<const td::td_api::updateDeleteMessages &>(update);
+         purple_debug_misc(config::pluginId, "Incoming update: %zu messages deleted\n",
+@@ -2483,10 +2491,14 @@ bool PurpleTdClient::votePoll(int64_t tdlibChatId, int64_t messageId,
+                                      ": an option is not in it\n", messageId);
+                 return;
+             }
++            purple_debug_misc(config::pluginId, "Voting in poll %" G_GINT64_FORMAT ": %zu of %zu options\n",
++                              messageId, optionIds.size(), options.size());
+             auto vote = td::td_api::make_object<td::td_api::setPollAnswer>(chatId.value(), messageId,
+                                                                          std::move(optionIds));
+-            // The poll's tally comes back as updateMessageContent, which shows nothing new
+-            m_transceiver.sendQuery(std::move(vote), [this, chatId](uint64_t, TdObjectPtr result) {
++            // The poll comes back as updateMessageContent, with the counts, which rewrites it
++            m_transceiver.sendQuery(std::move(vote), [this, chatId, messageId](uint64_t, TdObjectPtr result) {
++                if (result && (result->get_id() == td::td_api::ok::ID))
++                    purple_debug_misc(config::pluginId, "Voted in poll %" G_GINT64_FORMAT "\n", messageId);
+                 // TRANSLATOR: In-chat error message, argument will be a reason (text)
+                 commandResponse(chatId, _("Failed to vote: {}"), std::move(result));
+             });
+diff --git a/tdlib-purple.cpp b/tdlib-purple.cpp
+index 619a367..408c353 100644
+--- a/tdlib-purple.cpp
++++ b/tdlib-purple.cpp
+@@ -615,6 +615,8 @@ static void tgprpl_send_poll_vote_cb(PurpleAccount *account, const char * /*peer
+                              pollMessageId ? pollMessageId : "");
+         return;
+     }
++    // Which options, by their text, is the user's to know only
++    purple_debug_misc(config::pluginId, "Poll vote asked for message %" G_GINT64_FORMAT "\n", messageId);
+     tdClient->votePoll(chatId, messageId, webos::splitMembers(optionsJoined));
+ }
+ 
+diff --git a/test/CMakeLists.txt b/test/CMakeLists.txt
+index 225c806..aedacd2 100644
+--- a/test/CMakeLists.txt
++++ b/test/CMakeLists.txt
+@@ -28,6 +28,7 @@ add_executable(tests EXCLUDE_FROM_ALL
+     call-protocol-test.cpp
+     webos-commands-test.cpp
+     webos-receive-test.cpp
++    webos-mention-test.cpp
+     test-transceiver.cpp
+     libpurple-mock.cpp
+     printout.cpp
+diff --git a/test/webos-commands-test.cpp b/test/webos-commands-test.cpp
+index 6bd61dd..94a4ed7 100644
+--- a/test/webos-commands-test.cpp
++++ b/test/webos-commands-test.cpp
+@@ -1236,6 +1236,34 @@ TEST_F(WebosCommandTest, VotePollNotSent)
+     );
+ }
+ 
++// A poll, TDLib's id 99, with how many chose each option, as TDLib gives them: every count 0 and
++// can_see_results false until we have voted (PollManager::get_poll_object)
++static object_ptr<messagePoll> makePollContent(const std::vector<int32_t> &counts, bool canSeeResults,
++                                               int chosen = -1)
++{
++    auto poll = make_object<td::td_api::poll>();
++    poll->id_       = 99;
++    poll->question_ = makeFormattedText("Lunch?");
++    const char *texts[] = {"Pizza", "Soup", "Pasta"};
++    for (size_t i = 0; i < 3; i++) {
++        auto option          = make_object<pollOption>();
++        option->text_        = makeFormattedText(texts[i]);
++        option->voter_count_ = canSeeResults ? counts[i] : 0;
++        option->is_chosen_   = (int(i) == chosen);
++        poll->options_.push_back(std::move(option));
++    }
++    poll->allows_multiple_answers_ = true;
++    poll->can_see_results_         = canSeeResults;
++    auto content   = make_object<messagePoll>();
++    content->poll_ = std::move(poll);
++    return content;
++}
++
++static std::string pollText(const std::vector<int32_t> *votes)
++{
++    return webos::pollToken("Lunch?", {"Pizza", "Soup", "Pasta"}, true, votes);
++}
++
+ // What we sent to a group from another client is shown with its id, as a received message is, so
+ // that the app can react to it, edit it or vote in it. libpurple writes it as received, our name
+ // being no member's of the chat, and the transport stores it so.
+@@ -1269,6 +1297,228 @@ TEST_F(WebosCommandTest, OwnMessageFromElsewhereInGroup)
+     ASSERT_STREQ(serviceMessageId(groupChatId, 2).c_str(), stashed);
+     g_free(stashed);
+     purple_conversation_set_data(conv, "webos-msg-id", nullptr);
++    // A poll made on the phone, which the app is to vote in
++    message = makeMessage(3, selfId, groupChatId, true, 10003, makePollContent({0, 0, 0}, false));
++    message->sending_state_ = nullptr;
++    tgl.update(make_object<updateNewMessage>(std::move(message)));
++    tgl.verifyRequest(viewMessages(groupChatId, {3}, nullptr, true));
++    prpl.verifyEvents(ConversationWriteEvent(
++        groupChatPurpleName, selfFirstName + " " + selfLastName, pollText(nullptr),
++        (PurpleMessageFlags)(PURPLE_MESSAGE_SEND | PURPLE_MESSAGE_REMOTE_SEND), 10003
++    ));
++    stashed = static_cast<char *>(purple_conversation_get_data(conv, "webos-msg-id"));
++    ASSERT_STREQ(serviceMessageId(groupChatId, 3).c_str(), stashed);
++    g_free(stashed);
++    purple_conversation_set_data(conv, "webos-msg-id", nullptr);
++}
++
++// A vote in a group's poll, by the options' names as the app has them, is given TDLib as their
++// positions in the poll
++TEST_F(WebosCommandTest, VotePollInGroup)
++{
++    login();
++    addBasicGroup();
++    auto vote = reinterpret_cast<PollVoteCallback>(getConnectedSignal("webos-im-send-poll-vote"));
++    ASSERT_NE(nullptr, vote);
++    std::string id = serviceMessageId(groupChatId, 5);
++
++    vote(account, groupChatPurpleName.c_str(), id.c_str(), "Pasta", nullptr);
++    tgl.verifyRequest(getMessage(groupChatId, 5));
++    tgl.reply(makeMessage(5, userIds[0], groupChatId, false, 10001, makePollContent({0, 0, 0}, false)));
++    tgl.verifyRequest(setPollAnswer(groupChatId, 5, {2}));
++    tgl.reply(make_object<ok>());
++
++    vote(account, groupChatPurpleName.c_str(), id.c_str(), "Soup\x1fPizza\x1f" "Soup", nullptr);
++    tgl.verifyRequest(getMessage(groupChatId, 5));
++    tgl.reply(makeMessage(5, userIds[0], groupChatId, false, 10001, makePollContent({0, 0, 1}, true, 2)));
++    tgl.verifyRequest(setPollAnswer(groupChatId, 5, {0, 1}));
++    tgl.reply(make_object<ok>());
++    prpl.verifyNoEvents();
++    ASSERT_EQ(std::vector<WebosSignal>(), takeWebosSignals());
++}
++
++// The counts come with the poll each time it changes, and the poll is rewritten where it is, as
++// it was, with them: no notice of an edit, and nothing where nothing the app shows has changed
++TEST_F(WebosCommandTest, PollCountsRewritten)
++{
++    login();
++    addBasicGroup();
++    tgl.update(make_object<updateNewMessage>(makeMessage(
++        5, userIds[0], groupChatId, false, 10001, makePollContent({0, 0, 0}, false)
++    )));
++    tgl.verifyRequest(viewMessages(groupChatId, {5}, nullptr, true));
++    prpl.verifyEvents(
++        ServGotJoinedChatEvent(connection, 2, groupChatPurpleName, "Physics"),
++        ServGotChatEvent(connection, 2, purpleUserName(0) + "\x1f" + userFirstNames[0] + " " + userLastNames[0],
++                         pollText(nullptr), PURPLE_MESSAGE_RECV, 10001)
++    );
++    PurpleConversation *conv = purple_find_chat(connection, 2);
++    ASSERT_NE(nullptr, conv);
++    g_free(purple_conversation_get_data(conv, "webos-msg-id"));
++    purple_conversation_set_data(conv, "webos-msg-id", nullptr);
++    std::string id = serviceMessageId(groupChatId, 5);
++
++    // Our vote, from here or elsewhere: now the counts can be seen
++    tgl.update(makeUpdateMessageContent(groupChatId, 5, makePollContent({2, 0, 1}, true, 0)));
++    std::vector<int32_t> votes = {2, 0, 1};
++    ASSERT_EQ(std::vector<WebosSignal>({webosEdit(account, id, pollText(&votes))}), takeWebosSignals());
++    // Being chosen, say, which the app does not show
++    tgl.update(makeUpdateMessageContent(groupChatId, 5, makePollContent({2, 0, 1}, true, 0)));
++    ASSERT_EQ(std::vector<WebosSignal>(), takeWebosSignals());
++    // Someone else's vote
++    tgl.update(makeUpdateMessageContent(groupChatId, 5, makePollContent({2, 3, 1}, true, 0)));
++    votes = {2, 3, 1};
++    ASSERT_EQ(std::vector<WebosSignal>({webosEdit(account, id, pollText(&votes))}), takeWebosSignals());
++    // Closed: shown with the final counts, not as an edit followed by the poll once more
++    auto closed = makePollContent({2, 3, 2}, true, 0);
++    closed->poll_->is_closed_ = true;
++    tgl.update(makeUpdateMessageContent(groupChatId, 5, std::move(closed)));
++    votes = {2, 3, 2};
++    ASSERT_EQ(std::vector<WebosSignal>({webosEdit(account, id, pollText(&votes))}), takeWebosSignals());
++    tgl.verifyNoRequests();
++    prpl.verifyNoEvents();
++
++    // updatePoll, which a bot gets, finds the message by the poll's id
++    auto poll = makePollContent({4, 3, 2}, true, 0);
++    tgl.update(make_object<updatePoll>(std::move(poll->poll_)));
++    votes = {4, 3, 2};
++    ASSERT_EQ(std::vector<WebosSignal>({webosEdit(account, id, pollText(&votes))}), takeWebosSignals());
++    poll = makePollContent({4, 3, 2}, true, 0);
++    poll->poll_->id_ = 98;
++    tgl.update(make_object<updatePoll>(std::move(poll->poll_)));
++    ASSERT_EQ(std::vector<WebosSignal>(), takeWebosSignals());
++
++    // Our vote taken back: the counts cannot be seen any longer, and are not shown as 0
++    tgl.update(makeUpdateMessageContent(groupChatId, 5, makePollContent({0, 0, 0}, false)));
++    ASSERT_EQ(std::vector<WebosSignal>({webosEdit(account, id, pollText(nullptr))}), takeWebosSignals());
++    tgl.verifyNoRequests();
++    prpl.verifyNoEvents();
++}
++
++// A poll that comes with counts has them from the start; one from an earlier session is rewritten
++// where the transport keeps it
++TEST_F(WebosCommandTest, PollCountsAtOnce)
++{
++    login();
++    tgl.update(make_object<updateNewMessage>(makeMessage(
++        5, userIds[0], chatIds[0], false, 10001, makePollContent({1, 2, 0}, true, 1)
++    )));
++    std::vector<int32_t> votes = {1, 2, 0};
++    prpl.verifyEvents(NewConversationEvent(PURPLE_CONV_TYPE_IM, account, purpleUserName(0)),
++                      ServGotImEvent(connection, purpleUserName(0), pollText(&votes), PURPLE_MESSAGE_RECV, 10001));
++    tgl.verifyRequest(viewMessages(chatIds[0], {5}, nullptr, true));
++    PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM,
++                                                                     purpleUserName(0).c_str(), account);
++    ASSERT_NE(nullptr, conv);
++    g_free(purple_conversation_get_data(conv, "webos-msg-id"));
++    purple_conversation_set_data(conv, "webos-msg-id", nullptr);
++    // As it was shown
++    tgl.update(makeUpdateMessageContent(chatIds[0], 5, makePollContent({1, 2, 0}, true, 1)));
++    ASSERT_EQ(std::vector<WebosSignal>(), takeWebosSignals());
++
++    tgl.update(makeUpdateMessageContent(chatIds[0], 42, makePollContent({1, 1, 1}, true)));
++    votes = {1, 1, 1};
++    ASSERT_EQ(std::vector<WebosSignal>({webosEdit(account, serviceMessageId(chatIds[0], 42), pollText(&votes))}),
++              takeWebosSignals());
++    tgl.verifyNoRequests();
++    prpl.verifyNoEvents();
++
++    // A forwarded poll keeps the line saying so
++    auto message = makeMessage(6, userIds[0], chatIds[0], false, 10002, makePollContent({0, 0, 0}, false));
++    message->forward_info_ = make_object<messageForwardInfo>(make_object<messageOriginHiddenUser>("Galileo"),
++                                                             10000, nullptr, "");
++    tgl.update(make_object<updateNewMessage>(std::move(message)));
++    const std::string forwarded = "<b>Forwarded from Galileo:</b>\n";
++    prpl.verifyEvents(ServGotImEvent(connection, purpleUserName(0), forwarded + pollText(nullptr),
++                                     PURPLE_MESSAGE_RECV, 10002));
++    tgl.verifyRequest(viewMessages(chatIds[0], {6}, nullptr, true));
++    g_free(purple_conversation_get_data(conv, "webos-msg-id"));
++    purple_conversation_set_data(conv, "webos-msg-id", nullptr);
++    tgl.update(makeUpdateMessageContent(chatIds[0], 6, makePollContent({0, 1, 0}, true, 1)));
++    votes = {0, 1, 0};
++    ASSERT_EQ(std::vector<WebosSignal>({webosEdit(account, serviceMessageId(chatIds[0], 6),
++                                                  forwarded + pollText(&votes))}),
++              takeWebosSignals());
++    tgl.verifyNoRequests();
++    prpl.verifyNoEvents();
++}
++
++// A poll still waiting to be shown, for the message it answers, is shown as it is by then
++TEST_F(WebosCommandTest, PollCountsWhileWaiting)
++{
++    login();
++    auto message = makeMessage(5, userIds[0], chatIds[0], false, 10001, makePollContent({0, 0, 0}, false));
++    message->reply_to_ = makeReplyTo(1);
++    tgl.update(make_object<updateNewMessage>(std::move(message)));
++    uint64_t requestId = tgl.verifyRequest(getMessage(chatIds[0], 1));
++    prpl.verifyNoEvents();
++
++    tgl.update(makeUpdateMessageContent(chatIds[0], 5, makePollContent({1, 0, 0}, true, 0)));
++    // Given to the transport, which has no such message yet
++    std::vector<int32_t> votes = {1, 0, 0};
++    ASSERT_EQ(std::vector<WebosSignal>({webosEdit(account, serviceMessageId(chatIds[0], 5), pollText(&votes))}),
++              takeWebosSignals());
++    tgl.verifyNoRequests();
++    prpl.verifyNoEvents();
++
++    tgl.reply(requestId, makeMessage(1, userIds[0], chatIds[0], false, 10000, makeTextMessage("Hungry?")));
++    prpl.verifyEvents(NewConversationEvent(PURPLE_CONV_TYPE_IM, account, purpleUserName(0)),
++                      ServGotImEvent(connection, purpleUserName(0), pollText(&votes), PURPLE_MESSAGE_RECV, 10001));
++    tgl.verifyRequest(viewMessages(chatIds[0], {5}, nullptr, true));
++    PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM,
++                                                                     purpleUserName(0).c_str(), account);
++    ASSERT_NE(nullptr, conv);
++    for (const char *key: {"webos-msg-id", "webos-quoted-id", "webos-quoted-text", "webos-quoted-from"}) {
++        g_free(purple_conversation_get_data(conv, key));
++        purple_conversation_set_data(conv, key, nullptr);
++    }
++    ASSERT_EQ(std::vector<WebosSignal>(), takeWebosSignals());
++}
++
++// A mention, by username or by name, is shown in bold (webos-mention-test.cpp has the forms)
++static object_ptr<formattedText> makeEntityText(const std::string &text,
++                                                std::vector<object_ptr<textEntity>> entities)
++{
++    return make_object<formattedText>(text, std::move(entities));
++}
++
++static object_ptr<textEntity> entityOf(int32_t offset, int32_t length, object_ptr<TextEntityType> type)
++{
++    return make_object<textEntity>(offset, length, std::move(type));
++}
++
++// As received, and as a reply quotes it
++TEST_F(WebosCommandTest, ReceivedMentionBold)
++{
++    login();
++    std::vector<object_ptr<textEntity>> entities;
++    entities.push_back(entityOf(0, 6, make_object<textEntityTypeMention>()));
++    auto content = make_object<messageText>(makeEntityText("@isaac, look", std::move(entities)), nullptr, nullptr);
++    tgl.update(make_object<updateNewMessage>(makeMessage(1, userIds[0], chatIds[0], false, 10001, std::move(content))));
++    prpl.verifyEvents(NewConversationEvent(PURPLE_CONV_TYPE_IM, account, purpleUserName(0)),
++                      ServGotImEvent(connection, purpleUserName(0), "<b>@isaac</b>, look", PURPLE_MESSAGE_RECV, 10001));
++    tgl.verifyRequest(viewMessages(chatIds[0], {1}, nullptr, true));
++    PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM,
++                                                                     purpleUserName(0).c_str(), account);
++    ASSERT_NE(nullptr, conv);
++    g_free(purple_conversation_get_data(conv, "webos-msg-id"));
++    purple_conversation_set_data(conv, "webos-msg-id", nullptr);
++
++    auto reply = makeMessage(2, userIds[0], chatIds[0], false, 10002, makeTextMessage("Yes?"));
++    reply->reply_to_ = makeReplyTo(1);
++    tgl.update(make_object<updateNewMessage>(std::move(reply)));
++    uint64_t requestId = tgl.verifyRequest(getMessage(chatIds[0], 1));
++    entities.clear();
++    entities.push_back(entityOf(0, 6, make_object<textEntityTypeMention>()));
++    content = make_object<messageText>(makeEntityText("@isaac, look", std::move(entities)), nullptr, nullptr);
++    tgl.reply(requestId, makeMessage(1, userIds[0], chatIds[0], false, 10001, std::move(content)));
++    prpl.verifyEvents(ServGotImEvent(connection, purpleUserName(0), "Yes?", PURPLE_MESSAGE_RECV, 10002));
++    tgl.verifyRequest(viewMessages(chatIds[0], {2}, nullptr, true));
++    ASSERT_STREQ("@isaac, look", static_cast<char *>(purple_conversation_get_data(conv, "webos-quoted-text")));
++    for (const char *key: {"webos-msg-id", "webos-quoted-id", "webos-quoted-text", "webos-quoted-from"}) {
++        g_free(purple_conversation_get_data(conv, key));
++        purple_conversation_set_data(conv, key, nullptr);
++    }
+ }
+ 
+ // A group's own news is told in words, not as "Unsupported message type"
+diff --git a/test/webos-mention-test.cpp b/test/webos-mention-test.cpp
+new file mode 100644
+index 0000000..60f4a7b
+--- /dev/null
++++ b/test/webos-mention-test.cpp
+@@ -0,0 +1,109 @@
++// A mention, by username or by name, is shown in bold, as it is in the text: offsets count UTF-16
++// code units, custom emoji are replaced as before, and entities nest as the formatting does. For
++// the Messaging app only: other front-ends show a mention plain.
++#include "receiving.h"
++#include "purple-info.h"
++#include "libpurple-mock.h"
++#include <gtest/gtest.h>
++
++using td::td_api::formattedText;
++using td::td_api::make_object;
++using td::td_api::object_ptr;
++using td::td_api::textEntity;
++using td::td_api::TextEntityType;
++using td::td_api::textEntityTypeBold;
++using td::td_api::textEntityTypeCustomEmoji;
++using td::td_api::textEntityTypeMention;
++using td::td_api::textEntityTypeMentionName;
++
++static object_ptr<formattedText> makeEntityText(const std::string &text,
++                                                std::vector<object_ptr<textEntity>> entities)
++{
++    return make_object<formattedText>(text, std::move(entities));
++}
++
++static object_ptr<textEntity> entityOf(int32_t offset, int32_t length, object_ptr<TextEntityType> type)
++{
++    return make_object<textEntity>(offset, length, std::move(type));
++}
++
++class WebosMentionTest: public testing::Test {
++protected:
++    void SetUp() override
++    {
++        m_uiName = getUiName();
++        setUiName("Palm Messaging");
++    }
++    void TearDown() override
++    {
++        setUiName(m_uiName);
++    }
++private:
++    const char *m_uiName = nullptr;
++};
++
++TEST_F(WebosMentionTest, Bold)
++{
++    std::vector<object_ptr<textEntity>> entities;
++    // An emoji before it, two UTF-16 code units
++    entities.push_back(entityOf(3, 4, make_object<textEntityTypeMention>()));
++    ASSERT_EQ("\xF0\x9F\x98\x80 <b>@ann</b> hi",
++              getMessageText(*makeEntityText("\xF0\x9F\x98\x80 @ann hi", std::move(entities))));
++
++    // By name, with no "@" added, and escaped inside
++    entities.clear();
++    entities.push_back(entityOf(3, 11, make_object<textEntityTypeMentionName>(100)));
++    ASSERT_EQ("Hi <b>Tom &lt;Jerry&gt;</b>!",
++              getMessageText(*makeEntityText("Hi Tom <Jerry>!", std::move(entities))));
++
++    // Both kinds, out of order, beside other formatting, which is shown too
++    entities.clear();
++    entities.push_back(entityOf(8, 3, make_object<textEntityTypeMentionName>(100)));
++    entities.push_back(entityOf(4, 4, make_object<textEntityTypeBold>()));
++    entities.push_back(entityOf(0, 3, make_object<textEntityTypeMention>()));
++    ASSERT_EQ("<b>@bo</b> <b>and </b><b>Ann</b>",
++              getMessageText(*makeEntityText("@bo and Ann", std::move(entities))));
++
++    // Not as text to edit, which has no mention markup to send back
++    entities.clear();
++    entities.push_back(entityOf(0, 3, make_object<textEntityTypeMention>()));
++    ASSERT_EQ("@bo &lt;3", getMessageText(*makeEntityText("@bo <3", std::move(entities)), nullptr, true));
++
++    // Nothing to bold, or past the end
++    entities.clear();
++    entities.push_back(entityOf(0, 0, make_object<textEntityTypeMention>()));
++    entities.push_back(entityOf(5, 4, make_object<textEntityTypeMention>()));
++    ASSERT_EQ("@bo", getMessageText(*makeEntityText("@bo", std::move(entities))));
++}
++
++TEST_F(WebosMentionTest, NextToCustomEmoji)
++{
++    const int64_t emojiId = 5555;
++    std::map<int64_t, std::string> smileys = {{emojiId, "<:)>"}};
++    std::vector<object_ptr<textEntity>> entities;
++    entities.push_back(entityOf(0, 2, make_object<textEntityTypeCustomEmoji>(emojiId)));
++    entities.push_back(entityOf(2, 4, make_object<textEntityTypeMention>()));
++    ASSERT_EQ("&lt;:)&gt;<b>@bob</b>",
++              getMessageText(*makeEntityText("\xF0\x9F\x98\x80@bob", std::move(entities)), &smileys));
++
++    // Over the custom emoji too: the emoji is shown inside the bold mention
++    entities.clear();
++    entities.push_back(entityOf(0, 6, make_object<textEntityTypeMention>()));
++    entities.push_back(entityOf(0, 2, make_object<textEntityTypeCustomEmoji>(emojiId)));
++    ASSERT_EQ("<b>&lt;:)&gt;@bob</b>",
++              getMessageText(*makeEntityText("\xF0\x9F\x98\x80@bob", std::move(entities)), &smileys));
++    // Without smileys the emoji stays, and the mention is bold
++    entities.clear();
++    entities.push_back(entityOf(0, 2, make_object<textEntityTypeCustomEmoji>(emojiId)));
++    entities.push_back(entityOf(2, 4, make_object<textEntityTypeMention>()));
++    ASSERT_EQ("\xF0\x9F\x98\x80<b>@bob</b>",
++              getMessageText(*makeEntityText("\xF0\x9F\x98\x80@bob", std::move(entities))));
++}
++
++TEST_F(WebosMentionTest, PlainForOtherFrontEnds)
++{
++    setUiName("Pidgin");
++    std::vector<object_ptr<textEntity>> entities;
++    entities.push_back(entityOf(0, 4, make_object<textEntityTypeMention>()));
++    ASSERT_EQ("@ann hi", getMessageText(*makeEntityText("@ann hi", std::move(entities))));
++}
+diff --git a/test/webos-receive-test.cpp b/test/webos-receive-test.cpp
+index 50167cf..b8185fc 100644
+--- a/test/webos-receive-test.cpp
++++ b/test/webos-receive-test.cpp
+@@ -40,6 +40,23 @@ TEST(WebosReceiveTest, PollToken)
+     ASSERT_EQ("{\"name\":\"\xFB\xFF?>\",\"options\":[\"x\"],\"max\":1}", pollJson(token));
+ }
+ 
++// How many chose each option, which the app draws next to it (util/poll.js votesFor)
++TEST(WebosReceiveTest, PollTokenWithVotes)
++{
++    std::vector<int32_t> votes = {2, 0, 1};
++    ASSERT_EQ("{\"name\":\"Which?\",\"options\":[\"A\",\"B\",\"C\"],\"max\":0,\"votes\":[2,0,1]}",
++              pollJson(webos::pollToken("Which?", {"A", "B", "C"}, true, &votes)));
++    votes = {0, 0};
++    ASSERT_EQ("{\"name\":\"Lunch?\",\"options\":[\"Pizza\",\"Soup\"],\"max\":1,\"votes\":[0,0]}",
++              pollJson(webos::pollToken("Lunch?", {"Pizza", "Soup"}, false, &votes)));
++    // No counts is not counts of 0
++    ASSERT_EQ("{\"name\":\"Lunch?\",\"options\":[\"Pizza\",\"Soup\"],\"max\":1}",
++              pollJson(webos::pollToken("Lunch?", {"Pizza", "Soup"}, false, nullptr)));
++    votes = {123456789};
++    ASSERT_EQ("{\"name\":\"\",\"options\":[\"x\"],\"max\":1,\"votes\":[123456789]}",
++              pollJson(webos::pollToken("", {"x"}, false, &votes)));
++}
++
+ TEST(WebosReceiveTest, ContactLabel)
+ {
+     ASSERT_EQ("Isaac Newton", webos::contactLabel("Isaac", "Newton", "4412345"));
+diff --git a/webos-receive.cpp b/webos-receive.cpp
+index 2e4f20f..44e6d5a 100644
+--- a/webos-receive.cpp
++++ b/webos-receive.cpp
+@@ -23,7 +23,7 @@ static void appendJsonString(std::string &out, const std::string &value)
+ }
+ 
+ std::string pollToken(const std::string &question, const std::vector<std::string> &options,
+-                      bool multipleAnswers)
++                      bool multipleAnswers, const std::vector<int32_t> *votes)
+ {
+     std::string json = "{\"name\":";
+     appendJsonString(json, question);
+@@ -35,6 +35,15 @@ std::string pollToken(const std::string &question, const std::vector<std::string
+     }
+     json += "],\"max\":";
+     json += multipleAnswers ? "0" : "1";
++    if (votes) {
++        json += ",\"votes\":[";
++        for (size_t i = 0; i < votes->size(); i++) {
++            if (i)
++                json += ',';
++            json += std::to_string((*votes)[i]);
++        }
++        json += ']';
++    }
+     json += '}';
+ 
+     gchar      *encoded = g_base64_encode(reinterpret_cast<const guchar *>(json.data()), json.size());
+diff --git a/webos-receive.h b/webos-receive.h
+index 96c1b70..9c970d0 100644
+--- a/webos-receive.h
++++ b/webos-receive.h
+@@ -5,6 +5,7 @@
+ // forms purple-combined (WhatsApp) gives them. Nothing in here knows about TDLib or libpurple, so
+ // that the unit tests can call it as it is.
+ 
++#include <cstdint>
+ #include <string>
+ #include <vector>
+ 
+@@ -12,9 +13,10 @@ namespace webos {
+ 
+ // A poll, as the app draws one: "poll:" and the base64url (no padding) of
+ // {"name":<question>,"options":[<text>,...],"max":<n>}, n being 1 where one answer may be picked
+-// and 0 where any number may
++// and 0 where any number may. Given votes, how many chose each option, in the options' order, it
++// has them too, as "votes":[<count>,...], which the app writes next to each option.
+ std::string pollToken(const std::string &question, const std::vector<std::string> &options,
+-                      bool multipleAnswers);
++                      bool multipleAnswers, const std::vector<int32_t> *votes = nullptr);
+ 
+ // A vCard 3.0 for a contact that came without one
+ std::string makeVCard(const std::string &firstName, const std::string &lastName,

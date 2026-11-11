@@ -1,0 +1,1110 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 7 Nov 2026 22:21:27 +0100
+Subject: [PATCH] webOS: edit and delete a received message where it is, and
+ show polls and contact cards as the app does
+
+* Edit and delete a received message where it is
+
+An edit or deletion from elsewhere was told with a notice under the
+conversation ("X edited the message from T: new", "Message from T has
+been deleted"), and only for a message shown in this session. The
+Messaging app keeps every message, so it can show the change on the
+message itself.
+
+An edited text message now emits "webos-im-edit" (account,
+"<chatId>:<messageId>", text as markup), and each permanently deleted
+message emits "webos-im-delete" (account, "<chatId>:<messageId>"),
+whichever session the message came in. imlibpurpleservice finds the
+stored message by that id, as it does for Discord. A text edit needs
+nothing fetched any more and gets no notice; a caption or a replaced
+file is still told with a notice, as before. Deletions no longer get a
+notice. This is for the Messaging app only (isWebosUi()): other
+front-ends are told with the notices as before.
+
+webosServiceMessageId() makes the id in one place; the reply quote, the
+reactions and the outbox id use it too. The test mock keeps the two
+signals for the tests to check.
+
+* Show a received poll and contact card as the Messaging app does
+
+Both came in as "Unsupported message type" with TDLib's description of
+them. The Messaging app has a bubble for each, and purple-combined
+(WhatsApp) already gives them in its forms:
+
+- a poll is a "poll:<base64url JSON>" token, {"name", "options", "max"}
+  with max 1 for one answer and 0 for any number, which the app draws
+  as a list to vote on. A vote from it comes as
+  "webos-im-send-poll-vote" (account, peer, "<chatId>:<messageId>",
+  option texts "\x1f"-joined); the plug-in gets the poll to learn its
+  options' positions and sends setPollAnswer. None chosen takes the vote
+  back. A failure is told in the chat.
+- a contact card is written as contact_<sha256>.vcf next to the files
+  TDLib downloads, its vCard as it came or one made from the name and
+  number, and shown as "file://<path>?name=<name>", which the app offers
+  to import into Contacts. Where it cannot be written the name and
+  number are shown as text.
+
+Locations were already shown with their geo: link.
+
+The forms are in webos-receive.cpp, the vote's option positions in
+webos-send.cpp, with unit tests.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ CMakeLists.txt               |   1 +
+ receiving.cpp                | 111 +++++++++++++++++--
+ receiving.h                  |   2 +
+ td-client.cpp                |  47 +++++++-
+ td-client.h                  |   2 +
+ tdlib-purple.cpp             |  20 ++++
+ test/CMakeLists.txt          |   2 +
+ test/fixture.cpp             |   1 +
+ test/libpurple-mock.cpp      |  37 ++++++-
+ test/libpurple-mock.h        |  14 +++
+ test/test-transceiver.cpp    |   1 +
+ test/webos-commands-test.cpp | 206 +++++++++++++++++++++++++++++++++++
+ test/webos-receive-test.cpp  | 135 +++++++++++++++++++++++
+ webos-receive.cpp            | 119 ++++++++++++++++++++
+ webos-receive.h              |  37 +++++++
+ webos-send.cpp               |  17 +++
+ webos-send.h                 |   6 +
+ 17 files changed, 747 insertions(+), 11 deletions(-)
+ create mode 100644 test/webos-receive-test.cpp
+ create mode 100644 webos-receive.cpp
+ create mode 100644 webos-receive.h
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index dcf848d..395c875 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -105,6 +105,7 @@ add_library(telegram-tdlib SHARED
+     clipboard.cpp
+     thumbnail.cpp
+     webos-send.cpp
++    webos-receive.cpp
+ )
+ 
+ #target_compile_options(telegram-tdlib PRIVATE -Wmissing-declarations)
+diff --git a/receiving.cpp b/receiving.cpp
+index f7ca38a..b8a509d 100644
+--- a/receiving.cpp
++++ b/receiving.cpp
+@@ -10,6 +10,8 @@
+ #include "call.h"
+ #include "pidgin-ui.h"
+ #include "log-history.h"
++#include "td-client.h"
++#include "webos-receive.h"
+ #include <algorithm>
+ #include <cmath>
+ #include <limits>
+@@ -886,7 +888,7 @@ void showMessageText(TdAccountData &account, const td::td_api::chat &chat, const
+     if (message.repliedMessageId.valid()) {
+         extractQuotedMessage(message.repliedMessage.get(), account, quotedName, quotedText);
+         if (isWebosUi())
+-            quotedId = std::to_string(getId(chat).value()) + ":" + std::to_string(message.repliedMessageId.value());
++            quotedId = webosServiceMessageId(getId(chat).value(), message.repliedMessageId.value());
+         else {
+             const td::td_api::message *replied = message.repliedMessage.get();
+             if (text)
+@@ -934,7 +936,7 @@ void showMessageText(TdAccountData &account, const td::td_api::chat &chat, const
+     // Local echoes (sentLocally) are stored by the app's own send path, so we skip them.
+     std::string serviceMessageId;
+     if (isWebosUi() && message.id.valid() && (!message.outgoing || !message.sentLocally))
+-        serviceMessageId = std::to_string(getId(chat).value()) + ":" + std::to_string(message.id.value());
++        serviceMessageId = webosServiceMessageId(getId(chat).value(), message.id.value());
+     const char *svcMsgId = serviceMessageId.empty() ? NULL : serviceMessageId.c_str();
+     const char *qId   = quotedId.empty()   ? NULL : quotedId.c_str();
+     const char *qText = quotedText.empty() ? NULL : quotedText.c_str();
+@@ -980,7 +982,7 @@ void showReactions(TdAccountData &account, int64_t chatId, int64_t messageId,
+     }
+ 
+     // Target key must match the serviceMessageId stashed when the message was shown.
+-    std::string targetId = std::to_string(chatId) + ":" + std::to_string(messageId);
++    std::string targetId = webosServiceMessageId(chatId, messageId);
+     purple_signal_emit(purple_conversations_get_handle(), "webos-im-reaction-set",
+                        account.purpleAccount, targetId.c_str(), serialized.c_str(), (const char *)NULL);
+ }
+@@ -1643,6 +1645,47 @@ private:
+     std::vector<ReactionCount> m_counts;
+ };
+ 
++// webOS: a poll as the Messaging app draws one, a list to vote on (webos-receive.h)
++static void showWebosPoll(const td::td_api::chat &chat, const TgMessageInfo &messageInfo,
++                          const td::td_api::poll &poll, TdAccountData &account)
++{
++    std::vector<std::string> options;
++    for (const auto &option: poll.options_)
++        options.push_back((option && option->text_) ? option->text_->text_ : std::string());
++    std::string token = webos::pollToken(poll.question_ ? poll.question_->text_ : std::string(),
++                                         options, poll.allows_multiple_answers_);
++    showMessageText(account, chat, messageInfo, token.c_str(), NULL);
++}
++
++// Where contact cards are written for the app to open, next to the files TDLib downloads
++static std::string getContactCardDir(PurpleAccount *account)
++{
++    return PurpleTdClient::getFilesDir(purple_account_get_username(account)) + G_DIR_SEPARATOR_S +
++           "webos-contacts";
++}
++
++// webOS: a contact card as a .vcf the app offers to import into Contacts, its vCard as it came, or
++// made from the name and number; where it cannot be written, the name and number as text
++static void showWebosContact(const td::td_api::chat &chat, const TgMessageInfo &messageInfo,
++                             const td::td_api::contact &contact, TdAccountData &account)
++{
++    std::string label = webos::contactLabel(contact.first_name_, contact.last_name_, contact.phone_number_);
++    std::string vcard = !contact.vcard_.empty() ? contact.vcard_ :
++                        webos::makeVCard(contact.first_name_, contact.last_name_, contact.phone_number_);
++    std::string path  = webos::writeVCardFile(getContactCardDir(account.purpleAccount), vcard);
++    std::string text;
++    if (!path.empty())
++        text = escapeForDisplay(webos::contactCardText(path, label));
++    if (text.empty()) {
++        std::string who = label;
++        if (!contact.phone_number_.empty() && (label != contact.phone_number_))
++            who += ", " + contact.phone_number_;
++        // TRANSLATOR: In-chat message. Argument is a name and phone number.
++        text = formatMessage(_("Contact: {}"), escapeForDisplay(who));
++    }
++    showMessageText(account, chat, messageInfo, text.c_str(), NULL);
++}
++
+ void showMessage(const td::td_api::chat &chat, IncomingMessage &fullMessage,
+                 TdTransceiver &transceiver, TdAccountData &account)
+ {
+@@ -1790,6 +1833,22 @@ void showMessage(const td::td_api::chat &chat, IncomingMessage &fullMessage,
+                 showUnsupportedMessage(chat, messageInfo, *message.content_, account);
+             break;
+         }
++        case td::td_api::messagePoll::ID: {
++            const auto &poll = static_cast<const td::td_api::messagePoll &>(*message.content_);
++            if (poll.poll_)
++                showWebosPoll(chat, messageInfo, *poll.poll_, account);
++            else
++                showUnsupportedMessage(chat, messageInfo, *message.content_, account);
++            break;
++        }
++        case td::td_api::messageContact::ID: {
++            const auto &contact = static_cast<const td::td_api::messageContact &>(*message.content_);
++            if (contact.contact_)
++                showWebosContact(chat, messageInfo, *contact.contact_, account);
++            else
++                showUnsupportedMessage(chat, messageInfo, *message.content_, account);
++            break;
++        }
+         default:
+             showUnsupportedMessage(chat, messageInfo, *message.content_, account);
+     }
+@@ -2773,12 +2832,38 @@ static void showPendingEdit(TdAccountData &account, ChatId chatId, MessageId mes
+         requestEditedMessage(account, edit);
+ }
+ 
++std::string webosServiceMessageId(int64_t chatId, int64_t messageId)
++{
++    return std::to_string(chatId) + ":" + std::to_string(messageId);
++}
++
++// webOS: the transport keeps every message it was given, from this session or before, by the
++// serviceMessageId it came with; "webos-im-edit" (account, serviceMessageId, text) has it change
++// that message's text where it is. Only text is: a caption or a replaced file is still told with a
++// notice. Returns whether the edit was given that way.
++static bool emitWebosEdit(TdAccountData &account, ChatId chatId, MessageId messageId,
++                          const td::td_api::MessageContent &content)
++{
++    if (content.get_id() != td::td_api::messageText::ID)
++        return false;
++    const auto &text = static_cast<const td::td_api::messageText &>(content);
++    std::string id      = webosServiceMessageId(chatId.value(), messageId.value());
++    std::string newText = text.text_ ? getMessageText(*text.text_) : std::string();
++    purple_signal_emit(purple_conversations_get_handle(), "webos-im-edit",
++                       account.purpleAccount, id.c_str(), newText.c_str());
++    return true;
++}
++
+ void updateMessageContent(TdAccountData &account, ChatId chatId, MessageId messageId,
+                           td::td_api::object_ptr<td::td_api::MessageContent> content)
+ {
++    if (!content)
++        return;
++    // The Messaging app changes a message where it is; other front-ends are told with a notice
++    bool inPlace = isWebosUi() && emitWebosEdit(account, chatId, messageId, *content);
+     // A message not shown in this session is in no conversation window to be corrected
+     ShownMessage *shownMessage = account.findShownMessage(chatId, messageId);
+-    if (!shownMessage || !content)
++    if (!shownMessage)
+         return;
+ 
+     ShownMessage editedMessage;
+@@ -2820,10 +2905,10 @@ void updateMessageContent(TdAccountData &account, ChatId chatId, MessageId messa
+         {
+             // Text needs nothing fetched for it, so the new can simply take the old one's place
+             message->content_ = std::move(content);
+-        } else
++        } else if (!inPlace)
+             // Requests made for the message are still under way, and would mistake the edit for it
+             account.addPendingEdit(edit);
+-    } else
++    } else if (!inPlace)
+         requestEditedMessage(account, edit);
+ }
+ 
+@@ -2937,7 +3022,16 @@ void deleteMessages(TdAccountData &account, const td::td_api::updateDeleteMessag
+     std::vector<DeletedMessage> deleted;
+ 
+     for (unsigned i = 0; i < update.message_ids_.size(); i++) {
+-        MessageId     messageId    = getMessageId(update, i);
++        MessageId messageId = getMessageId(update, i);
++        // webOS: "webos-im-delete" (account, serviceMessageId) shows the stored message deleted
++        // where it is, whichever session it came in; that takes the place of a notice about it.
++        // Other front-ends are told with a notice, as before.
++        bool webos = isWebosUi();
++        if (webos) {
++            std::string id = webosServiceMessageId(chatId.value(), messageId.value());
++            purple_signal_emit(purple_conversations_get_handle(), "webos-im-delete",
++                               account.purpleAccount, id.c_str());
++        }
+         ShownMessage *shownMessage = account.findShownMessage(chatId, messageId);
+         if (!shownMessage)
+             continue;
+@@ -2957,6 +3051,9 @@ void deleteMessages(TdAccountData &account, const td::td_api::updateDeleteMessag
+                 strikeOutMessage(conv, messageId);
+             else
+                 removeMessage(conv, messageId);
++            // webOS: the app shows it deleted where it is, which takes the place of a notice
++            if (webos)
++                continue;
+             deleted.push_back(std::move(message));
+         }
+     }
+diff --git a/receiving.h b/receiving.h
+index e624a68..5933f3c 100644
+--- a/receiving.h
++++ b/receiving.h
+@@ -14,6 +14,8 @@ std::string getMessageText(const td::td_api::formattedText &text,
+ // Into the image store, which takes the data, under the file's name, for Pidgin to offer when saving it
+ int addImageFile(gchar *data, size_t length, const std::string &filePath);
+ std::string makeInlineImageText(int imgstoreId);
++// webOS: how imlibpurpleservice knows a message, "<chatId>:<messageId>" (message ids are a chat's own)
++std::string webosServiceMessageId(int64_t chatId, int64_t messageId);
+ // How long a message may wait for its picture, preview or quoted message before it is shown
+ // without: longer when catching up with a chat, where keeping messages in order matters more than
+ // showing each at once, but not so long that a message just sent waits behind them for long
+diff --git a/td-client.cpp b/td-client.cpp
+index f8003aa..161f937 100644
+--- a/td-client.cpp
++++ b/td-client.cpp
+@@ -212,7 +212,7 @@ void PurpleTdClient::processUpdate(td::td_api::Object &update)
+         // the transport's OutboxIdHandler attaches it to the row so the user can react to their own msg.
+         if (sendSucceeded.message_ && sendSucceeded.message_->is_outgoing_) {
+             const td::td_api::message &msg = *sendSucceeded.message_;
+-            std::string svcMsgId = std::to_string(msg.chat_id_) + ":" + std::to_string(msg.id_);
++            std::string svcMsgId = webosServiceMessageId(msg.chat_id_, msg.id_);
+             std::string text;
+             if (msg.content_ && msg.content_->get_id() == td::td_api::messageText::ID) {
+                 const auto &mt = static_cast<const td::td_api::messageText &>(*msg.content_);
+@@ -2449,6 +2449,51 @@ bool PurpleTdClient::deleteMessage(int64_t tdlibChatId, int64_t messageId)
+     return true;
+ }
+ 
++bool PurpleTdClient::votePoll(int64_t tdlibChatId, int64_t messageId,
++                              const std::vector<std::string> &optionTexts)
++{
++    const td::td_api::chat *chat = getCommandChat(tdlibChatId, "vote");
++    if (!chat)
++        return false;
++    ChatId chatId = getId(*chat);
++
++    // The vote is by the options' positions, which only the poll itself has
++    auto request = td::td_api::make_object<td::td_api::getMessage>(tdlibChatId, messageId);
++    m_transceiver.sendQuery(std::move(request),
++        [this, chatId, messageId, optionTexts](uint64_t, TdObjectPtr object) {
++            if (!object || (object->get_id() != td::td_api::message::ID)) {
++                // TRANSLATOR: In-chat error message, argument will be a reason (text)
++                commandResponse(chatId, _("Failed to vote: {}"), std::move(object));
++                return;
++            }
++            const auto &message = static_cast<const td::td_api::message &>(*object);
++            if (!message.content_ || (message.content_->get_id() != td::td_api::messagePoll::ID) ||
++                !static_cast<const td::td_api::messagePoll &>(*message.content_).poll_)
++            {
++                purple_debug_warning(config::pluginId, "Cannot vote: message %" G_GINT64_FORMAT
++                                     " is not a poll\n", messageId);
++                return;
++            }
++            std::vector<std::string> options;
++            for (const auto &option: static_cast<const td::td_api::messagePoll &>(*message.content_).poll_->options_)
++                options.push_back((option && option->text_) ? option->text_->text_ : std::string());
++            std::vector<int32_t> optionIds;
++            if (!webos::pollOptionIds(options, optionTexts, optionIds)) {
++                purple_debug_warning(config::pluginId, "Cannot vote in poll %" G_GINT64_FORMAT
++                                     ": an option is not in it\n", messageId);
++                return;
++            }
++            auto vote = td::td_api::make_object<td::td_api::setPollAnswer>(chatId.value(), messageId,
++                                                                         std::move(optionIds));
++            // The poll's tally comes back as updateMessageContent, which shows nothing new
++            m_transceiver.sendQuery(std::move(vote), [this, chatId](uint64_t, TdObjectPtr result) {
++                // TRANSLATOR: In-chat error message, argument will be a reason (text)
++                commandResponse(chatId, _("Failed to vote: {}"), std::move(result));
++            });
++        });
++    return true;
++}
++
+ bool PurpleTdClient::getCommandUsers(const std::vector<std::string> &memberNames, const char *command,
+                                      std::vector<int64_t> &userIds)
+ {
+diff --git a/td-client.h b/td-client.h
+index ce761a9..e59306d 100644
+--- a/td-client.h
++++ b/td-client.h
+@@ -58,6 +58,8 @@ public:
+     bool removeFromGroup(const char *purpleChatName, const std::vector<std::string> &memberNames);
+     // Leave the group chat of this purple name, keeping what it holds
+     bool leaveGroupChat(const char *purpleChatName);
++    // Vote in a poll for these options, by their text; none takes the vote back
++    bool votePoll(int64_t chatId, int64_t messageId, const std::vector<std::string> &optionTexts);
+     void sendTyping(const char *buddyName, bool isTyping);
+     void sendReadReceipts(PurpleConversation *conversation);
+     // Fills a tab just opened with the chat's latest messages, as set; false if it is to be tried
+diff --git a/tdlib-purple.cpp b/tdlib-purple.cpp
+index fff80b9..fd91d3b 100644
+--- a/tdlib-purple.cpp
++++ b/tdlib-purple.cpp
+@@ -591,6 +591,24 @@ static gboolean tgprpl_group_leave_cb(PurpleAccount *account, const char *chat,
+     return tdClient->leaveGroupChat(chat) ? TRUE : FALSE;
+ }
+ 
++// webOS: vote in a poll, by its serviceMessageId; optionsJoined is the whole choice, the options'
++// texts "\x1f"-joined, "" to take the vote back. A void signal: every plug-in sees it, for each
++// account, and the Telegram ones take it.
++static void tgprpl_send_poll_vote_cb(PurpleAccount *account, const char * /*peer*/, const char *pollMessageId,
++                                     const char *optionsJoined, void * /*data*/)
++{
++    PurpleTdClient *tdClient = getWebosCommandClient(account);
++    if (!tdClient)
++        return;
++    int64_t chatId, messageId;
++    if (!webos::parseServiceMessageId(pollMessageId, chatId, messageId)) {
++        purple_debug_warning(config::pluginId, "Cannot vote in '%s': not a message id\n",
++                             pollMessageId ? pollMessageId : "");
++        return;
++    }
++    tdClient->votePoll(chatId, messageId, webos::splitMembers(optionsJoined));
++}
++
+ // Connects, once for the whole process, the signals of the webOS transport, which registers them
+ // at init, before any account logs in. The callbacks pick out the Telegram accounts.
+ static void connectWebosSignals()
+@@ -614,6 +632,8 @@ static void connectWebosSignals()
+                           PURPLE_CALLBACK(tgprpl_group_remove_cb), NULL);
+     purple_signal_connect(conversations, "webos-im-group-leave", purple_get_core(),
+                           PURPLE_CALLBACK(tgprpl_group_leave_cb), NULL);
++    purple_signal_connect(conversations, "webos-im-send-poll-vote", purple_get_core(),
++                          PURPLE_CALLBACK(tgprpl_send_poll_vote_cb), NULL);
+ }
+ 
+ static void tgprpl_login (PurpleAccount *acct)
+diff --git a/test/CMakeLists.txt b/test/CMakeLists.txt
+index c9c2bb0..225c806 100644
+--- a/test/CMakeLists.txt
++++ b/test/CMakeLists.txt
+@@ -27,6 +27,7 @@ add_executable(tests EXCLUDE_FROM_ALL
+     formatted-text-test.cpp
+     call-protocol-test.cpp
+     webos-commands-test.cpp
++    webos-receive-test.cpp
+     test-transceiver.cpp
+     libpurple-mock.cpp
+     printout.cpp
+@@ -56,6 +57,7 @@ add_executable(tests EXCLUDE_FROM_ALL
+     ../clipboard.cpp
+     ../thumbnail.cpp
+     ../webos-send.cpp
++    ../webos-receive.cpp
+ )
+ 
+ # C++17, not the plugin's C++14: GoogleTest requires it from 1.17 on.
+diff --git a/test/fixture.cpp b/test/fixture.cpp
+index fba15a9..0ffc435 100644
+--- a/test/fixture.cpp
++++ b/test/fixture.cpp
+@@ -20,6 +20,7 @@ void CommTest::SetUp()
+     setCustomSmileys(false);
+     setRequestInputSupported(true);
+     clearConversationData();
++    takeWebosSignals();
+     gdkPixbufGetFileInfoName = "gdk_pixbuf_get_file_info";
+     setMessageLinksEnabled(false);
+     setJumpLinksEnabled(false);
+diff --git a/test/libpurple-mock.cpp b/test/libpurple-mock.cpp
+index 91657a4..6e091ff 100644
+--- a/test/libpurple-mock.cpp
++++ b/test/libpurple-mock.cpp
+@@ -4,6 +4,7 @@
+ #include <langinfo.h>
+ #include <locale.h>
+ #include <stdarg.h>
++#include <string.h>
+ #include <algorithm>
+ #include <vector>
+ #include <map>
+@@ -1949,10 +1950,40 @@ void purple_signal_disconnect(void *instance, const char *signal,
+ {
+ }
+ 
+-// The webOS signals (webos-im-outbox-id, webos-im-receipt-hwm, webos-im-send-reaction) go to
+-// imlibpurpleservice; nothing listens to them here.
+-void purple_signal_emit(void *, const char *, ...)
++// The webOS signals go to imlibpurpleservice; the ones tests look at are kept for them
++// (This file is extern "C" for libpurple; these are the tests' own.)
++extern "C++" {
++static std::vector<WebosSignal> g_webosSignals;
++
++std::vector<WebosSignal> takeWebosSignals()
++{
++    std::vector<WebosSignal> result;
++    result.swap(g_webosSignals);
++    return result;
++}
++}
++
++void purple_signal_emit(void *, const char *signal, ...)
+ {
++    unsigned nStrings;
++    if (!strcmp(signal, "webos-im-edit"))
++        nStrings = 2;
++    else if (!strcmp(signal, "webos-im-delete"))
++        nStrings = 1;
++    else
++        return;
++
++    WebosSignal emitted;
++    emitted.name = signal;
++    va_list args;
++    va_start(args, signal);
++    emitted.account = va_arg(args, PurpleAccount *);
++    for (unsigned i = 0; i < nStrings; i++) {
++        const char *arg = va_arg(args, const char *);
++        emitted.args.push_back(arg ? arg : "(null)");
++    }
++    va_end(args);
++    g_webosSignals.push_back(std::move(emitted));
+ }
+ 
+ void *purple_accounts_get_handle()
+diff --git a/test/libpurple-mock.h b/test/libpurple-mock.h
+index 91bbb36..08e5a73 100644
+--- a/test/libpurple-mock.h
++++ b/test/libpurple-mock.h
+@@ -32,6 +32,20 @@ void clearConversationData();
+ // plug-in makes some only once.
+ PurpleCallback getConnectedSignal(const char *signal);
+ 
++// The webOS signals the plug-in gives imlibpurpleservice that tests look at: "webos-im-edit"
++// (account, serviceMessageId, text) and "webos-im-delete" (account, serviceMessageId)
++struct WebosSignal {
++    std::string              name;
++    PurpleAccount           *account;
++    std::vector<std::string> args;
++    bool operator==(const WebosSignal &other) const
++    {
++        return (name == other.name) && (account == other.account) && (args == other.args);
++    }
++};
++// Those emitted since the last call, which forgets them
++std::vector<WebosSignal> takeWebosSignals();
++
+ using RoomlistData = std::vector<std::pair<PurpleRoomlistFieldType, std::string>>;
+ 
+ #if !GLIB_CHECK_VERSION(2, 34, 0)
+diff --git a/test/test-transceiver.cpp b/test/test-transceiver.cpp
+index 426ef92..228b62d 100644
+--- a/test/test-transceiver.cpp
++++ b/test/test-transceiver.cpp
+@@ -817,6 +817,7 @@ static void compareRequests(const Function &actual, const Function &expected,
+         // As above: compared in full
+         case createNewBasicGroupChat::ID:
+         case addChatMembers::ID:
++        case setPollAnswer::ID:
+         case discardCall::ID:
+             ASSERT_EQ(to_string(expected), to_string(actual));
+             break;
+diff --git a/test/webos-commands-test.cpp b/test/webos-commands-test.cpp
+index b7fa5f0..4333da9 100644
+--- a/test/webos-commands-test.cpp
++++ b/test/webos-commands-test.cpp
+@@ -4,6 +4,7 @@
+ #include "libpurple-mock.h"
+ #include "config.h"
+ #include "webos-send.h"
++#include "webos-receive.h"
+ #include "purple-info.h"
+ #include <cstring>
+ 
+@@ -907,3 +908,208 @@ TEST_F(WebosCommandTest, SendMentionInPrivateChat)
+     ));
+     purple_conversation_set_data(conv, "webos-send-mentions", nullptr);
+ }
++
++// What the transport is told of an edit or deletion from elsewhere: that message, changed where it is
++static WebosSignal webosEdit(PurpleAccount *account, const std::string &id, const std::string &text)
++{
++    return WebosSignal{"webos-im-edit", account, {id, text}};
++}
++
++static WebosSignal webosDelete(PurpleAccount *account, const std::string &id)
++{
++    return WebosSignal{"webos-im-delete", account, {id}};
++}
++
++TEST_F(WebosCommandTest, ReceivedEditAndDeleteInPlace)
++{
++    login();
++    tgl.update(make_object<updateNewMessage>(makeMessage(
++        1, userIds[0], chatIds[0], false, 10001, makeTextMessage("old")
++    )));
++    prpl.verifyEvents(NewConversationEvent(PURPLE_CONV_TYPE_IM, account, purpleUserName(0)),
++                      ServGotImEvent(connection, purpleUserName(0), "old", PURPLE_MESSAGE_RECV, 10001));
++    tgl.verifyRequest(viewMessages(chatIds[0], {1}, nullptr, true));
++
++    // Text needs nothing fetched, and the message is changed where it is, with no notice under it
++    tgl.update(makeUpdateMessageContent(chatIds[0], 1, makeTextMessage("1<2 new")));
++    ASSERT_EQ(std::vector<WebosSignal>({webosEdit(account, serviceMessageId(chatIds[0], 1), "1&lt;2 new")}),
++              takeWebosSignals());
++    tgl.verifyNoRequests();
++    prpl.verifyNoEvents();
++
++    tgl.update(makeUpdateDeleteMessages(chatIds[0], 1, true, false));
++    ASSERT_EQ(std::vector<WebosSignal>({webosDelete(account, serviceMessageId(chatIds[0], 1))}),
++              takeWebosSignals());
++    prpl.verifyNoEvents();
++
++    // Gone from this session too: an edit coming late is still passed on, for the transport to drop
++    tgl.update(makeUpdateMessageContent(chatIds[0], 1, makeTextMessage("newer")));
++    ASSERT_EQ(std::vector<WebosSignal>({webosEdit(account, serviceMessageId(chatIds[0], 1), "newer")}),
++              takeWebosSignals());
++    tgl.verifyNoRequests();
++    prpl.verifyNoEvents();
++}
++
++TEST_F(WebosCommandTest, ReceivedEditOfEarlierSession)
++{
++    login();
++    // Not shown in this session, but the transport has it from before
++    tgl.update(makeUpdateMessageContent(chatIds[0], 42, makeTextMessage("new")));
++    ASSERT_EQ(std::vector<WebosSignal>({webosEdit(account, serviceMessageId(chatIds[0], 42), "new")}),
++              takeWebosSignals());
++    tgl.update(make_object<updateDeleteMessages>(chatIds[0], std::vector<int64_t>({42, 43}), true, false));
++    ASSERT_EQ(std::vector<WebosSignal>({webosDelete(account, serviceMessageId(chatIds[0], 42)),
++                                        webosDelete(account, serviceMessageId(chatIds[0], 43))}),
++              takeWebosSignals());
++    tgl.verifyNoRequests();
++    prpl.verifyNoEvents();
++}
++
++TEST_F(WebosCommandTest, ReceivedNotTextOrNotDeleted)
++{
++    login();
++    // Only text is changed in place
++    std::vector<object_ptr<photoSize>> sizes;
++    sizes.push_back(makePhotoSize(makeFile(1234, 10000, "/path", "bleh"), 640, 480));
++    tgl.update(makeUpdateMessageContent(chatIds[0], 42, makeMessagePhoto(
++        makePhotoWithSizes(std::move(sizes)), makeFormattedText("caption"), false, false, false)));
++    ASSERT_EQ(std::vector<WebosSignal>(), takeWebosSignals());
++    tgl.update(make_object<updateMessageContent>(chatIds[0], 42, nullptr));
++    ASSERT_EQ(std::vector<WebosSignal>(), takeWebosSignals());
++
++    // Dropped from TDLib's cache is not deleted
++    tgl.update(makeUpdateDeleteMessages(chatIds[0], 42, false, false));
++    tgl.update(makeUpdateDeleteMessages(chatIds[0], 42, true, true));
++    ASSERT_EQ(std::vector<WebosSignal>(), takeWebosSignals());
++    tgl.verifyNoRequests();
++    prpl.verifyNoEvents();
++}
++
++// A poll and a contact card are shown as the app draws them (webos-receive-test.cpp has the forms)
++TEST_F(WebosCommandTest, ReceivedPoll)
++{
++    login();
++    auto poll = make_object<td::td_api::poll>();
++    poll->question_ = makeFormattedText("Lunch?");
++    for (const char *text: {"Pizza", "Soup"}) {
++        auto option   = make_object<pollOption>();
++        option->text_ = makeFormattedText(text);
++        poll->options_.push_back(std::move(option));
++    }
++    poll->allows_multiple_answers_ = true;
++    auto content   = make_object<messagePoll>();
++    content->poll_ = std::move(poll);
++
++    tgl.update(make_object<updateNewMessage>(makeMessage(1, userIds[0], chatIds[0], false, 10001,
++                                                         std::move(content))));
++    prpl.verifyEvents(NewConversationEvent(PURPLE_CONV_TYPE_IM, account, purpleUserName(0)),
++                      ServGotImEvent(connection, purpleUserName(0),
++                                     webos::pollToken("Lunch?", {"Pizza", "Soup"}, true),
++                                     PURPLE_MESSAGE_RECV, 10001));
++    tgl.verifyRequest(viewMessages(chatIds[0], {1}, nullptr, true));
++}
++
++TEST_F(WebosCommandTest, ReceivedContactNowhereToWrite)
++{
++    login();
++    // The test runs where the plug-in's files directory, under /media/cryptofs, cannot be made
++    if (g_file_test("/media/cryptofs", G_FILE_TEST_EXISTS))
++        GTEST_SKIP() << "/media/cryptofs is there";
++    auto content = make_object<messageContact>();
++    content->contact_ = make_object<contact>("4412345", "Isaac", "Newton", "", userIds[1]);
++    tgl.update(make_object<updateNewMessage>(makeMessage(1, userIds[0], chatIds[0], false, 10001,
++                                                         std::move(content))));
++    prpl.verifyEvents(NewConversationEvent(PURPLE_CONV_TYPE_IM, account, purpleUserName(0)),
++                      ServGotImEvent(connection, purpleUserName(0), "Contact: Isaac Newton, 4412345",
++                                     PURPLE_MESSAGE_RECV, 10001));
++    tgl.verifyRequest(viewMessages(chatIds[0], {1}, nullptr, true));
++}
++
++using PollVoteCallback = void (*)(PurpleAccount *, const char *, const char *, const char *, void *);
++
++// The poll message 5 in the private chat, as getMessage gives it
++static object_ptr<message> makePollMessage(int64_t chatId, int64_t userId)
++{
++    auto poll = make_object<td::td_api::poll>();
++    poll->question_ = makeFormattedText("Lunch?");
++    for (const char *text: {"Pizza", "Soup", "Pasta"}) {
++        auto option   = make_object<pollOption>();
++        option->text_ = makeFormattedText(text);
++        poll->options_.push_back(std::move(option));
++    }
++    poll->allows_multiple_answers_ = true;
++    auto content   = make_object<messagePoll>();
++    content->poll_ = std::move(poll);
++    return makeMessage(5, userId, chatId, false, 10001, std::move(content));
++}
++
++TEST_F(WebosCommandTest, VotePoll)
++{
++    login();
++    auto vote = reinterpret_cast<PollVoteCallback>(getConnectedSignal("webos-im-send-poll-vote"));
++    ASSERT_NE(nullptr, vote);
++    std::string id = serviceMessageId(chatIds[0], 5);
++
++    vote(account, purpleUserName(0).c_str(), id.c_str(), "Pasta\x1fPizza", nullptr);
++    tgl.verifyRequest(getMessage(chatIds[0], 5));
++    tgl.reply(makePollMessage(chatIds[0], userIds[0]));
++    tgl.verifyRequest(setPollAnswer(chatIds[0], 5, {0, 2}));
++    tgl.reply(make_object<ok>());
++    prpl.verifyNoEvents();
++
++    // None: the vote taken back
++    vote(account, purpleUserName(0).c_str(), id.c_str(), "", nullptr);
++    tgl.verifyRequest(getMessage(chatIds[0], 5));
++    tgl.reply(makePollMessage(chatIds[0], userIds[0]));
++    tgl.verifyRequest(setPollAnswer(chatIds[0], 5, {}));
++    tgl.reply(make_object<error>(400, "Poll is closed"));
++    prpl.verifyEvents(
++        NewConversationEvent(PURPLE_CONV_TYPE_IM, account, purpleUserName(0)),
++        ConversationWriteEvent(purpleUserName(0), purpleUserName(0),
++                               "Failed to vote: code 400 (Poll is closed)", PURPLE_MESSAGE_SYSTEM, 0)
++    );
++}
++
++TEST_F(WebosCommandTest, VotePollNotSent)
++{
++    login();
++    auto vote = reinterpret_cast<PollVoteCallback>(getConnectedSignal("webos-im-send-poll-vote"));
++    ASSERT_NE(nullptr, vote);
++    std::string id = serviceMessageId(chatIds[0], 5);
++
++    // Not ours, not a message id, not a chat we know
++    vote(otherAccount(), "buddy", id.c_str(), "Soup", nullptr);
++    vote(nullptr, "buddy", id.c_str(), "Soup", nullptr);
++    setProtocol("prpl-jabber");
++    vote(account, purpleUserName(0).c_str(), id.c_str(), "Soup", nullptr);
++    setProtocol(config::pluginId);
++    vote(account, purpleUserName(0).c_str(), "5", "Soup", nullptr);
++    vote(account, purpleUserName(0).c_str(), nullptr, "Soup", nullptr);
++    std::string unknownChat = serviceMessageId(chatIds[1], 5);
++    vote(account, purpleUserName(0).c_str(), unknownChat.c_str(), "Soup", nullptr);
++    tgl.verifyNoRequests();
++
++    // An option the poll has not
++    vote(account, purpleUserName(0).c_str(), id.c_str(), "Soup\x1fSalad", nullptr);
++    tgl.verifyRequest(getMessage(chatIds[0], 5));
++    tgl.reply(makePollMessage(chatIds[0], userIds[0]));
++    tgl.verifyNoRequests();
++
++    // Not a poll
++    vote(account, purpleUserName(0).c_str(), id.c_str(), "Soup", nullptr);
++    tgl.verifyRequest(getMessage(chatIds[0], 5));
++    tgl.reply(makeMessage(5, userIds[0], chatIds[0], false, 10001, makeTextMessage("Soup")));
++    tgl.verifyNoRequests();
++    prpl.verifyNoEvents();
++
++    // The poll is not to be had
++    vote(account, purpleUserName(0).c_str(), id.c_str(), "Soup", nullptr);
++    tgl.verifyRequest(getMessage(chatIds[0], 5));
++    tgl.reply(make_object<error>(404, "Not Found"));
++    tgl.verifyNoRequests();
++    prpl.verifyEvents(
++        NewConversationEvent(PURPLE_CONV_TYPE_IM, account, purpleUserName(0)),
++        ConversationWriteEvent(purpleUserName(0), purpleUserName(0),
++                               "Failed to vote: code 404 (Not Found)", PURPLE_MESSAGE_SYSTEM, 0)
++    );
++}
+diff --git a/test/webos-receive-test.cpp b/test/webos-receive-test.cpp
+new file mode 100644
+index 0000000..50167cf
+--- /dev/null
++++ b/test/webos-receive-test.cpp
+@@ -0,0 +1,135 @@
++// What the webOS Messaging app is given for a poll or a contact card (webos-receive.h)
++#include "webos-receive.h"
++#include "webos-send.h"
++#include <gtest/gtest.h>
++#include <glib.h>
++#include <glib/gstdio.h>
++
++// The JSON in a poll token, as the app's buildPollBlock decodes it
++static std::string pollJson(const std::string &token)
++{
++    if (token.compare(0, 5, "poll:") != 0)
++        return "not a poll token: " + token;
++    std::string b64 = token.substr(5);
++    if (b64.find_first_of("+/=") != std::string::npos)
++        return "not base64url: " + token;
++    for (char &c: b64)
++        c = (c == '-') ? '+' : (c == '_') ? '/' : c;
++    while (b64.size() % 4)
++        b64 += '=';
++    gsize   length;
++    guchar *data = g_base64_decode(b64.c_str(), &length);
++    std::string json(reinterpret_cast<char *>(data), length);
++    g_free(data);
++    return json;
++}
++
++TEST(WebosReceiveTest, PollToken)
++{
++    ASSERT_EQ("{\"name\":\"Lunch?\",\"options\":[\"Pizza\",\"Soup\"],\"max\":1}",
++              pollJson(webos::pollToken("Lunch?", {"Pizza", "Soup"}, false)));
++    ASSERT_EQ("{\"name\":\"Which?\",\"options\":[\"A\",\"B\",\"C\"],\"max\":0}",
++              pollJson(webos::pollToken("Which?", {"A", "B", "C"}, true)));
++    // Escaped as JSON, and UTF-8 as it is
++    ASSERT_EQ("{\"name\":\"Say \\\"hi\\\" \\\\ \\u000a\",\"options\":[\"\xF0\x9F\x8D\x95\",\"\"],\"max\":1}",
++              pollJson(webos::pollToken("Say \"hi\" \\ \n", {"\xF0\x9F\x8D\x95", ""}, false)));
++    ASSERT_EQ("{\"name\":\"\",\"options\":[],\"max\":1}", pollJson(webos::pollToken("", {}, false)));
++    // Bytes that come out as "+" and "/" in base64, and padding there would be
++    std::string token = webos::pollToken("\xFB\xFF?>", {"x"}, false);
++    ASSERT_EQ(std::string::npos, token.find_first_of("+/=", 5)) << token;
++    ASSERT_EQ("{\"name\":\"\xFB\xFF?>\",\"options\":[\"x\"],\"max\":1}", pollJson(token));
++}
++
++TEST(WebosReceiveTest, ContactLabel)
++{
++    ASSERT_EQ("Isaac Newton", webos::contactLabel("Isaac", "Newton", "4412345"));
++    ASSERT_EQ("Isaac", webos::contactLabel("Isaac", "", "4412345"));
++    ASSERT_EQ("Newton", webos::contactLabel("", "Newton", "4412345"));
++    ASSERT_EQ("4412345", webos::contactLabel("", "", "4412345"));
++    ASSERT_EQ("", webos::contactLabel("", "", ""));
++}
++
++TEST(WebosReceiveTest, MakeVCard)
++{
++    ASSERT_EQ("BEGIN:VCARD\r\nVERSION:3.0\r\nN:Newton;Isaac;;;\r\nFN:Isaac Newton\r\n"
++              "TEL;TYPE=CELL:+4412345\r\nEND:VCARD\r\n",
++              webos::makeVCard("Isaac", "Newton", "4412345"));
++    // A number given with its "+" keeps the one; vCard's own characters are escaped
++    ASSERT_EQ("BEGIN:VCARD\r\nVERSION:3.0\r\nN:;A\\,B\\;C\\\\;;;\r\nFN:A\\,B\\;C\\\\\r\n"
++              "TEL;TYPE=CELL:+31 6\r\nEND:VCARD\r\n",
++              webos::makeVCard("A,B;C\\", "", "+31 6"));
++    // No name: the number names it; no number: no TEL
++    ASSERT_EQ("BEGIN:VCARD\r\nVERSION:3.0\r\nN:;;;;\r\nFN:+4412345\r\nTEL;TYPE=CELL:+4412345\r\nEND:VCARD\r\n",
++              webos::makeVCard("", "", "4412345"));
++    ASSERT_EQ("BEGIN:VCARD\r\nVERSION:3.0\r\nN:;Line\\nbreak;;;\r\nFN:Line\\nbreak\r\nEND:VCARD\r\n",
++              webos::makeVCard("Line\r\nbreak", "", ""));
++}
++
++TEST(WebosReceiveTest, WriteVCardFile)
++{
++    gchar *tmp = g_dir_make_tmp("webos-receive-XXXXXX", NULL);
++    ASSERT_NE(nullptr, tmp);
++    std::string dir = std::string(tmp) + "/made/here";
++    std::string card = webos::makeVCard("Isaac", "Newton", "4412345");
++
++    std::string path = webos::writeVCardFile(dir, card);
++    ASSERT_EQ(0u, path.find(dir + "/contact_")) << path;
++    ASSERT_EQ(dir.size() + strlen("/contact_") + 32 + strlen(".vcf"), path.size()) << path;
++    ASSERT_EQ(".vcf", path.substr(path.size() - 4));
++    gchar *written = NULL;
++    gsize  length  = 0;
++    ASSERT_TRUE(g_file_get_contents(path.c_str(), &written, &length, NULL));
++    ASSERT_EQ(card, std::string(written, length));
++    g_free(written);
++
++    // The same card is the same file; another is another
++    ASSERT_EQ(path, webos::writeVCardFile(dir, card));
++    std::string other = webos::writeVCardFile(dir, webos::makeVCard("Galileo", "", ""));
++    ASSERT_NE("", other);
++    ASSERT_NE(path, other);
++
++    // Nothing to write, or nowhere to
++    ASSERT_EQ("", webos::writeVCardFile(dir, ""));
++    ASSERT_EQ("", webos::writeVCardFile("", card));
++    std::string file = std::string(tmp) + "/file";
++    ASSERT_TRUE(g_file_set_contents(file.c_str(), "x", 1, NULL));
++    ASSERT_EQ("", webos::writeVCardFile(file + "/below", card));
++
++    g_unlink(path.c_str());
++    g_unlink(other.c_str());
++    g_unlink(file.c_str());
++    g_rmdir(dir.c_str());
++    g_rmdir((std::string(tmp) + "/made").c_str());
++    g_rmdir(tmp);
++    g_free(tmp);
++}
++
++TEST(WebosReceiveTest, ContactCardText)
++{
++    ASSERT_EQ("file:///media/x/contact_ab.vcf?name=Isaac%20Newton",
++              webos::contactCardText("/media/x/contact_ab.vcf", "Isaac Newton"));
++    ASSERT_EQ("file:///media/x/contact_ab.vcf?name=A%26B%3F%3D%2B%E2%82%AC",
++              webos::contactCardText("/media/x/contact_ab.vcf", "A&B?=+\xE2\x82\xAC"));
++    ASSERT_EQ("file:///media/x/contact_ab.vcf", webos::contactCardText("/media/x/contact_ab.vcf", ""));
++    // Not a path
++    ASSERT_EQ("", webos::contactCardText("relative.vcf", "Isaac"));
++}
++
++TEST(WebosReceiveTest, PollOptionIds)
++{
++    const std::vector<std::string> options = {"Pizza", "Soup", "Pasta"};
++    std::vector<int32_t> ids = {9};
++    // In the poll's order, each once
++    ASSERT_TRUE(webos::pollOptionIds(options, {"Pasta", "Pizza", "Pasta"}, ids));
++    ASSERT_EQ(std::vector<int32_t>({0, 2}), ids);
++    ASSERT_TRUE(webos::pollOptionIds(options, {"Soup"}, ids));
++    ASSERT_EQ(std::vector<int32_t>({1}), ids);
++    ASSERT_TRUE(webos::pollOptionIds(options, {}, ids));
++    ASSERT_EQ(std::vector<int32_t>(), ids);
++
++    // Not an option: nothing chosen at all
++    ids = {9};
++    ASSERT_FALSE(webos::pollOptionIds(options, {"Soup", "Salad"}, ids));
++    ASSERT_FALSE(webos::pollOptionIds(options, {"soup"}, ids));
++    ASSERT_FALSE(webos::pollOptionIds({}, {"Soup"}, ids));
++}
+diff --git a/webos-receive.cpp b/webos-receive.cpp
+new file mode 100644
+index 0000000..2e4f20f
+--- /dev/null
++++ b/webos-receive.cpp
+@@ -0,0 +1,119 @@
++#include "webos-receive.h"
++#include <glib.h>
++#include <glib/gstdio.h>
++#include <cstdio>
++
++namespace webos {
++
++static void appendJsonString(std::string &out, const std::string &value)
++{
++    out += '"';
++    for (unsigned char c: value) {
++        if ((c == '"') || (c == '\\')) {
++            out += '\\';
++            out += static_cast<char>(c);
++        } else if (c < 0x20) {
++            char escaped[8];
++            snprintf(escaped, sizeof(escaped), "\\u%04x", c);
++            out += escaped;
++        } else
++            out += static_cast<char>(c);
++    }
++    out += '"';
++}
++
++std::string pollToken(const std::string &question, const std::vector<std::string> &options,
++                      bool multipleAnswers)
++{
++    std::string json = "{\"name\":";
++    appendJsonString(json, question);
++    json += ",\"options\":[";
++    for (size_t i = 0; i < options.size(); i++) {
++        if (i)
++            json += ',';
++        appendJsonString(json, options[i]);
++    }
++    json += "],\"max\":";
++    json += multipleAnswers ? "0" : "1";
++    json += '}';
++
++    gchar      *encoded = g_base64_encode(reinterpret_cast<const guchar *>(json.data()), json.size());
++    std::string token   = "poll:";
++    for (const gchar *c = encoded; *c && (*c != '='); c++)
++        token += (*c == '+') ? '-' : (*c == '/') ? '_' : *c;
++    g_free(encoded);
++    return token;
++}
++
++// A vCard text value: backslash, comma and semicolon are escaped, a line break is written "\n"
++static std::string vCardText(const std::string &value)
++{
++    std::string result;
++    for (char c: value) {
++        if ((c == '\\') || (c == ',') || (c == ';')) {
++            result += '\\';
++            result += c;
++        } else if (c == '\n')
++            result += "\\n";
++        else if (c != '\r')
++            result += c;
++    }
++    return result;
++}
++
++std::string makeVCard(const std::string &firstName, const std::string &lastName,
++                      const std::string &phoneNumber)
++{
++    // TDLib gives the number without its "+"
++    std::string number = phoneNumber;
++    if (!number.empty() && g_ascii_isdigit(number[0]))
++        number = "+" + number;
++    std::string fullName = contactLabel(firstName, lastName, number);
++    std::string card = "BEGIN:VCARD\r\nVERSION:3.0\r\n";
++    card += "N:" + vCardText(lastName) + ";" + vCardText(firstName) + ";;;\r\n";
++    card += "FN:" + vCardText(fullName) + "\r\n";
++    if (!number.empty())
++        card += "TEL;TYPE=CELL:" + vCardText(number) + "\r\n";
++    card += "END:VCARD\r\n";
++    return card;
++}
++
++std::string contactLabel(const std::string &firstName, const std::string &lastName,
++                         const std::string &phoneNumber)
++{
++    std::string name = firstName;
++    if (!lastName.empty())
++        name += (name.empty() ? "" : " ") + lastName;
++    return name.empty() ? phoneNumber : name;
++}
++
++std::string writeVCardFile(const std::string &dir, const std::string &vcard)
++{
++    if (dir.empty() || vcard.empty() || (g_mkdir_with_parents(dir.c_str(), 0755) != 0))
++        return std::string();
++    gchar      *sum  = g_compute_checksum_for_string(G_CHECKSUM_SHA256, vcard.c_str(), vcard.size());
++    std::string name = "contact_" + std::string(sum, 32) + ".vcf";
++    g_free(sum);
++    std::string path = dir + G_DIR_SEPARATOR_S + name;
++    if (!g_file_set_contents(path.c_str(), vcard.data(), vcard.size(), NULL))
++        return std::string();
++    return path;
++}
++
++std::string contactCardText(const std::string &path, const std::string &label)
++{
++    gchar *uri = g_filename_to_uri(path.c_str(), NULL, NULL);
++    if (!uri)
++        return std::string();
++    std::string text = uri;
++    g_free(uri);
++    if (!label.empty()) {
++        gchar *escaped = g_uri_escape_string(label.c_str(), NULL, FALSE);
++        text += "?name=";
++        text += escaped;
++        g_free(escaped);
++    }
++    return text;
++}
++
++} // namespace webos
+diff --git a/webos-receive.h b/webos-receive.h
+new file mode 100644
+index 0000000..96c1b70
+--- /dev/null
++++ b/webos-receive.h
+@@ -0,0 +1,37 @@
++#ifndef _WEBOS_RECEIVE_H
++#define _WEBOS_RECEIVE_H
++
++// What the webOS Messaging app is given for a message it has no bubble of its own for, in the
++// forms purple-combined (WhatsApp) gives them. Nothing in here knows about TDLib or libpurple, so
++// that the unit tests can call it as it is.
++
++#include <string>
++#include <vector>
++
++namespace webos {
++
++// A poll, as the app draws one: "poll:" and the base64url (no padding) of
++// {"name":<question>,"options":[<text>,...],"max":<n>}, n being 1 where one answer may be picked
++// and 0 where any number may
++std::string pollToken(const std::string &question, const std::vector<std::string> &options,
++                      bool multipleAnswers);
++
++// A vCard 3.0 for a contact that came without one
++std::string makeVCard(const std::string &firstName, const std::string &lastName,
++                      const std::string &phoneNumber);
++
++// Who a contact card is of, by name, else by number; empty if neither is given
++std::string contactLabel(const std::string &firstName, const std::string &lastName,
++                         const std::string &phoneNumber);
++
++// Writes a vCard into dir (made if missing) as contact_<hash of it>.vcf, so the same card is one
++// file however often it comes. Returns its path, or "" if it could not be written.
++std::string writeVCardFile(const std::string &dir, const std::string &vcard);
++
++// The text the app shows a contact card chip for, which opens the Contacts import:
++// "file://<path>?name=<label, percent-encoded>", the name left off when there is none
++std::string contactCardText(const std::string &path, const std::string &label);
++
++} // namespace webos
++
++#endif
+diff --git a/webos-send.cpp b/webos-send.cpp
+index fe5234f..f28595a 100644
+--- a/webos-send.cpp
++++ b/webos-send.cpp
+@@ -56,6 +56,23 @@ std::vector<std::string> splitMembers(const char *membersJoined)
+     return members;
+ }
+ 
++bool pollOptionIds(const std::vector<std::string> &options, const std::vector<std::string> &chosen,
++                   std::vector<int32_t> &optionIds)
++{
++    std::vector<bool> picked(options.size(), false);
++    for (const std::string &text: chosen) {
++        auto it = std::find(options.begin(), options.end(), text);
++        if (it == options.end())
++            return false;
++        picked[it - options.begin()] = true;
++    }
++    optionIds.clear();
++    for (size_t i = 0; i < picked.size(); i++)
++        if (picked[i])
++            optionIds.push_back(static_cast<int32_t>(i));
++    return true;
++}
++
+ // A whole number in C's form, whatever the locale's decimal point
+ static bool parseDegrees(const std::string &text, double limit, double &value)
+ {
+diff --git a/webos-send.h b/webos-send.h
+index 032d995..644b706 100644
+--- a/webos-send.h
++++ b/webos-send.h
+@@ -23,6 +23,12 @@ bool parseServiceMessageId(const char *serviceMessageId, int64_t &chatId, int64_
+ // buddy name, in order, without empty ones
+ std::vector<std::string> splitMembers(const char *membersJoined);
+ 
++// A poll vote, "webos-im-send-poll-vote": the options chosen, by their text, as positions among the
++// poll's options, each once and in the poll's order. False if one of them is not an option.
++// None chosen takes the vote back.
++bool pollOptionIds(const std::vector<std::string> &options, const std::vector<std::string> &chosen,
++                   std::vector<int32_t> &optionIds);
++
+ // What imlibpurpleservice puts with an outgoing message as conversation data, copied in send_im or
+ // chat_send: the transport frees it as soon as they return. Empty where not given.
+ struct OutgoingExtras {
