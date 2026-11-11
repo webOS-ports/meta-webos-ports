@@ -26,6 +26,10 @@ DEPENDS = "maliit-framework-webos hunspell presage luna-service2 presage-native 
 # went missing when the maliit bump changed PKGV, so state it explicitly.
 RDEPENDS:${PN} += "maliit-framework-webos qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS:${PN} += "hunspell-dictionaries"
+# The Pre Keyboard's GIFs and stickers: HTTPS to KLIPY (Qt's OpenSSL TLS backend,
+# in qtbase-plugins) and their previews (the GIF reader, also there, and WebP,
+# in qtimageformats-plugins). Without them the tabs stay empty; nothing else.
+RRECOMMENDS:${PN} += "qtbase-plugins qtimageformats-plugins"
 
 
 SRCREV = "0cfafafa734eaa81aed8633b969c20f4b4e71e7f"
@@ -55,6 +59,41 @@ EXTRA_QMAKEVARS_PRE = "\
     CONFIG+=enable-hunspell \
     LUNEOS_KEYBOARD_TEST_DIR=${libdir}/webos-keyboard/tests \
 "
+
+# KLIPY app key for the Pre Keyboard's GIFs and stickers. None is committed
+# anywhere: set it in local.conf, or in a file it includes that no repository
+# holds (luneos-secrets' secrets.conf):
+#
+#   KLIPY_KEY = "<key>"
+#
+# Make one in KLIPY's Partner Panel (docs.klipy.com, API Keys); a key in
+# testing is allowed 100 calls an hour, which the keyboard keeps under. Unset,
+# the GIF and sticker tabs say this build has no KLIPY key. qmake reads it from
+# the environment (src/plugin/plugin.pro) and compiles it in, so it is readable
+# by anyone with the image, it shows in this recipe's logs, and it is part of
+# the configure and compile task hashes: an sstate cache built with it is as
+# private as the key.
+#
+# Both tasks get it: qmake writes the top Makefile in do_configure, but the
+# subdirectories' Makefiles, src/plugin's among them, only in do_compile.
+KLIPY_KEY ?= ""
+do_configure[vardeps] += "KLIPY_KEY"
+do_compile[vardeps] += "KLIPY_KEY"
+
+klipy_key_export() {
+    case "${KLIPY_KEY}" in
+        *[!A-Za-z0-9_-]*) bbfatal "KLIPY_KEY holds characters a KLIPY app key does not" ;;
+    esac
+    export KLIPY_KEY="${KLIPY_KEY}"
+}
+
+do_configure:prepend() {
+    klipy_key_export
+}
+
+do_compile:prepend() {
+    klipy_key_export
+}
 
 INSANE_SKIP:${PN} += "libdir"
 INSANE_SKIP:${PN}-dbg += "libdir"
