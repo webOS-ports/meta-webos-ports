@@ -10,7 +10,7 @@ LIC_FILES_CHKSUM = " \
 "
 
 WEBOS_VERSION = "1.0.0-5_e3b8d5297c20edd8fc73ee3ac8729094159942ec"
-PR = "r4"
+PR = "r5"
 
 inherit webos_enhanced_submissions
 inherit fontcache
@@ -18,6 +18,7 @@ inherit webos_public_repo
 
 SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0001-31-webos-aliases.conf-Use-Prelude-for-LuneOS.patch \
+    file://30-luneos-prelude.conf \
 "
 
 # Skip the unwanted tasks
@@ -29,6 +30,9 @@ do_install() {
     install -v -m 644 ${S}/31-webos-aliases.conf ${D}${datadir}/fontconfig/conf.avail
     install -d ${D}${sysconfdir}/fonts/conf.d
     ln -vsf /usr/share/fontconfig/conf.avail/31-webos-aliases.conf ${D}${sysconfdir}/fonts/conf.d/31-webos-aliases.conf
+    # Prelude ahead of the CJK fonts' sans-serif aliases; see the file.
+    install -v -m 644 ${UNPACKDIR}/30-luneos-prelude.conf ${D}${datadir}/fontconfig/conf.avail
+    ln -vsf /usr/share/fontconfig/conf.avail/30-luneos-prelude.conf ${D}${sysconfdir}/fonts/conf.d/30-luneos-prelude.conf
 }
 
 FILES:${PN} += "${sysconfdir}/fonts/conf.d/ ${datadir}/fontconfig/"
