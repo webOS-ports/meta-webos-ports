@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sun, 8 Nov 2026 10:09:54 +0100
+Subject: [PATCH] droidcamsrc: stop the preview outside the device lock
+
+A HAL can finish a picture that is still being taken before its
+stopPreview() returns: the Exynos HAL1 HAL of the SM-T520 joins its
+picture thread there. That thread's shutter and JPEG callbacks take
+dev->lock, which dev_stop() held across
+droid_media_camera_stop_preview(), so closing the camera with a
+picture pending hung.
+
+Mark the device as not running under the lock, then call
+stop_preview without it, as dev_close() already does for the
+disconnect. Callbacks that arrive in the meantime see
+dev->running == FALSE.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ gst/droidcamsrc/gstdroidcamsrcdev.c | 14 +++++++++++++-
+ 1 file changed, 13 insertions(+), 1 deletion(-)
+
+diff --git a/gst/droidcamsrc/gstdroidcamsrcdev.c b/gst/droidcamsrc/gstdroidcamsrcdev.c
+index c227853..02756dd 100644
+--- a/gst/droidcamsrc/gstdroidcamsrcdev.c
++++ b/gst/droidcamsrc/gstdroidcamsrcdev.c
+@@ -858,6 +858,8 @@ out:
+ void
+ gst_droidcamsrc_dev_stop (GstDroidCamSrcDev * dev)
+ {
++  DroidMediaCamera *cam = NULL;
++
+   g_rec_mutex_lock (dev->lock);
+ 
+   GST_DEBUG ("dev stop");
+@@ -867,8 +869,18 @@ gst_droidcamsrc_dev_stop (GstDroidCamSrcDev * dev)
+     if (dev->pool) {
+       gst_buffer_pool_set_active (dev->pool, FALSE);
+     }
+-    droid_media_camera_stop_preview (dev->cam);
++    cam = dev->cam;
+     dev->running = FALSE;
++  }
++
++  /* Not under dev->lock: a HAL can finish a picture that is still being
++   * taken before its stopPreview() returns (the Exynos HAL1 HAL waits for
++   * its picture thread there), and the shutter and JPEG callbacks of that
++   * picture take dev->lock. dev->running is already FALSE for them. */
++  if (cam) {
++    g_rec_mutex_unlock (dev->lock);
++    droid_media_camera_stop_preview (cam);
++    g_rec_mutex_lock (dev->lock);
+     GST_DEBUG ("stopped preview");
+   }
+ 

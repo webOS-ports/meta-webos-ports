@@ -1,0 +1,116 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 4 Nov 2026 17:02:13 +0100
+Subject: [PATCH 11/20] droidcamsrc: build the video caps without a nested
+ function
+
+gst_droidcamsrc_get_video_caps_locked() handed gst_caps_foreach() a GCC
+nested function. Taking the address of one makes GCC build a trampoline
+on the stack, and at -O0 that gives libgstdroid-1.0.so an executable
+stack (GNU_STACK RWE). Clang does not build nested functions at all, so
+the plugin could not be built with it.
+
+The function also went on with its own "caps" after the loop, although
+gst_caps_merge_structure() returns the caps to use from then on, which
+need not be the ones it was given. Use what it returned.
+
+Make the callback a plain static function, and use a guint for the
+index compared against gst_caps_get_size().
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/sailfishos/gst-droid/pull/91]
+---
+ gst/droidcamsrc/gstdroidcamsrc.c | 65 +++++++++++++++++---------------
+ 1 file changed, 34 insertions(+), 31 deletions(-)
+
+diff --git a/gst/droidcamsrc/gstdroidcamsrc.c b/gst/droidcamsrc/gstdroidcamsrc.c
+index 671ee9c..495692b 100644
+--- a/gst/droidcamsrc/gstdroidcamsrc.c
++++ b/gst/droidcamsrc/gstdroidcamsrc.c
+@@ -2643,52 +2643,55 @@ out:
+   return ret;
+ }
+ 
+-static GstCaps *
+-gst_droidcamsrc_get_video_caps_locked (GstDroidCamSrc * src)
++struct GstDroidCamSrcVideoCapsData
+ {
+-  struct Data
+-  {
+-    GstCaps *result;
+-    GstStructure *encoded;
+-  };
++  GstCaps *result;
++  GstStructure *encoded;
++};
+ 
+-  gboolean __map (GstCapsFeatures * features,
+-      GstStructure * structure, gpointer data_param)
+-  {
+-
+-    /* Given structure from template caps, we need to transform Data::encoded */
+-    int i;
+-    struct Data *data = data_param;
+-    GstStructure *s = gst_structure_copy (data->encoded);
+-    for (i = 0; i < gst_structure_n_fields (structure); i++) {
+-      const gchar *field = gst_structure_nth_field_name (structure, i);
+-      /* skip format field */
+-      if (g_strcmp0 (field, "format") != 0) {
+-        gst_structure_set_value (s, field, gst_structure_get_value (structure,
+-                field));
+-      }
++/* Given a structure from the template caps, adds Data::encoded with the
++ * template's fields, other than its format, to Data::result */
++static gboolean
++gst_droidcamsrc_add_encoded_video_caps (GstCapsFeatures * features,
++    GstStructure * structure, gpointer data_param)
++{
++  int i;
++  struct GstDroidCamSrcVideoCapsData *data = data_param;
++  GstStructure *s = gst_structure_copy (data->encoded);
++
++  for (i = 0; i < gst_structure_n_fields (structure); i++) {
++    const gchar *field = gst_structure_nth_field_name (structure, i);
++    /* skip format field */
++    if (g_strcmp0 (field, "format") != 0) {
++      gst_structure_set_value (s, field, gst_structure_get_value (structure,
++              field));
+     }
++  }
+ 
+-    data->result = gst_caps_merge_structure (data->result, s);
++  data->result = gst_caps_merge_structure (data->result, s);
+ 
+-    return TRUE;
+-  }
++  return TRUE;
++}
+ 
++static GstCaps *
++gst_droidcamsrc_get_video_caps_locked (GstDroidCamSrc * src)
++{
+   GstCaps *tpl = gst_droidcamsrc_params_get_video_caps (src->dev->params);
+-  GstCaps *caps = gst_caps_new_empty ();
++  GstCaps *caps;
+   GstCaps *encoded =
+       gst_droid_codec_get_all_caps (GST_DROID_CODEC_ENCODER_VIDEO);
+-  int x;
++  guint x;
+ 
+-  struct Data data;
+-  data.result = caps;
++  struct GstDroidCamSrcVideoCapsData data;
++  data.result = gst_caps_new_empty ();
+ 
+   for (x = 0; x < gst_caps_get_size (encoded); x++) {
+     data.encoded = gst_caps_get_structure (encoded, x);
+-    gst_caps_foreach (tpl, __map, &data);
++    gst_caps_foreach (tpl, gst_droidcamsrc_add_encoded_video_caps, &data);
+   }
+ 
+-  caps = gst_caps_merge (caps, tpl);
++  /* gst_caps_merge_structure() may give back other caps than it was given */
++  caps = gst_caps_merge (data.result, tpl);
+ 
+   caps = gst_caps_simplify (caps);
+ 
