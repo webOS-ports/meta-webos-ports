@@ -8,8 +8,9 @@ inherit allarch
 inherit webos_filesystem_paths
 inherit webos_system_bus
 
+PE = "1"
 PV = "0.1.0+git"
-SRCREV = "589dacc81e524fba6092f5a34ad1725cfeb48852"
+SRCREV = "1b8bb6fc1ce53cada4c87a640712d3264313f877"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
@@ -34,9 +35,24 @@ do_install() {
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.role.json ${D}${webos_sysbus_rolesdir}/${BPN}.role.json
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.api.json ${D}${webos_sysbus_apipermissionsdir}/${BPN}.api.json
     install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}.groups.json ${D}${webos_sysbus_groupsdir}/${BPN}.groups.json
+    # The shell's group for the adb key questions (devmode-service.shell); in the
+    # service from herrie/security-WP1b-devmode-access on.
+    if [ -e ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}-shell.perm.json ]; then
+        install -v -m 0644 ${WEBOS_SYSTEM_BUS_FILES_LOCATION}/${BPN}-shell.perm.json ${D}${webos_sysbus_permissionsdir}/${BPN}-shell.perm.json
+    fi
+    # "adb shell luneos-ssh-addkey < ~/.ssh/id_ed25519.pub": one key for root's
+    # ssh, through the service's own checks; in the service from
+    # herrie/security-WP1b-devmode-access on.
+    if [ -e ${S}/bin/luneos-ssh-addkey ]; then
+        chmod 0755 ${D}${webos_servicesdir}/${PN}/bin/luneos-ssh-addkey
+        install -d ${D}${sbindir}
+        ln -sf ${webos_servicesdir}/${PN}/bin/luneos-ssh-addkey ${D}${sbindir}/luneos-ssh-addkey
+    fi
 }
 
-FILES:${PN} += "${webos_servicesdir}/${PN}"
+FILES:${PN} += "${webos_servicesdir}/${PN} ${sbindir}/luneos-ssh-addkey"
+# bin/luneos-ssh-addkey is "#!/usr/bin/env node".
+RDEPENDS:${PN} += "nodejs"
 
 inherit useradd
 
