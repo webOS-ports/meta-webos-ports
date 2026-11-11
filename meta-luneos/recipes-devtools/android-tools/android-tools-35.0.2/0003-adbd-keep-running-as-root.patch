@@ -1,0 +1,135 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 30 Oct 2026 09:42:11 +0100
+Subject: [PATCH] adbd: keep running as root
+
+On Linux adbd drops to the "adb" user unless /run/adbd.root holds the
+magic "adb root" writes there. LuneOS's adbd runs as root, as 5.1.1
+did: it reads /var/lib/adbd/adb_keys and makes /run/adbd/auth, both
+root's only, and "adb shell" is how a computer the user allowed gets to
+root's tasks, luneos-ssh-addkey among them. The drop, with "adb root"
+one command away through a file the dropped adbd may write, would keep
+none of that and protect nothing.
+
+drop_privileges() does nothing on Linux, and "adb unroot" is answered
+with "adbd runs as root on LuneOS".
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [LuneOS-specific: adbd runs as root]
+---
+ packages/modules/adb/daemon/main.cpp          | 55 ++++---------------
+ .../modules/adb/daemon/restart_service.cpp    |  7 +++
+ 2 files changed, 17 insertions(+), 45 deletions(-)
+
+diff --git a/packages/modules/adb/daemon/main.cpp b/packages/modules/adb/daemon/main.cpp
+index a7a5bea..b2c6758 100644
+--- a/packages/modules/adb/daemon/main.cpp
++++ b/packages/modules/adb/daemon/main.cpp
+@@ -66,12 +66,14 @@
+ #include "daemon/mdns.h"
+ #include "daemon/watchdog.h"
+ 
++#if defined(__ANDROID__)
+ namespace {
+ constexpr char kAdbRootStatePath[] = "/run/adbd.root";
+ constexpr char kRootMagic[] = "#ROOT#";
+ constexpr char kNoRootMagic[] = "#NOROOT#";
+ constexpr size_t kRootMagicSize = sizeof(kRootMagic) - 1;
+ }
++#endif
+ 
+ #if defined(__ANDROID__)
+ static const char* root_seclabel = nullptr;
+@@ -198,51 +200,14 @@ static void drop_privileges(int server_port) {
+ #endif
+ 
+ #if !defined(__ANDROID__)
+-static bool should_drop_privileges() {
+-    int f = unix_open(kAdbRootStatePath, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+-    if (f < 0) {
+-        return true;
+-    }
+-    char buf[kRootMagicSize];
+-    bool drop = true;
+-    if (unix_read(f, buf, sizeof(buf)) != -1 && !strncmp(buf, kRootMagic, kRootMagicSize)) {
+-        drop = false;
+-    }
+-    unix_close(f);
+-    return drop;
+-}
+-
+-static void drop_privileges(int) {
+-    if (!should_drop_privileges()) {
+-        return;
+-    }
+-    passwd* adb_user = getpwnam("adb");
+-    if (adb_user == nullptr) {
+-        PLOG(FATAL) << "getpwnam(adb) failed";
+-    }
+-    int f = unix_open(kAdbRootStatePath, O_WRONLY | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+-    if (f >= 0) {
+-        if (fchmod(f, 0600) == -1) {
+-            PLOG(ERROR) << "failed to set root state permissions";
+-        }
+-        if (fchown(f, adb_user->pw_uid, adb_user->pw_gid) == -1) {
+-            PLOG(ERROR) << "failed to set root state ownership";
+-        }
+-        if (unix_write(f, kNoRootMagic, sizeof(kNoRootMagic) - 1) == -1) {
+-            PLOG(ERROR) << "failed to initialize root state";
+-        }
+-        unix_close(f);
+-    }
+-    if (initgroups(adb_user->pw_name, adb_user->pw_gid) != 0) {
+-        PLOG(FATAL) << "initgroups(adb) failed";
+-    }
+-    if (setgid(adb_user->pw_gid) != 0) {
+-        PLOG(FATAL) << "setgid(adb) failed";
+-    }
+-    if (setuid(adb_user->pw_uid) != 0) {
+-        PLOG(FATAL) << "setuid(adb) failed";
+-    }
+-}
++// LuneOS: adbd keeps running as root, as it always has on LuneOS. Only a
++// host the user allowed gets in at all, and it gets in to develop on the
++// device: "adb shell luneos-ssh-addkey" writes root's ssh keys, and adbd
++// reads /var/lib/adbd/adb_keys and makes /run/adbd/auth, both root's only.
++// Debian's drop to the "adb" user, with "adb root" back through a file in
++// /run that the dropped adbd itself may write, would keep none of that and
++// protect nothing ("adb root" is one command away).
++static void drop_privileges(int) {}
+ #endif
+ 
+ static void setup_adb(const std::vector<std::string>& addrs) {
+diff --git a/packages/modules/adb/daemon/restart_service.cpp b/packages/modules/adb/daemon/restart_service.cpp
+index adacb36..0d81ffd 100644
+--- a/packages/modules/adb/daemon/restart_service.cpp
++++ b/packages/modules/adb/daemon/restart_service.cpp
+@@ -35,7 +35,9 @@
+ namespace {
+ constexpr char kAdbRootStatePath[] = "/run/adbd.root";
+ constexpr char kRootMagic[] = "#ROOT#";
++#if defined(__ANDROID__)
+ constexpr char kNoRootMagic[] = "#NOROOT#";
++#endif
+ constexpr size_t kRootMagicSize = sizeof(kRootMagic) - 1;
+ 
+ bool write_root_state(const char* value, size_t size) {
+@@ -74,6 +76,7 @@ void restart_root_service(unique_fd fd) {
+ }
+ 
+ void restart_unroot_service(unique_fd fd) {
++#if defined(__ANDROID__)
+     if (getuid() != 0) {
+         WriteFdExactly(fd.get(), "adbd not running as root\n");
+         return;
+@@ -85,6 +88,10 @@ void restart_unroot_service(unique_fd fd) {
+     }
+     LOG(INFO) << "adbd restarting as nonroot";
+     WriteFdExactly(fd.get(), "restarting adbd as non root\n");
++#else
++    // LuneOS: adbd runs as root (see drop_privileges() in main.cpp).
++    WriteFdExactly(fd.get(), "adbd runs as root on LuneOS\n");
++#endif
+ }
+ 
+ void restart_tcp_service(unique_fd fd, int port) {

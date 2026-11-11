@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 31 Oct 2026 00:20:02 +0100
+Subject: [PATCH] adbd: notice that the USB worker has exited on glibc
+
+UsbFfsConnection::StopWorker() signals the worker thread and then waits
+for pthread_kill(worker, 0) to return ESRCH. Bionic does that once the
+thread has exited; glibc 2.34 and later return 0 for a thread that has
+exited but not been joined (glibc bug 19193). The loop then never ends:
+after the first FUNCTIONFS_DISABLE (unplug, host suspend, cable reset)
+adbd hangs for good, the main thread joining the monitor thread and the
+monitor thread spinning here.
+
+Let the worker set a flag as it exits and wait for that instead.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ packages/modules/adb/daemon/usb.cpp | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/packages/modules/adb/daemon/usb.cpp b/packages/modules/adb/daemon/usb.cpp
+index 1fe2d3a..73316ca 100644
+--- a/packages/modules/adb/daemon/usb.cpp
++++ b/packages/modules/adb/daemon/usb.cpp
+@@ -404,6 +404,10 @@ struct UsbFfsConnection : public Connection {
+         worker_started_ = true;
+         worker_thread_ = std::thread([this]() {
+             adb_thread_setname("UsbFfs-worker");
++            struct ExitFlag {
++                std::atomic<bool>& f;
++                ~ExitFlag() { f = true; }
++            } exit_flag{worker_exited_};
+             LOG(INFO) << "UsbFfs-worker thread spawned";
+ 
+             for (size_t i = 0; i < kUsbReadQueueDepth; ++i) {
+@@ -445,7 +449,9 @@ struct UsbFfsConnection : public Connection {
+ 
+             std::this_thread::sleep_for(100ms);
+ 
+-            rc = pthread_kill(worker_thread_handle, 0);
++            // glibc 2.34+ returns 0, not ESRCH, for an exited thread
++            // that has not been joined yet (glibc bug 19193).
++            rc = worker_exited_ ? ESRCH : 0;
+             if (rc == 0) {
+                 continue;
+             } else if (rc == ESRCH) {
+@@ -708,6 +714,7 @@ struct UsbFfsConnection : public Connection {
+     std::thread monitor_thread_;
+ 
+     bool worker_started_;
++    std::atomic<bool> worker_exited_ = false;
+     std::thread worker_thread_;
+ 
+     std::atomic<bool> stopped_;
