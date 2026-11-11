@@ -1,0 +1,154 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 4 Nov 2026 16:58:31 +0100
+Subject: [PATCH 08/20] droidvdec: stop the codec and its task before freeing
+ it, and do not wait for ever
+
+_finish () drained the codec, waited for its EOS with no time limit, and
+then stopped and destroyed it. Two things went wrong there.
+
+The src pad task reports EOS from inside droid_media_codec_loop () and
+only returns from it afterwards (droidmedia drains its source after the
+callback). _finish () woke on the EOS and destroyed the codec without
+waiting for that iteration to end, so the task could still be using the
+codec while it was freed. Under load on sargo this showed up as SIGSEGV
+and SIGBUS in processes running several decoders.
+
+And a codec that stalls - c2.qti.avc.decoder runs out of buffers when
+several decoders run at once, and then neither delivers EOS nor reports
+an error - left _finish () waiting for ever, the pipeline never reached
+READY and the process never exited. An error reported during the drain
+only woke the wait, which then treated it as EOS without checking.
+
+Wait at most five seconds, in a loop on the state rather than on a single
+wake-up, and let an error during the drain end the wait explicitly. Then,
+with neither lock held, stop the codec, which wakes a task still waiting
+in it for output, pause the task, which waits for its current iteration
+to end, and only then destroy the codec. _stop () gets the same order:
+stopping a task that waits in the codec blocks until the codec is stopped.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/sailfishos/gst-droid/pull/91]
+---
+ gst/droidcodec/gstdroidvdec.c | 47 +++++++++++++++++++++++++++++------
+ gst/droidcodec/gstdroidvdec.h |  2 ++
+ 2 files changed, 42 insertions(+), 7 deletions(-)
+
+diff --git a/gst/droidcodec/gstdroidvdec.c b/gst/droidcodec/gstdroidvdec.c
+index 8822406..b7f8ed5 100644
+--- a/gst/droidcodec/gstdroidvdec.c
++++ b/gst/droidcodec/gstdroidvdec.c
+@@ -140,6 +140,12 @@ gst_droidvec_copy_packed_planes (guint8 * out0, guint8 * out1, gint stride_out,
+ 
+ #define ALIGN_SIZE(size, to) (((size) + to  - 1) & ~(to - 1))
+ 
++/* How long _finish () waits for the codec to drain. A codec that runs out of
++ * buffers can stall without ever reporting EOS or an error (seen with
++ * c2.qti.avc.decoder when several decoders run at once), and the pipeline must
++ * still be able to stop. */
++#define GST_DROIDVDEC_DRAIN_TIMEOUT (5 * G_TIME_SPAN_SECOND)
++
+ static gboolean
+ gst_droidvdec_convert_native_to_i420 (GstDroidVDec * dec, GstMapInfo * out,
+     DroidMediaData * in, GstVideoInfo * info, gsize width, gsize height)
+@@ -730,7 +736,9 @@ gst_droidvdec_error (void *data, int err)
+   GST_DROIDVDEC_STATE_LOCK (dec);
+ 
+   if (dec->state == GST_DROID_VDEC_STATE_WAITING_FOR_EOS) {
+-    /* Gotta love Android. We will ignore errors if we are expecting EOS */
++    /* Gotta love Android. We will ignore errors if we are expecting EOS,
++     * but no EOS will follow: let _finish () stop waiting for one. */
++    dec->drain_failed = TRUE;
+     g_cond_signal (&dec->state_cond);
+     GST_DROIDVDEC_STATE_UNLOCK (dec);
+     return;
+@@ -1030,12 +1038,18 @@ gst_droidvdec_stop (GstVideoDecoder * decoder)
+ 
+   GST_DEBUG_OBJECT (dec, "stop");
+ 
++  /* Stop the codec before the task: a task waiting in the codec for output
++   * only returns once the codec is stopped, and stopping the task waits for
++   * it to return. The codec itself must outlive the task. */
++  if (dec->codec) {
++    droid_media_codec_stop (dec->codec);
++  }
++
+   if (dec->running) {
+     gst_droidvdec_stop_loop (dec);
+   }
+ 
+   if (dec->codec) {
+-    droid_media_codec_stop (dec->codec);
+     droid_media_codec_destroy (dec->codec);
+     dec->codec = NULL;
+   }
+@@ -1262,19 +1276,30 @@ gst_droidvdec_finish (GstVideoDecoder * decoder)
+ 
+   if (dec->codec && dec->state == GST_DROID_VDEC_STATE_OK) {
+     GstBufferPool *pool = gst_video_decoder_get_buffer_pool (decoder);
++    DroidMediaCodec *codec = dec->codec;
++    gint64 deadline;
+ 
+     GST_INFO_OBJECT (dec, "draining");
+     dec->state = GST_DROID_VDEC_STATE_WAITING_FOR_EOS;
+-    droid_media_codec_drain (dec->codec);
++    dec->drain_failed = FALSE;
++    droid_media_codec_drain (codec);
+ 
+     /* release the lock to allow _frame_available () to do its job */
+     GST_LOG_OBJECT (dec, "releasing stream lock");
+     GST_VIDEO_DECODER_STREAM_UNLOCK (decoder);
+-    /* Now we wait for the codec to signal EOS */
+-    g_cond_wait (&dec->state_cond, &dec->state_lock);
++    /* Now we wait for the codec to signal EOS, or an error */
++    deadline = g_get_monotonic_time () + GST_DROIDVDEC_DRAIN_TIMEOUT;
++    while (dec->state == GST_DROID_VDEC_STATE_WAITING_FOR_EOS
++        && !dec->drain_failed) {
++      if (!g_cond_wait_until (&dec->state_cond, &dec->state_lock, deadline)) {
++        GST_WARNING_OBJECT (dec, "the codec did not drain in %d s, stopping it",
++            (gint) (GST_DROIDVDEC_DRAIN_TIMEOUT / G_TIME_SPAN_SECOND));
++        break;
++      }
++    }
+ 
+     droid_media_buffer_queue_set_callbacks (droid_media_codec_get_buffer_queue
+-        (dec->codec), NULL, NULL);
++        (codec), NULL, NULL);
+ 
+     GST_DROIDVDEC_STATE_UNLOCK (dec);
+ 
+@@ -1283,12 +1308,20 @@ gst_droidvdec_finish (GstVideoDecoder * decoder)
+       gst_object_unref (pool);
+     }
+ 
++    /* The src pad task may still be inside the codec: it reports EOS from
++     * within droid_media_codec_loop () and returns from it only afterwards,
++     * and after a timeout it is still waiting there for output. Stopping the
++     * codec wakes it; pausing the task then waits for that iteration to end.
++     * Only then can the codec go. Neither lock may be held here: the
++     * iteration takes both (EOS, error and frame callbacks). */
++    droid_media_codec_stop (codec);
++    gst_pad_pause_task (GST_VIDEO_DECODER_SRC_PAD (decoder));
++
+     GST_VIDEO_DECODER_STREAM_LOCK (decoder);
+     GST_DROIDVDEC_STATE_LOCK (dec);
+     GST_LOG_OBJECT (dec, "acquired stream lock");
+ 
+     if (dec->codec) {
+-      droid_media_codec_stop (dec->codec);
+       droid_media_codec_destroy (dec->codec);
+       dec->codec = NULL;
+     }
+diff --git a/gst/droidcodec/gstdroidvdec.h b/gst/droidcodec/gstdroidvdec.h
+index c522b77..3b558a0 100644
+--- a/gst/droidcodec/gstdroidvdec.h
++++ b/gst/droidcodec/gstdroidvdec.h
+@@ -67,6 +67,8 @@ struct _GstDroidVDec
+   GstDroidVDecState state;
+   GMutex state_lock;
+   GCond state_cond;
++  /* the codec failed while it was being drained: no EOS will come */
++  gboolean drain_failed;
+ 
+   /* protected by decoder stream lock */
+   GstFlowReturn downstream_flow_ret;

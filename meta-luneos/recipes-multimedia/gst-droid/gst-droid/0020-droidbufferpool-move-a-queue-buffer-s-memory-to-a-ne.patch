@@ -1,0 +1,354 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 4 Nov 2026 17:41:46 +0100
+Subject: [PATCH 20/20] droidbufferpool: move a queue buffer's memory to a new
+ pool, not copy it
+
+droidmedia hands over one reference to each queue buffer, with the
+buffer_created callback, and gst-droid lets go of it with
+droid_media_buffer_destroy() when the memory made for the buffer is
+freed. So there must be one such memory per reference.
+
+When the decoder renegotiated and a frame then came for a buffer bound in
+the earlier pool, gst_droid_buffer_pool_acquire_media_buffer() made a
+second memory for it in the new pool, and unreffed the old pool's buffer.
+The old memory let go of the client's reference, and the new one, when it
+was freed, of droidmedia's own: the buffer was freed while its queue slot
+still pointed at it, and droid_media_codec_stop() freed it again when it
+emptied the slots ("free(): double free detected in tcache 2" on sargo,
+and SIGSEGV/SIGBUS in _DroidMediaBufferQueue::buffersReleased before).
+The old buffer was also unreffed while the old pool's bound list still
+held it.
+
+Take the memory out of the old pool's buffer instead (when that one is
+still bound there, and not out in the pipeline), drop the buffer from the
+old pool's bound list, and bind the memory to a buffer of the new pool. A
+buffer that has no memory any more - the pool's buffers were invalidated
+- is not taken: there is no reference to bind it with, and droidmedia
+gives it a new one, through buffer_created, with its next frame.
+
+Traced on sargo with reference-count logging in droidmedia and the pool:
+one queue buffer, bound in one pool and then rebound in the next, freed
+twice from gst_droid_media_buffer_allocator_free(). Adds unit tests for
+both cases.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/sailfishos/gst-droid/pull/91]
+---
+ gst-libs/gst/droid/gstdroidbufferpool.c |  92 ++++++++++++++---
+ tests/check/libs/droid.c                | 130 +++++++++++++++++++++++-
+ 2 files changed, 205 insertions(+), 17 deletions(-)
+
+diff --git a/gst-libs/gst/droid/gstdroidbufferpool.c b/gst-libs/gst/droid/gstdroidbufferpool.c
+index 97fa90b..a42f5ec 100644
+--- a/gst-libs/gst/droid/gstdroidbufferpool.c
++++ b/gst-libs/gst/droid/gstdroidbufferpool.c
+@@ -177,22 +177,47 @@ gst_droid_buffer_pool_set_egl_display (GstBufferPool * pool, EGLDisplay display)
+   }
+ }
+ 
++/* Binds @buffer to a buffer of @pool, through @mem (transfer full): the
++ * memory that holds the reference to @buffer that droidmedia handed to
++ * buffer_created. That reference is let go when the memory is freed, so
++ * there must be no more than one such memory for it. */
++static gboolean
++gst_droid_buffer_pool_bind_memory (GstBufferPool * pool,
++    DroidMediaBuffer * buffer, GstMemory * mem)
++{
++  GstDroidBufferPool *dpool = GST_DROID_BUFFER_POOL (pool);
++  GstBuffer *gst_buffer;
++
++  if (gst_buffer_pool_acquire_buffer (pool, &gst_buffer, NULL) != GST_FLOW_OK) {
++    gst_memory_unref (mem);
++
++    return FALSE;
++  }
++
++  gst_buffer_insert_memory (gst_buffer, 0, mem);
++
++  g_mutex_lock (&dpool->binding_lock);
++
++  droid_media_buffer_set_user_data (buffer, gst_buffer);
++
++  g_ptr_array_add (dpool->bound_buffers, gst_buffer);
++
++  g_mutex_unlock (&dpool->binding_lock);
++
++  return TRUE;
++}
++
+ gboolean
+ gst_droid_buffer_pool_bind_media_buffer (GstBufferPool * pool,
+     DroidMediaBuffer * buffer)
+ {
+   GstDroidBufferPool *dpool;
+-  GstBuffer *gst_buffer;
+   GstMemory *mem;
+ 
+   if (!GST_IS_DROID_BUFFER_POOL (pool)) {
+     return FALSE;
+   }
+ 
+-  if (gst_buffer_pool_acquire_buffer (pool, &gst_buffer, NULL) != GST_FLOW_OK) {
+-    return FALSE;
+-  }
+-
+   dpool = GST_DROID_BUFFER_POOL (pool);
+ 
+   mem =
+@@ -200,22 +225,44 @@ gst_droid_buffer_pool_bind_media_buffer (GstBufferPool * pool,
+       buffer);
+ 
+   if (!mem) {
+-    gst_buffer_unref (gst_buffer);
+-
+     return FALSE;
+   }
+ 
+-  gst_buffer_insert_memory (gst_buffer, 0, mem);
++  return gst_droid_buffer_pool_bind_memory (pool, buffer, mem);
++}
++
++/* Takes the memory of @buffer out of @gst_buffer, the buffer of another pool
++ * it is bound to, when that buffer is still bound there and not out in the
++ * pipeline; NULL otherwise. */
++static GstMemory *
++gst_droid_buffer_pool_take_bound_memory (GstBufferPool * pool,
++    GstBuffer * gst_buffer, DroidMediaBuffer * buffer)
++{
++  GstDroidBufferPool *dpool = GST_DROID_BUFFER_POOL (pool);
++  GstMemory *mem = NULL;
++  guint index;
+ 
+   g_mutex_lock (&dpool->binding_lock);
+ 
+-  droid_media_buffer_set_user_data (buffer, gst_buffer);
++  if (droid_media_buffer_get_user_data (buffer) == gst_buffer
++      && gst_droid_media_buffer_memory_get_buffer_from_gst_buffer (gst_buffer)
++      == buffer && gst_buffer_is_writable (gst_buffer)
++      && g_ptr_array_find (dpool->bound_buffers, gst_buffer, &index)) {
++    g_ptr_array_remove_index_fast (dpool->bound_buffers, index);
+ 
+-  g_ptr_array_add (dpool->bound_buffers, gst_buffer);
++    mem = gst_buffer_get_memory (gst_buffer, 0);
++    gst_buffer_remove_all_memory (gst_buffer);
++    droid_media_buffer_set_user_data (buffer, NULL);
++  }
+ 
+   g_mutex_unlock (&dpool->binding_lock);
+ 
+-  return TRUE;
++  if (mem) {
++    /* the reference the bound list held: the buffer goes back to its pool */
++    gst_buffer_unref (gst_buffer);
++  }
++
++  return mem;
+ }
+ 
+ static void
+@@ -251,16 +298,31 @@ gst_droid_buffer_pool_acquire_media_buffer (GstBufferPool * pool,
+   gst_buffer = (GstBuffer *) droid_media_buffer_get_user_data (buffer);
+ 
+   if (!gst_buffer || gst_buffer->pool != pool) {
+-    droid_media_buffer_set_user_data (buffer, NULL);
++    /* droidmedia hands over one reference to the buffer, with
++     * buffer_created, and it is held by the memory made then. Another
++     * memory for the buffer here would let go of a reference it was never
++     * given: droidmedia's own, and the buffer would be freed while its
++     * queue slot still points at it (and freed again when the queue is
++     * emptied). So the memory moves along with the buffer to this pool,
++     * after a renegotiation; a buffer that has none any more (the pool's
++     * buffers were invalidated) is not taken: droidmedia gives it a new
++     * reference, through buffer_created, with its next frame. */
++    GstBufferPool *other = gst_buffer ? gst_buffer->pool : NULL;
++    GstMemory *mem = NULL;
+ 
+     g_mutex_unlock (&dpool->binding_lock);
+ 
+-    if (!gst_droid_buffer_pool_bind_media_buffer (pool, buffer)) {
++    if (other && GST_IS_DROID_BUFFER_POOL (other)) {
++      mem = gst_droid_buffer_pool_take_bound_memory (other, gst_buffer, buffer);
++    }
++
++    if (!mem) {
++      GST_DEBUG_OBJECT (pool, "droid buffer %p has no memory to bind", buffer);
+       return NULL;
+     }
+ 
+-    if (gst_buffer) {
+-      gst_buffer_unref (gst_buffer);
++    if (!gst_droid_buffer_pool_bind_memory (pool, buffer, mem)) {
++      return NULL;
+     }
+ 
+     g_mutex_lock (&dpool->binding_lock);
+diff --git a/tests/check/libs/droid.c b/tests/check/libs/droid.c
+index 2bb5926..8ad4d2f 100644
+--- a/tests/check/libs/droid.c
++++ b/tests/check/libs/droid.c
+@@ -19,8 +19,8 @@
+  */
+ 
+ /*
+- * Tests for libgstdroid's codec_data and frame parsers and its media buffer
+- * allocator, run without Android: the droidmedia calls they make are
++ * Tests for libgstdroid's codec_data and frame parsers, its media buffer
++ * allocator and its buffer pool, run without Android: the droidmedia calls they make are
+  * defined here, and take the place of the libhybris glue in libgstdroid.
+  *
+  * The parsers are given every short size, so that a read past the end of
+@@ -34,6 +34,7 @@
+ 
+ #include <droidmediaconstants.h>
+ 
++#include "gst/droid/gstdroidbufferpool.h"
+ #include "gst/droid/gstdroidcodec.h"
+ #include "gst/droid/gstdroidmediabuffer.h"
+ 
+@@ -83,6 +84,33 @@ droid_media_buffer_destroy (DroidMediaBuffer * buffer G_GNUC_UNUSED)
+   g_atomic_int_inc (&destroyed);
+ }
+ 
++/* A queue buffer, for the buffer pool tests: only its user data. */
++typedef struct
++{
++  void *user_data;
++} FakeQueueBuffer;
++
++static gint released;
++
++void
++droid_media_buffer_set_user_data (DroidMediaBuffer * buffer, void *data)
++{
++  ((FakeQueueBuffer *) buffer)->user_data = data;
++}
++
++void *
++droid_media_buffer_get_user_data (DroidMediaBuffer * buffer)
++{
++  return ((FakeQueueBuffer *) buffer)->user_data;
++}
++
++void
++droid_media_buffer_release (DroidMediaBuffer * buffer G_GNUC_UNUSED,
++    EGLDisplay display G_GNUC_UNUSED, EGLSyncKHR fence G_GNUC_UNUSED)
++{
++  g_atomic_int_inc (&released);
++}
++
+ /* --- g_once_init_enter/leave, for ThreadSanitizer only ---
+  *
+  * GLib is not built with ThreadSanitizer, so the release store in its
+@@ -485,6 +513,102 @@ GST_START_TEST (test_media_buffer_threads)
+ 
+ GST_END_TEST;
+ 
++/* --- the buffer pool and droidmedia's queue buffers ---
++ *
++ * droidmedia hands over one reference to a queue buffer, with
++ * buffer_created, and expects one droid_media_buffer_destroy () for it. */
++
++static GstBufferPool *
++queue_pool_new (void)
++{
++  GstBufferPool *pool = gst_droid_buffer_pool_new ();
++  GstStructure *config = gst_buffer_pool_get_config (pool);
++  GstCaps *caps = gst_caps_from_string ("video/x-raw("
++      GST_CAPS_FEATURE_MEMORY_DROID_MEDIA_QUEUE_BUFFER
++      "), format=RGBA, width=64, height=48, framerate=0/1");
++
++  gst_buffer_pool_config_set_params (config, caps, 1, 0, 0);
++  gst_caps_unref (caps);
++  fail_unless (gst_buffer_pool_set_config (pool, config));
++  fail_unless (gst_buffer_pool_set_active (pool, TRUE));
++  return pool;
++}
++
++static void
++queue_pool_free (GstBufferPool * pool)
++{
++  fail_unless (gst_buffer_pool_set_active (pool, FALSE));
++  gst_object_unref (pool);
++}
++
++/* A frame for a buffer bound in one pool, taken from another after the
++ * decoder renegotiated: a second memory for the buffer was made then, and
++ * the buffer was destroyed twice - once for the reference the client was
++ * given and once for droidmedia's own, which freed it while its queue slot
++ * still pointed at it. */
++GST_START_TEST (test_pool_rebind_keeps_one_reference)
++{
++  FakeQueueBuffer qb = { NULL };
++  DroidMediaBuffer *dbuf = (DroidMediaBuffer *) & qb;
++  GstBufferPool *first, *second;
++  GstBuffer *buffer;
++
++  g_atomic_int_set (&fake_format, FAKE_HAL_RGBA);
++  g_atomic_int_set (&destroyed, 0);
++  g_atomic_int_set (&released, 0);
++  first = queue_pool_new ();
++  second = queue_pool_new ();
++
++  /* buffer_created, then a frame and its release, in the first pool */
++  fail_unless (gst_droid_buffer_pool_bind_media_buffer (first, dbuf));
++  buffer = gst_droid_buffer_pool_acquire_media_buffer (first, dbuf);
++  fail_unless (buffer != NULL);
++  gst_buffer_unref (buffer);
++  fail_unless_equals_int (g_atomic_int_get (&released), 1);
++
++  /* the next frame, after a new pool was negotiated */
++  buffer = gst_droid_buffer_pool_acquire_media_buffer (second, dbuf);
++  fail_unless (buffer != NULL);
++  fail_unless (buffer->pool == second);
++  fail_unless (gst_droid_media_buffer_memory_get_buffer_from_gst_buffer
++      (buffer) == dbuf);
++  fail_unless_equals_int (g_atomic_int_get (&destroyed), 0);
++  gst_buffer_unref (buffer);
++  fail_unless_equals_int (g_atomic_int_get (&released), 2);
++
++  /* the queue goes: each pool lets go of what it holds */
++  gst_droid_buffer_pool_media_buffers_invalidated (second);
++  gst_droid_buffer_pool_media_buffers_invalidated (first);
++  fail_unless_equals_int (g_atomic_int_get (&destroyed), 1);
++  fail_unless (qb.user_data == NULL);
++
++  queue_pool_free (second);
++  queue_pool_free (first);
++}
++
++GST_END_TEST;
++
++/* A buffer whose memory went with an invalidation has no reference left to
++ * bind: the frame is not taken, and nothing is destroyed for it. */
++GST_START_TEST (test_pool_unbound_buffer_is_not_taken)
++{
++  FakeQueueBuffer qb = { NULL };
++  DroidMediaBuffer *dbuf = (DroidMediaBuffer *) & qb;
++  GstBufferPool *pool;
++
++  g_atomic_int_set (&fake_format, FAKE_HAL_RGBA);
++  g_atomic_int_set (&destroyed, 0);
++  pool = queue_pool_new ();
++
++  fail_unless (gst_droid_buffer_pool_acquire_media_buffer (pool, dbuf) == NULL);
++  gst_droid_buffer_pool_media_buffers_invalidated (pool);
++  fail_unless_equals_int (g_atomic_int_get (&destroyed), 0);
++
++  queue_pool_free (pool);
++}
++
++GST_END_TEST;
++
+ static Suite *
+ droid_suite (void)
+ {
+@@ -503,6 +627,8 @@ droid_suite (void)
+   tcase_add_test (tc, test_media_buffer_unknown_format);
+   tcase_add_test (tc, test_media_buffer_known_formats);
+   tcase_add_test (tc, test_media_buffer_threads);
++  tcase_add_test (tc, test_pool_rebind_keeps_one_reference);
++  tcase_add_test (tc, test_pool_unbound_buffer_is_not_taken);
+ 
+   return s;
+ }

@@ -1,0 +1,95 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 7 Nov 2026 08:53:51 +0100
+Subject: [PATCH] droidcamsrc: close the camera outside the device lock
+
+droid_media_camera_disconnect() is being made to wait for camera
+callbacks that are still running before it frees the camera, so that a
+callback can no longer run on a freed DroidMediaCamera (droidmedia
+branch luneos/teardown-races, not sent upstream yet). Those callbacks
+take dev->lock, and dev_close() called disconnect with dev->lock held,
+which would make the wait run into its timeout.
+
+Take the camera out of dev under the lock and disconnect it after
+unlocking. dev->cam is NULL by then, so a callback that runs during the
+disconnect sees a closed camera: dev_start() (which a late JPEG calls to
+restart the preview) now fails on it instead of using a NULL camera, and
+the recording frame release paths skip the release, which downstream
+can also reach after the close when it still holds a frame.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+---
+ gst/droidcamsrc/gstdroidcamsrcdev.c | 29 +++++++++++++++++++++--------
+ 1 file changed, 21 insertions(+), 8 deletions(-)
+
+diff --git a/gst/droidcamsrc/gstdroidcamsrcdev.c b/gst/droidcamsrc/gstdroidcamsrcdev.c
+index 66cb70c..1437f1c 100644
+--- a/gst/droidcamsrc/gstdroidcamsrcdev.c
++++ b/gst/droidcamsrc/gstdroidcamsrcdev.c
+@@ -367,7 +367,8 @@ gst_droidcamsrc_dev_video_frame_callback (void *user,
+   /* unlikely but just in case */
+   if (G_UNLIKELY (!data)) {
+     GST_ERROR ("invalid memory from camera HAL");
+-    droid_media_camera_release_recording_frame (dev->cam, video_data);
++    if (dev->cam)
++      droid_media_camera_release_recording_frame (dev->cam, video_data);
+     goto unlock_and_out;
+   }
+ 
+@@ -667,17 +668,22 @@ gst_droidcamsrc_dev_open (GstDroidCamSrcDev * dev, GstDroidCamSrcCamInfo * info)
+ void
+ gst_droidcamsrc_dev_close (GstDroidCamSrcDev * dev)
+ {
++  DroidMediaCamera *cam;
++
+   GST_DEBUG ("dev close");
+ 
+   g_rec_mutex_lock (dev->lock);
++  cam = dev->cam;
++  dev->cam = NULL;
++  dev->queue = NULL;
++  g_rec_mutex_unlock (dev->lock);
+ 
+-  if (dev->cam) {
+-    droid_media_camera_disconnect (dev->cam);
+-    dev->cam = NULL;
+-    dev->queue = NULL;
++  /* Not under dev->lock: droidmedia waits for camera callbacks that are
++   * still running before it frees the camera, and those take dev->lock.
++   * dev->cam is already NULL for any of them that look. */
++  if (cam) {
++    droid_media_camera_disconnect (cam);
+   }
+-
+-  g_rec_mutex_unlock (dev->lock);
+ }
+ 
+ void
+@@ -784,6 +790,11 @@ gst_droidcamsrc_dev_start (GstDroidCamSrcDev * dev, gboolean apply_settings)
+     goto out;
+   }
+ 
++  if (!dev->cam) {
++    GST_WARNING_OBJECT (src, "camera is closed");
++    goto out;
++  }
++
+   GST_DEBUG_OBJECT (src, "dev start");
+ 
+   if (!dev->use_raw_data) {
+@@ -1125,7 +1136,9 @@ gst_droidcamsrc_dev_release_recording_frame (void *data,
+   g_rec_mutex_lock (dev->lock);
+   --dev->vid->queued_frames;
+ 
+-  droid_media_camera_release_recording_frame (dev->cam, video_data->data);
++  /* downstream can hold a frame past the close of the camera */
++  if (dev->cam)
++    droid_media_camera_release_recording_frame (dev->cam, video_data->data);
+ 
+   g_slice_free (GstDroidCamSrcDevVideoData, video_data);
+   g_rec_mutex_unlock (dev->lock);
+-- 
+2.53.0
+
