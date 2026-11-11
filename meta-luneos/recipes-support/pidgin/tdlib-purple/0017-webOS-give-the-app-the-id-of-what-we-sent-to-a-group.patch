@@ -1,0 +1,102 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sun, 8 Nov 2026 19:46:34 +0100
+Subject: [PATCH] webOS: give the app the id of what we sent to a group
+ elsewhere
+
+A message we sent to a group from another client, the Telegram app on
+the phone say, reached the Messaging app without its serviceMessageId:
+a poll made on the phone could not be voted in from the app, nor such
+a message reacted to or edited. showMessageTextChat stashed
+"webos-msg-id" on the conversation for a received group message only;
+a private chat's such message has had it all along.
+
+It is written with purple_conv_chat_write under our own name, which
+libpurple (2.14, conversation.c, purple_conv_chat_write) compares with
+the chat's nick. That is the account's user name, the phone number,
+where the name we write under is the account's alias, our full name,
+so libpurple adds PURPLE_MESSAGE_RECV and the transport stores the
+message as a received one. Either way the transport's
+incoming_message_cb takes the stash with the write: as a received
+message's, or as an outgoing carbon's (PURPLE_MESSAGE_REMOTE_SEND).
+
+What this client sent itself is still not stashed: the app has it, and
+its id comes with "webos-im-outbox-id" once TDLib has sent it.
+
+Unit test in test/webos-commands-test.cpp.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ receiving.cpp                |  9 ++++++++-
+ test/webos-commands-test.cpp | 35 +++++++++++++++++++++++++++++++++++
+ 2 files changed, 43 insertions(+), 1 deletion(-)
+
+diff --git a/receiving.cpp b/receiving.cpp
+index 0ef67cc..bd7fa48 100644
+--- a/receiving.cpp
++++ b/receiving.cpp
+@@ -651,9 +651,16 @@ static void showMessageTextChat(TdAccountData &account, const td::td_api::chat &
+ 
+     if (text) {
+         if (flags & PURPLE_MESSAGE_SEND) {
+-            if (conv)
++            if (conv) {
++                // webOS: as for a private chat's, stash the id of what we sent from another client
++                // (the transport's incoming_message_cb takes it with the write), so that the
++                // message can be reacted to, voted in or edited from the app.
++                if (serviceMessageId && *serviceMessageId)
++                    purple_conversation_set_data(purple_conv_chat_get_conversation(conv), "webos-msg-id",
++                                                 g_strdup(serviceMessageId));
+                 purple_conv_chat_write(conv, purple_account_get_name_for_display(account.purpleAccount),
+                                        text, flags, message.timestamp);
++            }
+         } else {
+             if (purpleId != 0) {
+                 // webOS: smuggle the sender's routable id + display name through the single `who` slot
+diff --git a/test/webos-commands-test.cpp b/test/webos-commands-test.cpp
+index 5e4072b..6bd61dd 100644
+--- a/test/webos-commands-test.cpp
++++ b/test/webos-commands-test.cpp
+@@ -1236,6 +1236,41 @@ TEST_F(WebosCommandTest, VotePollNotSent)
+     );
+ }
+ 
++// What we sent to a group from another client is shown with its id, as a received message is, so
++// that the app can react to it, edit it or vote in it. libpurple writes it as received, our name
++// being no member's of the chat, and the transport stores it so.
++TEST_F(WebosCommandTest, OwnMessageFromElsewhereInGroup)
++{
++    login();
++    addBasicGroup();
++    tgl.update(make_object<updateNewMessage>(makeMessage(
++        1, userIds[0], groupChatId, false, 10001, makeTextMessage("Lunch?")
++    )));
++    tgl.verifyRequest(viewMessages(groupChatId, {1}, nullptr, true));
++    prpl.discardEvents();
++    PurpleConversation *conv = purple_find_chat(connection, 2);
++    ASSERT_NE(nullptr, conv);
++    char *stashed = static_cast<char *>(purple_conversation_get_data(conv, "webos-msg-id"));
++    ASSERT_STREQ(serviceMessageId(groupChatId, 1).c_str(), stashed);
++    // The transport takes it, with the write
++    g_free(stashed);
++    purple_conversation_set_data(conv, "webos-msg-id", nullptr);
++
++    // Sent elsewhere: TDLib has no sending state for it
++    auto message = makeMessage(2, selfId, groupChatId, true, 10002, makeTextMessage("At one"));
++    message->sending_state_ = nullptr;
++    tgl.update(make_object<updateNewMessage>(std::move(message)));
++    tgl.verifyRequest(viewMessages(groupChatId, {2}, nullptr, true));
++    prpl.verifyEvents(ConversationWriteEvent(
++        groupChatPurpleName, selfFirstName + " " + selfLastName, "At one",
++        (PurpleMessageFlags)(PURPLE_MESSAGE_SEND | PURPLE_MESSAGE_REMOTE_SEND), 10002
++    ));
++    stashed = static_cast<char *>(purple_conversation_get_data(conv, "webos-msg-id"));
++    ASSERT_STREQ(serviceMessageId(groupChatId, 2).c_str(), stashed);
++    g_free(stashed);
++    purple_conversation_set_data(conv, "webos-msg-id", nullptr);
++}
++
+ // A group's own news is told in words, not as "Unsupported message type"
+ TEST_F(WebosCommandTest, GroupEvents)
+ {

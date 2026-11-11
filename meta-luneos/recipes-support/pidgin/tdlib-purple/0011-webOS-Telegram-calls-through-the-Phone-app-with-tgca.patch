@@ -1,0 +1,3254 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 20 Oct 2026 16:30:48 +0200
+Subject: [PATCH] webOS: Telegram calls through the Phone app, with
+ tgcalls-lite and video
+
+* Place and take calls through the Phone app over LS2
+
+tdlib-purple already does the whole call - TDLib signalling and libtgvoip
+media - but its UI is Pidgin's: a purple_request_action() accept dialog, a
+"/hangup" command, and a gate on the front-end's PurpleMedia capabilities.
+webOS has none of that. What it has is the Phone app, which drives calls
+of other services through an LS2 contract, as it does for the WhatsApp
+connector.
+
+call-luna.{h,cpp} serves that contract as com.palm.telegram.call,
+registered when the account connects, on libpurple's own GLib main loop:
+callStateQuery (subscription), dial, answer, disconnect and hangupAll. They
+reach TDLib through three bridge functions in call.cpp (callBridgeDial/
+Answer/Hangup), and updateCall() pushes every state change - incoming,
+dialing, active, disconnected with a cause (normal, rejected, missed,
+error) - instead of writing to the conversation or opening a dialog. The
+media-caps gate is bypassed. The accept/cancel dialog's callbacks
+(acceptCallCb, discardCallCb) have no caller left and are removed;
+answering goes through acceptCurrentCall().
+
+Call audio: libtgvoip plays to the PulseAudio sink "voipcall" and records
+from the source "webcall", the call devices module-palm-policy routes to
+the earpiece, speaker or headset and the matching microphone. While the
+call is active the bridge reports it to audiod
+(com.palm.audio/phone/CallStatusUpdate, transport com.palm.telegram), and
+clears it on hangup, from the service's own handle. No audio scenario is
+forced, so a call starts on the earpiece (or a connected headset) and the
+Phone app's speaker button moves it.
+
+Dialing is made to cope with how the Phone app dials:
+
+- an "id<n>" buddy whose user TDLib has not loaded yet (right after login)
+  is called by id directly; createCall only needs the id.
+- a bare "+E.164" number (dialpad, or a contact not linked to a Telegram
+  buddy) is resolved with searchUserByPhoneNumber first, local contacts or
+  not; if it is not on Telegram the call card is closed with an error
+  instead of hanging on "Connecting".
+- the dialer may send both the resolved "id<n>" and the raw number for one
+  contact in the same tick. createCall is asynchronous, so hasActiveCall()
+  is still false for the second; a synchronous "initiating" flag drops it,
+  and its card is closed.
+- an outgoing call is reported under the exact address that was dialed,
+  so the plugin's card merges with the dialer's instead of leaving a
+  second one stuck on "Connecting".
+
+Calls are voice only: there is no video path for libtgvoip on LuneOS, so a
+video request is placed as a voice call and video is never reported.
+
+callProtocol.library_versions_ is left empty on purpose: declaring "2.7.7"
+makes current clients move to a newer signalling path the bundled
+VoIPController cannot speak, and audio breaks with it.
+
+Building needs luna-service2 (lunaservice_INCLUDE_DIRS/_LIBRARIES).
+-Dtgvoip_NO_DSP=ON matches a libtgvoip built with --disable-dsp. The call
+life cycle goes to libpurple's debug log.
+
+The tests have no bus, so they build test/call-luna-stub.cpp, whose
+call service functions do nothing, in place of call-luna.cpp.
+
+Not for upstream: the LS2 service, the Phone app contract and audiod are
+webOS only.
+
+* Carry calls with tgcalls-lite when the peer speaks tgcalls V2
+
+Current Telegram clients run calls on tgcalls. The versions they register
+are 2.7.7 and 5.0.0 (InstanceImpl) and 7.0.0 to 13.0.0 (InstanceV2Impl).
+None of them is libtgvoip, so with library_versions left empty a call has
+no engine both ends share.
+
+tgcalls-lite (luneos-synergy-connectors, im/telegram/plugin/tgcalls-lite)
+implements tgcalls V2 with signalling version 7.0.0:
+- signalling packets encrypted as tgcalls' EncryptedConnection does and
+  relayed by TDLib;
+- ICE through libnice, using the STUN/TURN servers TDLib hands over;
+- DTLS-SRTP and Opus;
+- audio on the PulseAudio call devices libtgvoip already uses
+  ("voipcall" and "webcall").
+
+When it is built in (tgcalls_lite_INCLUDE_DIRS/_LIBRARIES):
+
+- callProtocol.library_versions is ["7.0.0"];
+- if the agreed protocol in callStateReady names 7.0.0, the call runs
+  on tgcalls-lite. Its signalling goes out through sendCallSignalingData
+  and comes in through updateNewCallSignalingData. Signalling that
+  arrives before callStateReady is kept until the engine starts;
+- otherwise the call stays on libtgvoip as before;
+- LUNEOS_TELEGRAM_CALL_ENGINE=tgvoip in the service's environment turns
+  tgcalls-lite off, for comparison.
+
+Telegram's own reflectors (callServerTypeTelegramReflector) speak tgcalls'
+ReflectorPort protocol, not TURN, so tgcalls-lite only uses the WebRTC
+STUN/TURN servers. Calls are voice only: no video source or sink is wired
+to the engine yet. The plug-in is built as C++17 when tgcalls-lite is
+in, because its headers need it.
+
+Also fixed: when a call could not be activated, the VoIPController was
+deleted without Stop(), and libtgvoip aborts the process in that case.
+It is now stopped first.
+
+* Clear ended calls from the Phone app, show the peer's number
+
+The Phone app removes a call card only when a callStateQuery push no
+longer lists the call. com.palm.telegram.call kept reporting the ended
+call as "disconnected" for good, so its "Ended" card stayed on screen
+and kept the Phone app open after the next call. Push the empty line
+list 1.5 s after "disconnected", as the WhatsApp connector does; any
+newer push cancels it.
+
+Incoming call cards showed the "id<n>" buddy name, so the Phone app
+found no contact and offered to add one. When Telegram shares the
+peer's phone number, the card shows it in E.164 form instead. An
+outgoing call keeps the address that was dialled, which the Phone app
+keyed its card to.
+
+Every call went out as call id "tg". The Phone app remembers the ids of
+the calls it has seen end and ignores a later "disconnected" for one of
+them, so only the first call after the Phone app started closed its
+card; every later one stayed up. Each call now gets an id of its own,
+taken from the clock when it starts, so a restarted service does not
+reuse one either. audiod still gets "tg": it keeps one call per sender.
+
+* Video in tgcalls-lite calls through luneos-rtc-engine
+
+Telegram calls carried by tgcalls-lite get video the way WhatsApp calls
+do: org.webosports.rtcengine owns the camera, the H.264 encoder and
+decoder and the shared-memory frames the Phone app shows; this side
+decides when an engine session runs and moves access units between the
+engine's two SOCK_SEQPACKET sockets and the call engine.
+
+tgcalls-video.{h,cpp} hold that logic with no TDLib or luna-service2
+dependency, so test/tgcalls-video-test.cpp exercises it on its own:
+- AuBridge passes the peer's units to the engine without ever
+  blocking libpurple's loop, holds them back until an IDR after a drop
+  or a (re)connect, and reads our encoded camera on a thread of its own.
+- Controller asks for capabilities, starts a session (with TX when our
+  camera is wanted and the device can encode, receive-only when the user
+  only watches the peer), restarts it when the camera is toggled, stops
+  it when the call ends, ignores replies to sessions it already closed,
+  and passes the peer's keyframe requests to the encoder at most once a
+  second.
+
+The Phone app talks to com.palm.telegram.call as it does to the
+WhatsApp connector: dial takes "video", the new changeMedia method takes
+incomingVideo/outgoingVideo, and the call state carries incomingVideo,
+outgoingVideo, incomingVideoState, incomingVideoOrientation and the
+frame/preview paths. A wish made before the engine runs is kept and
+applied when it does. audiod is told the call carries video.
+
+Our picture is sent rotated by 90 degrees (the CVO extension); that
+value has not been checked against a live call yet.
+
+* Log why TDLib ended a call
+
+When a Telegram call is answered on another device, sargo showed it
+as missed. TDLib's log is capped at warnings (0009), so nothing
+recorded which discard reason the server sent. Log one line per
+ending call update: the state, TDLib's discard reason, whether the
+call is outgoing and whether it is the one the Phone app shows. No
+peer data is logged.
+
+* A Telegram call answered on another device is not missed
+
+When another device of the same account takes an incoming call, the
+server discards it here with no reason (callDiscardReasonEmpty); a
+caller who gives up while it rings gives callDiscardReasonMissed.
+Both were pushed to the Phone app as an end it had not acted on, so
+it showed a missed call.
+
+Tell the Phone app "answeredElsewhere" for an incoming call that was
+not answered here (no accept sent, never ready) and ended with no
+reason. Declined and missed keep their causes; anything else stays
+"normal". The rule lives in call-end.h with a standalone host test.
+
+Seen on sargo: answered on another device gave reason=empty, a call
+the caller cancelled gave reason=missed (logged by 0019).
+
+* Our picture upright on the far side, and turning with the phone
+
+A tgcalls receiver needs our camera's picture turned 270 degrees for
+sargo held upright (90 arrived upside down on Android), and the
+Phone app's own inset keeps its one quarter turn: the two are separate
+values now. The rotation follows the phone: the Phone app sends
+changeMedia {deviceOrientation} (the shell's quarter turns) while our
+camera is sent, and tgvideo::txRotationDegrees(camera, turns) gives
+270 less a quarter per turn for the front camera, more for the back
+one; the engine sends it in MediaState (and CVO) as the phone turns.
+test/video-rotation-test.cpp covers the arithmetic. Checked on sargo
+against Android, both ways sideways.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ CMakeLists.txt               |  31 ++
+ account-data.cpp             |  20 ++
+ account-data.h               |  26 ++
+ call-end.h                   |  27 ++
+ call-luna.cpp                | 414 +++++++++++++++++++++++++
+ call-luna.h                  |  61 ++++
+ call.cpp                     | 271 ++++++++++++----
+ call.h                       |   5 +-
+ td-client.cpp                |  81 ++++-
+ td-client.h                  |  10 +-
+ tdlib-purple.cpp             |   4 +-
+ test/CMakeLists.txt          |   3 +
+ test/call-end-test.cpp       |  50 +++
+ test/call-luna-stub.cpp      |  24 ++
+ test/tgcalls-video-test.cpp  | 481 +++++++++++++++++++++++++++++
+ test/video-rotation-test.cpp |  45 +++
+ tgcalls-call.cpp             | 285 +++++++++++++++++
+ tgcalls-call.h               |  43 +++
+ tgcalls-video.cpp            | 579 +++++++++++++++++++++++++++++++++++
+ tgcalls-video.h              | 187 +++++++++++
+ 20 files changed, 2585 insertions(+), 62 deletions(-)
+ create mode 100644 call-end.h
+ create mode 100644 call-luna.cpp
+ create mode 100644 call-luna.h
+ create mode 100644 test/call-end-test.cpp
+ create mode 100644 test/call-luna-stub.cpp
+ create mode 100644 test/tgcalls-video-test.cpp
+ create mode 100644 test/video-rotation-test.cpp
+ create mode 100644 tgcalls-call.cpp
+ create mode 100644 tgcalls-call.h
+ create mode 100644 tgcalls-video.cpp
+ create mode 100644 tgcalls-video.h
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 16895e6..e10e85d 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -89,6 +89,9 @@ add_library(telegram-tdlib SHARED
+     media-variants.cpp
+     file-transfer.cpp
+     call.cpp
++    call-luna.cpp
++    tgcalls-call.cpp
++    tgcalls-video.cpp
+     identifiers.cpp
+     secret-chat.cpp
+     pidgin-ui.cpp
+@@ -125,10 +128,38 @@ endif (NOT NoPidgin)
+ if (NOT tgvoip_INCLUDE_DIRS STREQUAL "")
+     target_include_directories(telegram-tdlib SYSTEM PRIVATE ${tgvoip_INCLUDE_DIRS})
+ endif (NOT tgvoip_INCLUDE_DIRS STREQUAL "")
++
++# luna-service2 for the com.palm.telegram.call LS2 service (call-luna.cpp)
++set(lunaservice_INCLUDE_DIRS "" CACHE STRING "Path to luna-service2 public headers")
++set(lunaservice_LIBRARIES "lunaservice" CACHE STRING "luna-service2 library to link")
++if (NOT lunaservice_INCLUDE_DIRS STREQUAL "")
++    target_include_directories(telegram-tdlib SYSTEM PRIVATE ${lunaservice_INCLUDE_DIRS})
++endif (NOT lunaservice_INCLUDE_DIRS STREQUAL "")
++target_link_libraries(telegram-tdlib PRIVATE ${lunaservice_LIBRARIES})
++
+ if (NOT NoVoip)
+     target_link_libraries(telegram-tdlib PRIVATE ${tgvoip_LIBRARIES})
++    if (tgvoip_NO_DSP)
++        # libtgvoip was built with --disable-dsp: EchoCanceller.h gates its webrtc:: members on
++        # TGVOIP_NO_DSP, so compile with the same define to match the ABI and avoid referencing
++        # webrtc types we didn't build.
++        target_compile_definitions(telegram-tdlib PRIVATE TGVOIP_NO_DSP)
++    endif (tgvoip_NO_DSP)
+ endif (NOT NoVoip)
+ 
++# tgcalls-lite (luneos-synergy-connectors, im/telegram/plugin/tgcalls-lite): calls with the tgcalls
++# V2 protocol current clients speak, next to libtgvoip. Its headers need C++17.
++set(tgcalls_lite_INCLUDE_DIRS "" CACHE STRING "tgcalls-lite headers; empty builds without it")
++set(tgcalls_lite_LIBRARIES "" CACHE STRING "tgcalls-lite library (libtgcalls-lite.a)")
++if (NOT NoVoip AND NOT tgcalls_lite_INCLUDE_DIRS STREQUAL "")
++    pkg_check_modules(tgcalls_lite_deps REQUIRED glib-2.0 nice libsrtp2 openssl json-glib-1.0 opus libpulse-simple)
++    target_compile_definitions(telegram-tdlib PRIVATE HAVE_TGCALLS_LITE)
++    target_include_directories(telegram-tdlib SYSTEM PRIVATE ${tgcalls_lite_INCLUDE_DIRS} ${tgcalls_lite_deps_INCLUDE_DIRS})
++    target_link_libraries(telegram-tdlib PRIVATE ${tgcalls_lite_LIBRARIES} ${tgcalls_lite_deps_LIBRARIES})
++    set_property(TARGET telegram-tdlib PROPERTY CXX_STANDARD 17)
++    message(STATUS "tgcalls-lite: enabled")
++endif ()
++
+ if (DEFINED STANDARD_LIBRARIES_EXTRA)
+     set (CMAKE_CXX_STANDARD_LIBRARIES "${CMAKE_CXX_STANDARD_LIBRARIES} ${STANDARD_LIBRARIES_EXTRA}")
+ endif (DEFINED STANDARD_LIBRARIES_EXTRA)
+diff --git a/account-data.cpp b/account-data.cpp
+index b25d806..03d581b 100644
+--- a/account-data.cpp
++++ b/account-data.cpp
+@@ -1105,6 +1105,7 @@ bool TdAccountData::hasActiveCall()
+ 
+ void TdAccountData::setActiveCall(int32_t callId)
+ {
++    m_callInitiating = false;   // the call really started; drop the synchronous initiation guard
+ #ifndef NoVoip
+     if (!m_callData) {
+         m_callData = std::make_unique<tgvoip::VoIPController>();
+@@ -1118,10 +1119,29 @@ tgvoip::VoIPController *TdAccountData::getCallData()
+     return m_callData.get();
+ }
+ 
++void TdAccountData::addPendingCallSignaling(const std::string &data)
++{
++    // Only the first few messages can arrive before the engine starts; a peer flooding us is
++    // not worth queueing.
++    if (m_pendingCallSignaling.size() < 64)
++        m_pendingCallSignaling.push_back(data);
++}
++
++std::vector<std::string> TdAccountData::takePendingCallSignaling()
++{
++    std::vector<std::string> result;
++    result.swap(m_pendingCallSignaling);
++    return result;
++}
++
+ void TdAccountData::removeActiveCall()
+ {
++    m_callEngine.reset();
++    m_pendingCallSignaling.clear();
+     m_callData.reset();
+     m_callId = 0;
++    m_callInitiating = false;   // failed/ended: allow a fresh dial
++    m_callDialedAddress.clear();
+ }
+ 
+ void TdAccountData::addPendingReadReceipt(ChatId chatId, MessageId messageId)
+diff --git a/account-data.h b/account-data.h
+index 2efcbf9..06aff4f 100644
+--- a/account-data.h
++++ b/account-data.h
+@@ -513,6 +513,28 @@ public:
+     int32_t                    getActiveCallId() const { return m_callId; }
+     tgvoip::VoIPController    *getCallData();
+     void                       removeActiveCall();
++    // The tgcalls-lite engine of the active call (tgcalls-call.cpp), type-erased so this header
++    // needs none of its headers; empty for a libtgvoip call. Dropped with the call.
++    void                      *getCallEngine() const { return m_callEngine.get(); }
++    void                       setCallEngine(std::shared_ptr<void> engine) { m_callEngine = std::move(engine); }
++    // Call signalling that arrived before the engine started.
++    void                       addPendingCallSignaling(const std::string &data);
++    std::vector<std::string>   takePendingCallSignaling();
++    // createCall is async: hasActiveCall() only turns true once callStatePending arrives, so two
++    // dials fired in the same tick (e.g. the dialer sending both a resolved "id<n>" and the raw
++    // phone number for the same contact) both pass the guard and start two calls. This flag is set
++    // synchronously the instant a dial begins (createCall sent OR a phone->user lookup started) so
++    // the second dial is rejected. Cleared when the call really starts (setActiveCall) or fails.
++    bool                       isCallInitiating() const { return m_callInitiating; }
++    void                       beginCallInitiation() { m_callInitiating = true; }
++    void                       endCallInitiation()   { m_callInitiating = false; }
++    // The exact address the dialer dialed for the current OUTGOING call (e.g. "+15555550101" when a
++    // phone number was typed, or "id<n>" for a contact). The Phone app creates its call card keyed to
++    // that string; if the plugin then reports the call under the *resolved* "id<n>" (phone numbers get
++    // resolved via searchUserByPhoneNumber) the two don't match and TWO cards show. Push state under
++    // this dialed address so the plugin's card merges with the dialer's instead of splitting.
++    void                       setCallDialedAddress(const std::string &a) { m_callDialedAddress = a; }
++    const std::string         &getCallDialedAddress() const { return m_callDialedAddress; }
+ 
+     PendingMessageQueue        pendingMessages;
+     // Reactions to our messages not seen yet, by chat
+@@ -603,7 +625,11 @@ private:
+ 
+     // Voice call data
+     std::unique_ptr<tgvoip::VoIPController> m_callData;
++    std::shared_ptr<void>                   m_callEngine;
++    std::vector<std::string>                m_pendingCallSignaling;
+     int32_t                                 m_callId;
++    bool                                    m_callInitiating = false;
++    std::string                             m_callDialedAddress;
+ 
+     std::unique_ptr<PendingRequest> getPendingRequestImpl(uint64_t requestId);
+     void                            saveTempFileUploads();
+diff --git a/call-end.h b/call-end.h
+new file mode 100644
+index 0000000..9f9c52e
+--- /dev/null
++++ b/call-end.h
+@@ -0,0 +1,27 @@
++#ifndef _CALL_END_H
++#define _CALL_END_H
++
++// Which cause the Phone app is told when TDLib discards a call. Kept free of TDLib types so the
++// rule can be tested on its own (test/call-end-test.cpp).
++
++enum class CallEndReason { None, Empty, Missed, Declined, Disconnected, HungUp, UpgradeToGroupCall, Other };
++
++// answeredHere: the call was accepted on this device (the user tapped answer, or it became ready).
++//
++// Answered elsewhere: when another device of the same account takes an incoming call, the server
++// discards it here with no reason (TDLib callDiscardReasonEmpty), seen on sargo 2026-11-05. A caller
++// who gives up while it rings gives "missed" instead, and our own decline gives "declined".
++inline const char *callEndCause(CallEndReason reason, bool outgoing, bool answeredHere)
++{
++    switch (reason) {
++    case CallEndReason::Declined: return "rejected";
++    case CallEndReason::Missed:   return "missed";
++    case CallEndReason::None:
++    case CallEndReason::Empty:
++        if (!outgoing && !answeredHere) return "answeredElsewhere";
++        return "normal";
++    default:                      return "normal";
++    }
++}
++
++#endif
+diff --git a/call-luna.cpp b/call-luna.cpp
+new file mode 100644
+index 0000000..b585251
+--- /dev/null
++++ b/call-luna.cpp
+@@ -0,0 +1,414 @@
++/* webOS Synergy Revival - Telegram calling M2 (Path C): the LS2 call service.
++ * See call-luna.h. Serves com.palm.telegram.call to the stock Phone app (CallSynergizer),
++ * mirroring the com.palm.whatsapp / wacallm contract:
++ *   - callStateQuery  (subscription) : streams line/call state to the dialer
++ *   - dial {address}                 : place an outgoing call
++ *   - answer {id}                    : accept the pending incoming call
++ *   - disconnect {id} / hangupAll    : end the current call
++ * The heavy lifting (TDLib signaling + libtgvoip media) already lives in call.cpp; this only
++ * translates the webOS call contract to/from the small bridge functions below.
++ */
++
++#include "call-luna.h"
++#include "config.h"
++#include <luna-service2/lunaservice.h>
++#include <glib.h>
++#include <string>
++#include <cstring>
++#include <cstdarg>
++#include <memory>
++
++/* Implemented in call.cpp - drive the active account's TDLib call via the existing prpl logic. */
++extern bool callBridgeDial(PurpleAccount *account, const char *who, bool video);
++extern void callBridgeAnswer(PurpleAccount *account);
++extern void callBridgeHangup(PurpleAccount *account);
++extern void callBridgeChangeMedia(PurpleAccount *account, bool hasView, bool view, bool hasCamera, bool camera,
++                                  int deviceTurns);
++
++/* Call life-cycle trace, through libpurple's debug log like the rest of the plug-in. */
++void tgcLog(const char *fmt, ...)
++{
++    va_list ap;
++    va_start(ap, fmt);
++    char *msg = g_strdup_vprintf(fmt, ap);
++    va_end(ap);
++    purple_debug_info(config::pluginId, "call: %s\n", msg);
++    g_free(msg);
++}
++
++namespace {
++
++LSHandle      *g_sh       = NULL;   // com.palm.telegram.call on the (single) bus
++PurpleAccount *g_account  = NULL;   // the bound Telegram account
++
++// Last state we pushed, so a late subscriber gets the current picture immediately.
++std::string    g_state, g_peerAddr, g_peerName, g_cause;
++bool           g_outgoing = false;
++// The call's id on the card. The Phone app remembers every call id it has seen end and ignores a
++// later "disconnected" for it, so each call needs an id of its own, or the card of every call after
++// the first stays up. From the clock, so a restarted service does not hand out an old one again.
++std::string    g_cardId;
++bool           g_isVideo = false;   // call.is_video_
++// The video members while the call has a video session (tgcalls-call.cpp), else empty.
++std::string    g_videoLine, g_videoPayload;
++
++const char *SUBKEY = "callState";
++
++std::string jsonEscape(const char *s)
++{
++    std::string o;
++    for (const char *p = s ? s : ""; *p; ++p) {
++        switch (*p) {
++            case '"':  o += "\\\""; break;
++            case '\\': o += "\\\\"; break;
++            case '\n': o += "\\n";  break;
++            case '\r': o += "\\r";  break;
++            case '\t': o += "\\t";  break;
++            default:   o += *p;     break;
++        }
++    }
++    return o;
++}
++
++// Build the callStateQuery payload the Phone app's SynergyTransport reads: one line with a
++// line-level "state" (incoming/dialing/active/disconnected), or no lines when idle, and the
++// video members the WhatsApp connector sends too (line: incomingVideo, outgoingVideo,
++// incomingVideoState; top level: videoURI and the preview).
++std::string buildPayload()
++{
++    std::string p = "{\"returnValue\":true";
++    p += g_videoPayload.empty() ? std::string(",\"allowVideoCalls\":true,\"videoURI\":\"\"") : g_videoPayload;
++    p += ",\"lines\":[";
++    if (!g_state.empty()) {
++        p += "{\"state\":\"" + jsonEscape(g_state.c_str()) + "\",";
++        if (g_state == "disconnected")
++            p += "\"disconnectDetails\":{\"cause\":\"" + jsonEscape(g_cause.c_str()) + "\"},";
++        // lineFields() start with ','; without a session, a video call still shows as one.
++        std::string video = g_videoLine.empty()
++            ? std::string(",\"incomingVideo\":false,\"outgoingVideo\":false,\"incomingVideoState\":\"") +
++                  (g_isVideo && g_state != "disconnected" ? "available" : "unavailable") + "\""
++            : g_videoLine;
++        p += video.substr(1) + ",";
++        // address and displayName sit flat on each call, as the WhatsApp connector sends them.
++        // transport is this connector's own PHONE account template id: without it the call is
++        // taken for a cellular one and the id is shown formatted as a phone number.
++        p += "\"calls\":[{\"id\":\"" + g_cardId + "\",\"origin\":\"" + std::string(g_outgoing ? "outgoing" : "incoming") + "\","
++             "\"transport\":\"com.palm.telegram\","
++             "\"address\":\"" + jsonEscape(g_peerAddr.c_str()) + "\","
++             "\"displayName\":\"" + jsonEscape(g_peerName.empty() ? g_peerAddr.c_str() : g_peerName.c_str()) + "\"}]}";
++    }
++    p += "]}";
++    return p;
++}
++
++bool cbCallStateQuery(LSHandle *sh, LSMessage *msg, void *)
++{
++    LSError err; LSErrorInit(&err);
++    bool subscribed = false;
++    LSSubscriptionProcess(sh, msg, &subscribed, &err);   // honours {"subscribe":true}
++    if (subscribed)
++        LSSubscriptionAdd(sh, SUBKEY, msg, &err);
++    std::string payload = buildPayload();
++    LSMessageReply(sh, msg, payload.c_str(), &err);
++    if (LSErrorIsSet(&err)) { purple_debug_warning(config::pluginId, "callStateQuery: %s\n", err.message); LSErrorFree(&err); }
++    return true;
++}
++
++// tiny extractor for a top-level boolean: 1 true, 0 false, -1 absent or not a boolean
++int getBool(const char *json, const char *key)
++{
++    if (!json) return -1;
++    std::string needle = std::string("\"") + key + "\"";
++    const char *k = strstr(json, needle.c_str());
++    if (!k) return -1;
++    const char *c = strchr(k + needle.size(), ':');
++    if (!c) return -1;
++    while (*++c == ' ') ;
++    if (!strncmp(c, "true", 4)) return 1;
++    if (!strncmp(c, "false", 5)) return 0;
++    return -1;
++}
++
++// tiny extractor for a top-level small non-negative integer: -1 when absent or not one
++int getSmallUint(const char *json, const char *key)
++{
++    if (!json) return -1;
++    std::string needle = std::string("\"") + key + "\"";
++    const char *k = strstr(json, needle.c_str());
++    if (!k) return -1;
++    const char *c = strchr(k + needle.size(), ':');
++    if (!c) return -1;
++    while (*++c == ' ') ;
++    int v = -1;
++    for (; *c >= '0' && *c <= '9' && v < 10000; c++)
++        v = (v < 0 ? 0 : v * 10) + (*c - '0');
++    return v;
++}
++
++// tiny extractor for a top-level string field (avoids pulling a JSON lib into the prpl)
++std::string getField(const char *json, const char *key)
++{
++    if (!json) return "";
++    std::string needle = std::string("\"") + key + "\"";
++    const char *k = strstr(json, needle.c_str());
++    if (!k) return "";
++    const char *c = strchr(k + needle.size(), ':');
++    if (!c) return "";
++    while (*++c == ' ') ;
++    if (*c != '"') return "";
++    const char *e = strchr(++c, '"');
++    return e ? std::string(c, e - c) : "";
++}
++
++bool cbDial(LSHandle *sh, LSMessage *msg, void *)
++{
++    LSError err; LSErrorInit(&err);
++    const char *payload = LSMessageGetPayload(msg);
++    std::string addr = getField(payload, "address");
++    // A video call, when the peer speaks tgcalls V2 (tgcalls-lite); libtgvoip carries its audio.
++    bool video = getBool(payload, "video") == 1;
++    bool ok = g_account && !addr.empty() && callBridgeDial(g_account, addr.c_str(), video);
++    tgcLog("dial %s%s: %s", addr.c_str(), video ? " (video)" : "", ok ? "placed" : "failed");
++    LSMessageReply(sh, msg, ok ? "{\"returnValue\":true}" : "{\"returnValue\":false}", &err);
++    if (LSErrorIsSet(&err)) LSErrorFree(&err);
++    return true;
++}
++
++bool cbAnswer(LSHandle *sh, LSMessage *msg, void *)
++{
++    LSError err; LSErrorInit(&err);
++    if (g_account) callBridgeAnswer(g_account);
++    LSMessageReply(sh, msg, "{\"returnValue\":true}", &err);
++    if (LSErrorIsSet(&err)) LSErrorFree(&err);
++    return true;
++}
++
++bool cbDisconnect(LSHandle *sh, LSMessage *msg, void *)
++{
++    LSError err; LSErrorInit(&err);
++    if (g_account) callBridgeHangup(g_account);
++    LSMessageReply(sh, msg, "{\"returnValue\":true}", &err);
++    if (LSErrorIsSet(&err)) LSErrorFree(&err);
++    return true;
++}
++
++// changeMedia {id, incomingVideo?, outgoingVideo?, deviceOrientation?} - the Phone app's video toggles (legacy
++// VideoCall.js/AbstractCall.js). A member left out leaves that direction as it is. incomingVideo:
++// the user wants to see the peer's video; outgoingVideo: our camera. The state change comes back
++// through callStateQuery.
++bool cbChangeMedia(LSHandle *sh, LSMessage *msg, void *)
++{
++    LSError err; LSErrorInit(&err);
++    const char *payload = LSMessageGetPayload(msg);
++    int in = getBool(payload, "incomingVideo"), out = getBool(payload, "outgoingVideo");
++    // Which way the phone is held, the shell's quarter turns: our picture's turn follows it.
++    int turns = getSmallUint(payload, "deviceOrientation");
++    tgcLog("changeMedia incoming=%d outgoing=%d orientation=%d", in, out, turns);
++    if (g_account)
++        callBridgeChangeMedia(g_account, in >= 0, in == 1, out >= 0, out == 1, turns);
++    LSMessageReply(sh, msg, "{\"returnValue\":true}", &err);
++    if (LSErrorIsSet(&err)) LSErrorFree(&err);
++    return true;
++}
++
++// The Phone app's manual-dial call contract methods (spec Part 3). We implement the ones a 1:1
++// VoIP call needs; the rest ack so CallSynergizer doesn't error.
++bool cbNoop(LSHandle *sh, LSMessage *msg, void *)
++{
++    LSError err; LSErrorInit(&err);
++    LSMessageReply(sh, msg, "{\"returnValue\":true}", &err);
++    if (LSErrorIsSet(&err)) LSErrorFree(&err);
++    return true;
++}
++
++LSMethod g_methods[] = {
++    { "callStateQuery", cbCallStateQuery, LUNA_METHOD_FLAGS_NONE },
++    { "dial",           cbDial,           LUNA_METHOD_FLAGS_NONE },
++    { "answer",         cbAnswer,         LUNA_METHOD_FLAGS_NONE },
++    { "disconnect",     cbDisconnect,     LUNA_METHOD_FLAGS_NONE },
++    { "hangupAll",      cbDisconnect,     LUNA_METHOD_FLAGS_NONE },
++    { "hangupAllActive",cbDisconnect,     LUNA_METHOD_FLAGS_NONE },
++    { "hold",           cbNoop,           LUNA_METHOD_FLAGS_NONE },
++    { "swap",           cbNoop,           LUNA_METHOD_FLAGS_NONE },
++    { "merge",          cbNoop,           LUNA_METHOD_FLAGS_NONE },
++    { "extract",        cbNoop,           LUNA_METHOD_FLAGS_NONE },
++    { "dtmf",           cbNoop,           LUNA_METHOD_FLAGS_NONE },
++    { "dtmfEnd",        cbNoop,           LUNA_METHOD_FLAGS_NONE },
++    { "changeMedia",    cbChangeMedia,    LUNA_METHOD_FLAGS_NONE },
++    { NULL, NULL, LUNA_METHOD_FLAGS_NONE }
++};
++
++} // namespace
++
++bool callLunaInit(PurpleAccount *account)
++{
++    g_account = account;
++    if (g_sh) return true;   // already registered (one service, whichever account connects first)
++
++    LSError err; LSErrorInit(&err);
++    if (!LSRegister("com.palm.telegram.call", &g_sh, &err)) {
++        purple_debug_error(config::pluginId, "LSRegister com.palm.telegram.call: %s\n", err.message);
++        LSErrorFree(&err); return false;
++    }
++    // libpurple runs the default main context, so the service is attached to that.
++    if (!LSRegisterCategory(g_sh, "/", g_methods, NULL, NULL, &err) ||
++        !LSGmainContextAttach(g_sh, g_main_context_default(), &err)) {
++        purple_debug_error(config::pluginId, "com.palm.telegram.call: %s\n", err.message);
++        LSErrorFree(&err);
++        LSErrorInit(&err);
++        if (!LSUnregister(g_sh, &err))
++            LSErrorFree(&err);
++        g_sh = NULL;
++        return false;
++    }
++    purple_debug_info(config::pluginId, "com.palm.telegram.call registered\n");
++    return true;
++}
++
++void callLunaShutdown(PurpleAccount *account)
++{
++    if (g_account == account) g_account = NULL;
++    // Keep the service registered for the process lifetime (cheap, and other accounts may use it).
++}
++
++// The Phone app drops a call card only when a push stops listing that call. So an ended call is
++// shown as "disconnected" for a moment and then the empty line list follows, as the WhatsApp
++// connector does. Any newer push cancels the pending one.
++constexpr guint kEndedCallHoldMs = 1500;
++static guint g_idlePush = 0;
++
++static gboolean pushIdle(gpointer)
++{
++    g_idlePush = 0;
++    callLunaPushState(NULL, NULL, NULL, false, NULL, false);
++    return G_SOURCE_REMOVE;
++}
++
++void callLunaPushState(const char *state, const char *peerAddress, const char *peerName,
++                       bool isOutgoing, const char *cause, bool isVideo)
++{
++    if (g_idlePush) {
++        g_source_remove(g_idlePush);
++        g_idlePush = 0;
++    }
++    if (state && !strcmp(state, "disconnected"))
++        g_idlePush = g_timeout_add(kEndedCallHoldMs, pushIdle, NULL);
++
++    // A call starts when a line appears where there was none, or replaces an ended one. A repeated
++    // "disconnected" still belongs to the call that ended.
++    bool newCall = state && *state &&
++                   (g_state.empty() || (g_state == "disconnected" && strcmp(state, "disconnected") != 0));
++    if (newCall)
++        g_cardId = "tg-" + std::to_string(g_get_real_time());
++
++    g_state    = state       ? state       : "";
++    g_peerAddr = peerAddress  ? peerAddress : "";
++    g_peerName = peerName     ? peerName    : "";
++    g_cause    = cause        ? cause       : "";
++    g_outgoing = isOutgoing;
++    g_isVideo  = isVideo;
++    tgcLog("state %s, peer %s", g_state.empty() ? "idle" : g_state.c_str(), g_peerAddr.c_str());
++    if (!g_sh) return;
++    std::string payload = buildPayload();
++    LSError err; LSErrorInit(&err);
++    if (!LSSubscriptionReply(g_sh, SUBKEY, payload.c_str(), &err)) {
++        purple_debug_warning(config::pluginId, "callStateQuery push: %s\n", err.message);
++        LSErrorFree(&err);
++    }
++}
++
++// --- call audio -------------------------------------------------------------------------------
++// audiod has to be told a VoIP call is up: only then does it put the call devices -- the voipcall
++// sink and webcall source libtgvoip plays to and records from (call.cpp) -- on the earpiece or
++// the headset and the microphone. The transport names this connector and must not be
++// com.palm.telephony, which would make audiod switch the modem's voice-call path on. audiod keeps
++// the calls of each sender apart, so the update goes out on this service's own handle, and the
++// empty list on hangup only clears our own call. No scenario is forced: the call starts wherever
++// audiod routes calls (earpiece, or a connected headset), and the Phone app's speaker button
++// moves it.
++static bool audiodReply(LSHandle *sh, LSMessage *m, void *ctx) { (void)sh; (void)m; (void)ctx; return true; }
++static bool g_audioOn = false, g_audioVideo = false;
++static void audiodSend(const char *uri, const char *payload)
++{
++    if (!g_sh) return;
++    LSError err; LSErrorInit(&err);
++    LSMessageToken tok;
++    if (!LSCallOneReply(g_sh, uri, payload, audiodReply, NULL, &tok, &err)) {
++        purple_debug_warning(config::pluginId, "audiod %s: %s\n", uri, err.message);
++        LSErrorFree(&err);
++    }
++}
++void callLunaSetCallAudio(bool active)
++{
++    tgcLog("call audio %s", active ? "on" : "off");
++    g_audioOn = active;
++    if (!active)
++        g_audioVideo = false;
++    if (active)
++        audiodSend("palm://com.palm.audio/phone/CallStatusUpdate",
++                   g_audioVideo ? "{\"lines\":[{\"state\":\"active\",\"calls\":[{\"id\":\"tg\",\"video\":true,"
++                                  "\"transport\":\"com.palm.telegram\"}]}]}"
++                                : "{\"lines\":[{\"state\":\"active\",\"calls\":[{\"id\":\"tg\",\"video\":false,"
++                                  "\"transport\":\"com.palm.telegram\"}]}]}");
++    else
++        audiodSend("palm://com.palm.audio/phone/CallStatusUpdate", "{\"lines\":[]}");
++}
++
++void callLunaSetCallVideo(bool video)
++{
++    if (video == g_audioVideo)
++        return;
++    g_audioVideo = video;
++    if (g_audioOn)
++        callLunaSetCallAudio(true);
++}
++
++// --- video: org.webosports.rtcengine ------------------------------------------------------------
++namespace {
++using RtcReply = std::function<void(const std::string &)>;
++
++bool rtcReply(LSHandle *, LSMessage *msg, void *ctx)
++{
++    std::unique_ptr<RtcReply> cb(static_cast<RtcReply *>(ctx));
++    const char *payload = LSMessageGetPayload(msg);
++    if (*cb)
++        (*cb)(payload ? payload : "");
++    return true;
++}
++} // namespace
++
++bool callLunaRtcCall(const std::string &method, const std::string &payload, std::function<void(const std::string &reply)> onReply)
++{
++    if (!g_sh) return false;
++    const std::string uri = "luna://org.webosports.rtcengine/" + method;
++    // One reply: the callback object is freed in rtcReply. Replies without a callback are logged.
++    if (!onReply)
++        onReply = [method](const std::string &reply) {
++            tgcLog("rtcengine %s: %s", method.c_str(), reply.c_str());
++        };
++    RtcReply *ctx = new RtcReply(std::move(onReply));
++    LSError err; LSErrorInit(&err);
++    LSMessageToken tok;
++    if (!LSCallOneReply(g_sh, uri.c_str(), payload.c_str(), rtcReply, ctx, &tok, &err)) {
++        purple_debug_warning(config::pluginId, "rtcengine %s: %s\n", method.c_str(), err.message);
++        LSErrorFree(&err);
++        delete ctx;
++        return false;
++    }
++    return true;
++}
++
++void callLunaSetVideo(const std::string &lineFields, const std::string &payloadFields)
++{
++    if (lineFields == g_videoLine && payloadFields == g_videoPayload)
++        return;
++    g_videoLine = lineFields;
++    g_videoPayload = payloadFields;
++    if (!g_sh || g_state.empty()) return;
++    std::string payload = buildPayload();
++    LSError err; LSErrorInit(&err);
++    if (!LSSubscriptionReply(g_sh, SUBKEY, payload.c_str(), &err)) {
++        purple_debug_warning(config::pluginId, "callStateQuery push: %s\n", err.message);
++        LSErrorFree(&err);
++    }
++}
+diff --git a/call-luna.h b/call-luna.h
+new file mode 100644
+index 0000000..a91c9aa
+--- /dev/null
++++ b/call-luna.h
+@@ -0,0 +1,61 @@
++#ifndef _CALL_LUNA_H
++#define _CALL_LUNA_H
++
++/* webOS Synergy Revival - Telegram calling M2 (Path C).
++ *
++ * The prpl already does the whole call: TDLib signaling + libtgvoip media (see call.cpp). Its only
++ * webOS problem is the *UI* - the pidgin-style purple_request_action dialog + the media-caps gate.
++ * This module replaces that UI with the webOS call contract: it registers an LS2 service
++ * (com.palm.telegram.call) that the stock Phone app's CallSynergizer drives, exactly like the
++ * WhatsApp mediator (com.palm.whatsapp) - so the stock dialer / in-call screen / call log handle
++ * Telegram calls with no new UI, reusing this plugin's single logged-in TDLib session.
++ *
++ * Registered from inside imlibpurpletransport (the plugin's host) on libpurple's glib mainloop;
++ * the transport's LS2 role must allow the name com.palm.telegram.call.
++ */
++
++#include <purple.h>
++
++#include <functional>
++#include <string>
++
++/* Register the com.palm.telegram.call service (idempotent) and bind it to this Telegram account.
++ * Call when the account connects. Returns false (and logs) if LS2 registration fails. */
++bool callLunaInit(PurpleAccount *account);
++
++/* Tear down the service (account disconnect / plugin unload). */
++void callLunaShutdown(PurpleAccount *account);
++
++/* Call life-cycle trace into libpurple's debug log. printf-style; used from call.cpp too. */
++void tgcLog(const char *fmt, ...);
++
++/* Tell audiod a VoIP call is active (true) or over (false), so it routes the voipcall sink and
++ * webcall source libtgvoip uses. Call when the call becomes active and on hangup. */
++void callLunaSetCallAudio(bool active);
++
++/* Calls method of org.webosports.rtcengine (luneos-rtc-engine) on this service's handle; onReply,
++ * if set, gets the reply payload on the main loop. False if the call could not be sent. This
++ * service's client permissions must include the rtc.operation group. */
++bool callLunaRtcCall(const std::string &method, const std::string &payload,
++                     std::function<void(const std::string &reply)> onReply);
++
++/* The video members of the call state (see tgvideo::Controller::lineFields/payloadFields), or
++ * both empty when the call has no video session; republishes the state. */
++void callLunaSetVideo(const std::string &lineFields, const std::string &payloadFields);
++
++/* Tell audiod whether the active call shows video: a video call plays on the speaker, unless a
++ * headset or Bluetooth is connected (audiod's own policy). */
++void callLunaSetCallVideo(bool video);
++
++/* Push the current call state to Phone-app callStateQuery subscribers. Called from call.cpp's
++ * updateCall(). state is one of: "incoming", "dialing", "active", "disconnected", "" (idle).
++ * NOTE: these strings must match the stock Phone app CallSynergizer STATES enum exactly
++ * (incoming/dialing/active/disconnected) or the call card won't render the state.
++ * peerAddress = the Telegram user's +E.164 / id; peerName = resolved display name (may be NULL).
++ * isVideo = call.is_video_ from TDLib: until the call has a video session (callLunaSetVideo) it
++ * makes the line say the peer's video is available, so the Phone app shows a video call.
++ * cause is only meaningful for "disconnected" (e.g. "rejected", "normal", "missed"). */
++void callLunaPushState(const char *state, const char *peerAddress, const char *peerName,
++                       bool isOutgoing, const char *cause, bool isVideo);
++
++#endif
+diff --git a/call.cpp b/call.cpp
+index 76259b5..206e1f2 100644
+--- a/call.cpp
++++ b/call.cpp
+@@ -5,6 +5,11 @@
+ #include "buildopt.h"
+ #include "format.h"
+ #include "purple-info.h"
++#include "td-client.h"
++#include "call-luna.h"
++#include "tgcalls-call.h"
++#include "call-end.h"
++#include <glib.h>
+ 
+ static td::td_api::object_ptr<td::td_api::callProtocol> getCallProtocol()
+ {
+@@ -13,22 +18,42 @@ static td::td_api::object_ptr<td::td_api::callProtocol> getCallProtocol()
+     protocol->udp_reflector_ = true;
+     protocol->min_layer_     = 65;
+     protocol->max_layer_     = 92;
++    // library_versions_: with tgcalls-lite built in, "7.0.0", the tgcalls V2 version it speaks,
++    // which current clients register (InstanceV2Impl). Otherwise empty, for libtgvoip: libtgvoip
++    // has no version a current client still registers, and "2.7.7" or libtgvoip's own "2.5" made
++    // peers reject the call or never start it.
++#ifdef HAVE_TGCALLS_LITE
++    if (tgcallsLiteEnabled())
++        protocol->library_versions_.push_back(tgcallsLiteVersion());
++#endif
+     return protocol;
+ }
+ 
+-bool initiateCall(int64_t userId, TdAccountData &account, TdTransceiver &transceiver)
++bool initiateCall(int64_t userId, bool video, TdAccountData &account, TdTransceiver &transceiver)
+ {
++    // userId is tdlib's int53 (createCall.user_id_): Telegram user ids exceed INT32_MAX (e.g.
++    // 5000000000), so this MUST be 64-bit - an int32_t param truncated large ids to a garbage user and
++    // the call silently never started (no state pushed -> Phone app stuck on the video tab).
+ #ifndef NoVoip
+-    if (!account.hasActiveCall()) {
++    if (!account.hasActiveCall() && !account.isCallInitiating()) {
++        account.beginCallInitiation();   // synchronous: block a 2nd dial arriving in the same tick
+         td::td_api::object_ptr<td::td_api::createCall> callRequest = td::td_api::make_object<td::td_api::createCall>();
+         callRequest->user_id_  = userId;
+         callRequest->protocol_ = getCallProtocol();
++        // acceptCall (the callee side) has no is_video_ field of its own -- video is decided here,
++        // by whoever places the call, and the callee just inherits it via the returned call.is_video_
++        // (see activateCall/updateCall, which read call.is_video_ directly).
++        callRequest->is_video_ = video;
+         transceiver.sendQuery(std::move(callRequest), nullptr);
+-    } else
+-        // TRANSLATOR: Dialog title of an error message.
+-        purple_notify_warning(account.purpleAccount, _("Voice call"),
+-                              // TRANSLATOR: Dialog content of an error message.
+-                              _("Cannot start new call, already in another call"), NULL);
++        return true;   // call request sent; report success so the dial isn't logged as FAILED TO DIAL
++    } else {
++        // A call is already active or being initiated. This is the expected dedup of the dialer's
++        // double-dial (it fires both the resolved "id<n>" and the raw phone number for one contact),
++        // so drop the duplicate silently instead of popping "already in another call".
++        tgcLog("initiateCall: dropping duplicate dial to user %lld (call already active/initiating)",
++               (long long)userId);
++        return false;
++    }
+ #endif
+ 
+     return false;
+@@ -44,29 +69,6 @@ static void discardCall(int32_t callId, TdTransceiver &transceiver)
+     transceiver.sendQuery(std::move(discardReq), nullptr);
+ }
+ 
+-struct CallRequestData {
+-    int            callId;
+-    TdTransceiver *transceiver;
+-    TdAccountData *account;
+-};
+-
+-static void acceptCallCb(CallRequestData *data, int action)
+-{
+-    std::unique_ptr<CallRequestData> request(data);
+-
+-    td::td_api::object_ptr<td::td_api::acceptCall> acceptReq = td::td_api::make_object<td::td_api::acceptCall>();
+-    acceptReq->call_id_ = request->callId;
+-    acceptReq->protocol_ = getCallProtocol();
+-    request->transceiver->sendQuery(std::move(acceptReq), nullptr);
+-}
+-
+-static void discardCallCb(CallRequestData *data, int action)
+-{
+-    std::unique_ptr<CallRequestData> request(data);
+-    discardCall(request->callId, *request->transceiver);
+-    request->account->removeActiveCall();
+-}
+-
+ static std::string getPurpleUserName(UserId userId, TdAccountData &account)
+ {
+     const td::td_api::user *user = account.getUser(userId);
+@@ -100,6 +102,19 @@ static bool activateCall(const td::td_api::call &call, const std::string &buddyN
+         return false;
+     }
+ 
++#ifdef HAVE_TGCALLS_LITE
++    // The peer agreed on tgcalls-lite's version: tgcalls V2 media, not libtgvoip's.
++    if (tgcallsLiteEnabled() && tgcallsLiteAgreed(state)) {
++        if (!tgcallsLiteStart(call, state, account, transceiver))
++            return false;
++        if (!buddyName.empty())
++            showMessageTextIm(account, buddyName.c_str(), NULL,
++                              call.is_outgoing_ ? _("Call active") : _("Call active, type /hangup to terminate"),
++                              time(NULL), PURPLE_MESSAGE_SYSTEM);
++        return true;
++    }
++#endif
++
+     tgvoip::VoIPController *voip = account.getCallData();
+     if (!voip)
+         return false;
+@@ -108,8 +123,17 @@ static bool activateCall(const td::td_api::call &call, const std::string &buddyN
+     config.enableAEC = true;
+     config.enableNS  = true;
+     config.enableAGC = true;
++    // Voice only: LuneOS has no video path for libtgvoip, so a video call carries its audio.
++    config.enableVideoSend    = false;
++    config.enableVideoReceive = false;
+     voip->SetConfig(config);
+ 
++    // The PulseAudio call devices: module-palm-policy puts the voipcall sink on the earpiece,
++    // speaker or headset and the webcall source on the matching microphone, the way audiod routes
++    // calls. A stream that names them is routed by the device, not by its media.role.
++    voip->SetCurrentAudioOutput("voipcall");
++    voip->SetCurrentAudioInput("webcall");
++
+     std::vector<tgvoip::Endpoint> endpoints;
+     for (const auto &pServer: state.servers_)
+         if (pServer && pServer->type_ && (pServer->type_->get_id() == td::td_api::callServerTypeTelegramReflector::ID)) {
+@@ -129,8 +153,12 @@ static bool activateCall(const td::td_api::call &call, const std::string &buddyN
+     std::vector<char> key(state.encryption_key_.length()+1);
+     memmove(key.data(), state.encryption_key_.c_str(), key.size());
+     voip->SetEncryptionKey(key.data(), call.is_outgoing_);
++    tgcLog("activateCall: endpoints=%zu p2p=%d max_layer=%d key_len=%zu outgoing=%d",
++           endpoints.size(), (int)(state.allow_p2p_ && state.protocol_->udp_p2p_),
++           (int)state.protocol_->max_layer_, state.encryption_key_.length(), (int)call.is_outgoing_);
+     voip->Start();
+     voip->Connect();
++    callLunaSetCallAudio(true);   // tell audiod a VoIP call is up, so it routes the call devices
+ 
+     if (!buddyName.empty()) {
+         // For an outgoing call, "type /hangup to terminate" has already been shown when the call
+@@ -150,6 +178,12 @@ static bool activateCall(const td::td_api::call &call, const std::string &buddyN
+ static void deactivateCall(TdAccountData &account)
+ {
+ #ifndef NoVoip
++    callLunaSetCallAudio(false);   // and that it is over
++#ifdef HAVE_TGCALLS_LITE
++    tgcallsLiteStop(account);
++#endif
++    // Also for a tgcalls-lite call or one that never started: libtgvoip aborts when a
++    // VoIPController is deleted without Stop(), and Stop() on an idle one does nothing harmful.
+     tgvoip::VoIPController *voip = account.getCallData();
+     if (voip)
+         voip->Stop();
+@@ -173,16 +207,83 @@ static void notifyCallError(const td::td_api::callStateError &error, const std::
+                           time(NULL), PURPLE_MESSAGE_SYSTEM);
+ }
+ 
++// The incoming call answered on this device (accept sent, or it became ready); 0 for none. TDLib
++// call ids are unique within a session, so a stale value never matches a later call.
++static int32_t g_answeredCallId = 0;
++
++static CallEndReason toCallEndReason(const td::td_api::CallDiscardReason *reason)
++{
++    if (!reason) return CallEndReason::None;
++    switch (reason->get_id()) {
++    case td::td_api::callDiscardReasonEmpty::ID:              return CallEndReason::Empty;
++    case td::td_api::callDiscardReasonMissed::ID:             return CallEndReason::Missed;
++    case td::td_api::callDiscardReasonDeclined::ID:           return CallEndReason::Declined;
++    case td::td_api::callDiscardReasonDisconnected::ID:       return CallEndReason::Disconnected;
++    case td::td_api::callDiscardReasonHungUp::ID:             return CallEndReason::HungUp;
++    case td::td_api::callDiscardReasonUpgradeToGroupCall::ID: return CallEndReason::UpgradeToGroupCall;
++    default:                                                  return CallEndReason::Other;
++    }
++}
++
++static const char *discardReasonName(const td::td_api::CallDiscardReason *reason)
++{
++    switch (toCallEndReason(reason)) {
++    case CallEndReason::None:               return "none";
++    case CallEndReason::Empty:              return "empty";
++    case CallEndReason::Missed:             return "missed";
++    case CallEndReason::Declined:           return "declined";
++    case CallEndReason::Disconnected:       return "disconnected";
++    case CallEndReason::HungUp:             return "hungUp";
++    case CallEndReason::UpgradeToGroupCall: return "upgradeToGroupCall";
++    case CallEndReason::Other:              break;
++    }
++    return "unknown";
++}
++
++// One journal line per ending call update: which state, TDLib's discard reason, and whether this
++// call is the one the Phone app shows. No peer data. The only way to see what the server sends
++// when the call is taken on another device (TDLib's own log is capped at warnings, 0009).
++static void logCallEnd(const td::td_api::call &call, TdAccountData &account)
++{
++    const int32_t id = call.state_->get_id();
++    const char *state = (id == td::td_api::callStateHangingUp::ID) ? "hangingUp"
++                      : (id == td::td_api::callStateDiscarded::ID) ? "discarded"
++                      : (id == td::td_api::callStateError::ID)     ? "error"
++                      : nullptr;
++    if (!state) return;
++    const bool shown = account.hasActiveCall() && account.getActiveCallId() == call.id_;
++    if (id == td::td_api::callStateDiscarded::ID) {
++        const auto &d = static_cast<const td::td_api::callStateDiscarded &>(*call.state_);
++        g_printerr("tg-call: %s reason=%s outgoing=%d shown=%d need_rating=%d need_debug=%d\n", state,
++                   discardReasonName(d.reason_.get()), call.is_outgoing_ ? 1 : 0, shown ? 1 : 0,
++                   d.need_rating_ ? 1 : 0, d.need_debug_information_ ? 1 : 0);
++    } else {
++        g_printerr("tg-call: %s outgoing=%d shown=%d\n", state, call.is_outgoing_ ? 1 : 0, shown ? 1 : 0);
++    }
++}
++
+ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTransceiver &transceiver)
+ {
+     std::string buddyName = getPurpleUserName(getUserId(call), account);
++    // For an OUTGOING call, report the card under the exact address the dialer dialed (it keyed its
++    // card to that string). A phone-number dial gets resolved to this user's "id<n>", so pushing under
++    // buddyName would split from the dialer's "+E.164" card and leave a phantom "Connecting" one.
++    const std::string &dialedAddr = account.getCallDialedAddress();
++    std::string peerAddr = (call.is_outgoing_ && !dialedAddr.empty()) ? dialedAddr : buddyName;
++    // Otherwise show the peer's phone number when Telegram shares it, so the Phone app matches the
++    // address book entry instead of offering to add "id<n>" as a new contact. TDLib gives the
++    // number without the leading '+'.
++    if (!(call.is_outgoing_ && !dialedAddr.empty())) {
++        const td::td_api::user *user = account.getUser(getUserId(call));
++        if (user && !user->phone_number_.empty())
++            peerAddr = std::string("+") + getCanonicalPhoneNumber(user->phone_number_.c_str());
++    }
+ 
+ #ifndef NoVoip
+-    PurpleMediaManager *mediaManager = purple_media_manager_get();
+-    PurpleMediaCaps capabilities = purple_media_manager_get_ui_caps(mediaManager);
+-
+-    if (!(capabilities & PURPLE_MEDIA_CAPS_AUDIO) && !(capabilities & PURPLE_MEDIA_CAPS_AUDIO_SINGLE_DIRECTION) &&
+-        (strcasecmp(getUiName(), "pidgin") != 0)) {
++    // webOS (Path C): the call UI + audio is the stock Phone app via com.palm.telegram.call (see
++    // call-luna.cpp), NOT PurpleMedia - so do not gate on the frontend's media caps; always accept
++    // and drive the call over LS2. (libtgvoip does the media directly.)
++    if (false) {
+ #else
+     if (true) {
+ #endif
+@@ -201,25 +302,16 @@ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTranscei
+ 
+     if (!call.state_) return; // just in case
+ 
++    logCallEnd(call, account);
++
+     if (!call.is_outgoing_ && (call.state_->get_id() == td::td_api::callStatePending::ID)) {
+         if (!account.hasActiveCall()) {
+             account.setActiveCall(call.id_);
+-            // TRANSLATOR: Dialog content, user will have the options "_OK" and "_Cancel".
+-            std::string message = formatMessage(_("{} wishes to start a call with you."),
+-                                                account.getDisplayName(getUserId(call)));
+-            CallRequestData *request = new CallRequestData;
+-            request->callId = call.id_;
+-            request->transceiver = &transceiver;
+-            request->account = &account;
+-            purple_request_action(purple_account_get_connection(account.purpleAccount),
+-                                  // TRANSLATOR: Dialog title, asking about an incoming telephone call (OK/Cancel)
+-                                  _("Voice call"), message.c_str(), NULL,
+-                                  PURPLE_DEFAULT_ACTION_NONE,
+-                                  account.purpleAccount, !buddyName.empty() ? buddyName.c_str() : NULL, NULL,
+-                                  // TRANSLATOR: Dialog option, regarding a phone call; the alternative is "_Cancel". The underscore marks accelerator keys, they must be different!
+-                                  request, 2, _("_OK"), acceptCallCb,
+-                                  // TRANSLATOR: Dialog option, regarding a phone call; the alternative is "_OK". The underscore marks accelerator keys, they must be different!
+-                                  _("_Cancel"), discardCallCb);
++            // webOS: ring the stock Phone app instead of a pidgin accept/reject dialog. The user
++            // answers via com.palm.telegram.call/answer -> callBridgeAnswer -> acceptCurrentCall.
++            callLunaPushState("incoming", peerAddr.c_str(),
++                              account.getDisplayName(getUserId(call)).c_str(), false, NULL,
++                              call.is_video_);
+         } else if (call.id_ != account.getActiveCallId()) {
+             if (!buddyName.empty())
+                 showMessageTextIm(account, buddyName.c_str(), NULL,
+@@ -232,11 +324,12 @@ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTranscei
+     } else if (call.is_outgoing_ && (call.state_->get_id() == td::td_api::callStatePending::ID)) {
+         if (!account.hasActiveCall()) {
+             account.setActiveCall(call.id_);
+-            if (!buddyName.empty())
+-                showMessageTextIm(account, buddyName.c_str(), NULL,
+-                                // TRANSLATOR: In-chat status message. Please keep '/hangup' verbatim!
+-                                _("Call pending, type /hangup to terminate"),
+-                                time(NULL), PURPLE_MESSAGE_SYSTEM);
++            // The stock Phone app's CallSynergizer keys the "dialing/ringback" UI off the line
++            // state string STATES.DIALING == "dialing" (not "outgoing"); send that so the call
++            // card shows "Connecting..." while the outgoing call is pending, same as WhatsApp.
++            callLunaPushState("dialing", peerAddr.c_str(),
++                              account.getDisplayName(getUserId(call)).c_str(), true, NULL,
++                              call.is_video_);
+         } else if (call.id_ != account.getActiveCallId()) {
+             // This would happen if there was no active call when sending createCall, but there is one
+             // a millisecond later when asynchronous response is received. Possible if two calls are
+@@ -244,9 +337,15 @@ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTranscei
+             discardCall(call.id_, transceiver);
+         }
+     } else if (call.state_->get_id() == td::td_api::callStateReady::ID) {
++        g_answeredCallId = call.id_;
+         if (! activateCall(call, buddyName, account, transceiver)) {
+             discardCall(call.id_, transceiver);
++            deactivateCall(account);   // Stop() before the VoIPController is deleted, or libtgvoip aborts
+             account.removeActiveCall();
++        } else {
++            callLunaPushState("active", peerAddr.c_str(),
++                              account.getDisplayName(getUserId(call)).c_str(), call.is_outgoing_, NULL,
++                              call.is_video_);
+         }
+     }
+     else if ( ((call.state_->get_id() == td::td_api::callStateHangingUp::ID) ||
+@@ -254,6 +353,17 @@ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTranscei
+                (call.state_->get_id() == td::td_api::callStateError::ID)) &&
+               account.hasActiveCall() && account.getActiveCallId() == call.id_)
+     {
++        const char *cause = "normal";
++        if (call.state_->get_id() == td::td_api::callStateDiscarded::ID) {
++            const td::td_api::callStateDiscarded &d = static_cast<const td::td_api::callStateDiscarded &>(*call.state_);
++            cause = callEndCause(toCallEndReason(d.reason_.get()), call.is_outgoing_,
++                                 g_answeredCallId == call.id_);
++        } else if (call.state_->get_id() == td::td_api::callStateError::ID) {
++            cause = "error";
++        }
++        callLunaPushState("disconnected", peerAddr.c_str(),
++                          account.getDisplayName(getUserId(call)).c_str(), call.is_outgoing_, cause,
++                          call.is_video_);
+         if (call.state_->get_id() == td::td_api::callStateError::ID) {
+             const td::td_api::callStateError &error = static_cast<const td::td_api::callStateError &>(*call.state_);
+             notifyCallError(error, buddyName, account);
+@@ -263,12 +373,61 @@ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTranscei
+     }
+ }
+ 
++void handleCallSignalingData(int32_t callId, const std::string &data, TdAccountData &account)
++{
++#ifdef HAVE_TGCALLS_LITE
++    tgcallsLiteSignalingData(callId, data, account);
++#else
++    (void)callId; (void)data; (void)account;
++#endif
++}
++
+ void discardCurrentCall(TdAccountData &account, TdTransceiver &transceiver)
+ {
+     if (account.hasActiveCall())
+         discardCall(account.getActiveCallId(), transceiver);
+ }
+ 
++void acceptCurrentCall(TdAccountData &account, TdTransceiver &transceiver)
++{
++    if (!account.hasActiveCall()) return;
++    g_answeredCallId = account.getActiveCallId();
++    td::td_api::object_ptr<td::td_api::acceptCall> acceptReq = td::td_api::make_object<td::td_api::acceptCall>();
++    acceptReq->call_id_ = account.getActiveCallId();
++    acceptReq->protocol_ = getCallProtocol();
++    transceiver.sendQuery(std::move(acceptReq), nullptr);
++}
++
++// ---- LS2 <-> TDLib bridge: called by call-luna.cpp for the com.palm.telegram.call service ----
++bool callBridgeDial(PurpleAccount *account, const char *who, bool video)
++{
++    PurpleTdClient *client = getTdClient(account);
++    return (client && who) ? client->startVoiceCall(who, video) : false;
++}
++
++void callBridgeAnswer(PurpleAccount *account)
++{
++    PurpleTdClient *client = getTdClient(account);
++    if (client) client->acceptCurrentCall();
++}
++
++void callBridgeHangup(PurpleAccount *account)
++{
++    PurpleTdClient *client = getTdClient(account);
++    if (client) client->hangupVoiceCall();
++}
++
++void callBridgeChangeMedia(PurpleAccount *account, bool hasView, bool view, bool hasCamera, bool camera,
++                           int deviceTurns)
++{
++    (void)account; // one call at a time (call-luna.cpp)
++#ifdef HAVE_TGCALLS_LITE
++    tgcallsLiteChangeMedia(hasView, view, hasCamera, camera, deviceTurns);
++#else
++    (void)hasView; (void)view; (void)hasCamera; (void)camera; (void)deviceTurns;
++#endif
++}
++
+ void showCallMessage(const td::td_api::chat &chat, const TgMessageInfo &message,
+                      const td::td_api::messageCall &callEnded, TdAccountData &account)
+ {
+diff --git a/call.h b/call.h
+index 0a34d3a..25fe34d 100644
+--- a/call.h
++++ b/call.h
+@@ -3,9 +3,12 @@
+ 
+ #include "account-data.h"
+ 
+-bool initiateCall(int64_t userId, TdAccountData &account, TdTransceiver &transceiver);
++bool initiateCall(int64_t userId, bool video, TdAccountData &account, TdTransceiver &transceiver);
+ void updateCall(const td::td_api::call &call, TdAccountData &account, TdTransceiver &transceiver);
++// updateNewCallSignalingData: signalling from the peer's tgcalls, for tgcalls-lite.
++void handleCallSignalingData(int32_t callId, const std::string &data, TdAccountData &account);
+ void discardCurrentCall(TdAccountData &account, TdTransceiver &transceiver);
++void acceptCurrentCall(TdAccountData &account, TdTransceiver &transceiver);
+ void showCallMessage(const td::td_api::chat &chat, const TgMessageInfo &message,
+                      const td::td_api::messageCall &callEnded, TdAccountData &account);
+ 
+diff --git a/td-client.cpp b/td-client.cpp
+index 2b69868..10ebccc 100644
+--- a/td-client.cpp
++++ b/td-client.cpp
+@@ -5,6 +5,7 @@
+ #include "receiving.h"
+ #include "file-transfer.h"
+ #include "call.h"
++#include "call-luna.h"
+ #include "secret-chat.h"
+ #include "sticker.h"
+ #include "media-variants.h"
+@@ -367,6 +368,12 @@ void PurpleTdClient::processUpdate(td::td_api::Object &update)
+         break;
+     };
+ 
++    case td::td_api::updateNewCallSignalingData::ID: {
++        auto &signaling = static_cast<const td::td_api::updateNewCallSignalingData &>(update);
++        handleCallSignalingData(signaling.call_id_, signaling.data_, m_data);
++        break;
++    };
++
+     case td::td_api::updateChatReadOutbox::ID: {
+         // webOS read ticks (double tick): the recipient has READ all our outgoing messages in this chat
+         // up to last_read_outbox_message_id_. Emit a "read" watermark scoped to the chat; the transport
+@@ -896,6 +903,9 @@ void PurpleTdClient::onLoggedIn()
+ {
+     purple_connection_set_state (purple_account_get_connection(m_account), PURPLE_CONNECTED);
+ 
++    // webOS: bring up com.palm.telegram.call so the stock Phone app can drive Telegram calls.
++    callLunaInit(m_account);
++
+     // This query ensures an updateUser for every contact
+     m_transceiver.sendQuery(td::td_api::make_object<td::td_api::getContacts>(),
+                             &PurpleTdClient::getContactsResponse);
+@@ -3857,8 +3867,40 @@ void PurpleTdClient::cancelUpload(PurpleXfer *xfer)
+     }
+ }
+ 
+-bool PurpleTdClient::startVoiceCall(const char *buddyName)
++bool PurpleTdClient::startVoiceCall(const char *buddyName, bool video)
+ {
++    // The stock dialer often dials an "id<n>" buddy whose tdlib user OBJECT isn't loaded yet (right
++    // after a fresh login / transport restart) - getUsersByPurpleName then returns nothing and the
++    // call fails with "User not found" / the Phone app shows "Call cannot be placed through this
++    // device". createCall only needs the numeric user id, so when the buddy name parses to one, call
++    // it directly; tdlib resolves the user server-side. Named/phone dials still go the lookup route.
++    // Remember exactly what the dialer dialed so updateCall can report the call under this same
++    // address (the Phone app keyed its card to it). Without this a phone-number dial resolves to an
++    // "id<n>" and the plugin's card splits from the dialer's -> two cards, one stuck "Connecting".
++    if (buddyName)
++        m_data.setCallDialedAddress(buddyName);
++
++    UserId directId = purpleBuddyNameToUserId(buddyName);
++    if (directId.valid())
++        return initiateCall(directId.value(), video, m_data, m_transceiver);
++
++    // The dialer hands us a bare phone number (e.g. "+15555550101") when a number is typed on the
++    // dialpad, or dialed for a contact that isn't linked to a Telegram "id<n>" buddy. Telegram calls
++    // are placed on a numeric user id, not a phone number, so resolve it server-side first
++    // (only_local_=false lets a NON-contact number resolve too). initiateCall's own guard dedups this
++    // against a simultaneous "id<n>" dial for the same contact, so the raw-number call is dropped
++    // once the resolved-id call is in flight (the double-dial collapses to one).
++    if (buddyName && (buddyName[0] == '+')) {
++        m_pendingCallPhone = buddyName;
++        m_pendingCallVideo = video;
++        auto request = td::td_api::make_object<td::td_api::searchUserByPhoneNumber>();
++        request->phone_number_ = buddyName;
++        request->only_local_   = false;
++        m_transceiver.sendQuery(std::move(request), &PurpleTdClient::voiceCallPhoneLookupResponse);
++        return true;   // resolution in progress; report success so the dial isn't logged as FAILED
++    }
++
++
+     std::vector<const td::td_api::user *> users = getUsersByPurpleName(buddyName, m_data, "start voice call");
+     if (users.size() != 1) {
+         // Unlikely error messages not worth translating
+@@ -3871,7 +3913,32 @@ bool PurpleTdClient::startVoiceCall(const char *buddyName)
+         return false;
+     }
+ 
+-    return initiateCall(users.front()->id_, m_data, m_transceiver);
++    return initiateCall(users.front()->id_, video, m_data, m_transceiver);
++}
++
++void PurpleTdClient::voiceCallPhoneLookupResponse(uint64_t /*requestId*/, td::td_api::object_ptr<td::td_api::Object> object)
++{
++    std::string phone = m_pendingCallPhone;
++    bool video = m_pendingCallVideo;
++    m_pendingCallPhone.clear();
++    m_pendingCallVideo = false;
++
++    if (object && (object->get_id() == td::td_api::user::ID)) {
++        const td::td_api::user &user = static_cast<const td::td_api::user &>(*object);
++        // initiateCall dedups against an in-flight "id<n>" dial for the same contact (double-dial),
++        // and starts the call otherwise.
++        if (!initiateCall(user.id_, video, m_data, m_transceiver))
++            // Deduped: the resolved-id dial for this same contact is already ringing. Clear this
++            // raw-number card (keyed by its own +E.164 address) so the double-dial collapses to one.
++            callLunaPushState("disconnected", phone.c_str(), NULL, true, "normal", video);
++        return;
++    }
++
++    // Not on Telegram (or lookup failed): fail cleanly so the Phone app's "Connecting" card clears
++    // instead of hanging forever.
++    purple_debug_misc(config::pluginId, "voice call: phone %s not resolvable on Telegram: %s\n",
++                      phone.c_str(), getDisplayedError(object).c_str());
++    callLunaPushState("disconnected", phone.c_str(), NULL, true, "error", video);
+ }
+ 
+ bool PurpleTdClient::terminateCall(PurpleConversation *conv)
+@@ -3883,6 +3950,16 @@ bool PurpleTdClient::terminateCall(PurpleConversation *conv)
+     return true;
+ }
+ 
++void PurpleTdClient::acceptCurrentCall()
++{
++    ::acceptCurrentCall(m_data, m_transceiver);   // the free fn in call.cpp (not this member)
++}
++
++void PurpleTdClient::hangupVoiceCall()
++{
++    discardCurrentCall(m_data, m_transceiver);
++}
++
+ void PurpleTdClient::createSecretChat(const char* buddyName)
+ {
+     std::vector<const td::td_api::user *> users = getUsersByPurpleName(buddyName, m_data, "create secret chat");
+diff --git a/td-client.h b/td-client.h
+index 1dcc0c2..05d0ab3 100644
+--- a/td-client.h
++++ b/td-client.h
+@@ -93,8 +93,12 @@ public:
+                         bool isCaption, time_t date, const SentMedia &media);
+     PlaceholderUse                        findPasted(const std::string &placeholder);
+ 
+-    bool startVoiceCall(const char *buddyName);
++    bool startVoiceCall(const char *buddyName, bool video);
++    // async result of searchUserByPhoneNumber when a bare phone number is dialed (see startVoiceCall)
++    void       voiceCallPhoneLookupResponse(uint64_t requestId, td::td_api::object_ptr<td::td_api::Object> object);
+     bool terminateCall(PurpleConversation *conv);
++    void acceptCurrentCall();   // accept the pending incoming call (driven by com.palm.telegram.call)
++    void hangupVoiceCall();     // end the active call
+ 
+     void createSecretChat(const char *buddyName);
+ 
+@@ -247,6 +251,10 @@ private:
+     // Whether logging of the "Telegram" conversation was turned off for the value, and was on before
+     bool                  m_authInputUnlogged = false;
+     bool                  m_authInputWasLogging = false;
++    // the +E.164 being resolved by searchUserByPhoneNumber for an outgoing call; used to push a
++    // clean "disconnected" state (so the Phone app card doesn't hang) if the number isn't on Telegram
++    std::string           m_pendingCallPhone;
++    bool                  m_pendingCallVideo = false; // video flag for m_pendingCallPhone's call
+ 
+     PurpleAccount        *m_account;
+     TdTransceiver         m_transceiver;
+diff --git a/tdlib-purple.cpp b/tdlib-purple.cpp
+index 84272de..0c4767e 100644
+--- a/tdlib-purple.cpp
++++ b/tdlib-purple.cpp
+@@ -1029,7 +1029,7 @@ static PurpleCmdRet tgprpl_cmd_unarchive(PurpleConversation *conv, const gchar *
+ static PurpleMediaCaps getMediaCaps(PurpleAccount *account, const char *who)
+ {
+ #ifndef NoVoip
+-    return PURPLE_MEDIA_CAPS_AUDIO;
++    return (PurpleMediaCaps)(PURPLE_MEDIA_CAPS_AUDIO | PURPLE_MEDIA_CAPS_VIDEO | PURPLE_MEDIA_CAPS_AUDIO_VIDEO);
+ #else
+     return PURPLE_MEDIA_CAPS_NONE;
+ #endif
+@@ -1043,7 +1043,7 @@ gboolean initiateMedia(PurpleAccount *account, const char *who, PurpleMediaSessi
+ 
+     PurpleTdClient *tdClient = getTdClient(account);
+     if (tdClient)
+-        return tdClient->startVoiceCall(who) ? TRUE : FALSE;
++        return tdClient->startVoiceCall(who, (type & PURPLE_MEDIA_VIDEO) != 0) ? TRUE : FALSE;
+     else
+         return FALSE;
+ #else
+diff --git a/test/CMakeLists.txt b/test/CMakeLists.txt
+index 2780ee2..8107df6 100644
+--- a/test/CMakeLists.txt
++++ b/test/CMakeLists.txt
+@@ -7,6 +7,7 @@ set(GLIB_LIBRARIES "glib-2.0" CACHE STRING "GLib libraries")
+ # Compiling plugin sources again is not optimal but it's the easy way
+ add_executable(tests EXCLUDE_FROM_ALL
+     test-main.cpp
++    video-rotation-test.cpp
+     login-test.cpp
+     private-chat-test.cpp
+     group-chat-test.cpp
+@@ -29,6 +30,7 @@ add_executable(tests EXCLUDE_FROM_ALL
+     printout.cpp
+     purple-events.cpp
+     fixture.cpp
++    call-luna-stub.cpp
+ 
+     ../tdlib-purple.cpp
+     ../td-client.cpp
+@@ -44,6 +46,7 @@ add_executable(tests EXCLUDE_FROM_ALL
+     ../media-variants.cpp
+     ../file-transfer.cpp
+     ../call.cpp
++    ../tgcalls-call.cpp
+     ../identifiers.cpp
+     ../secret-chat.cpp
+     ../pidgin-ui.cpp
+diff --git a/test/call-end-test.cpp b/test/call-end-test.cpp
+new file mode 100644
+index 0000000..5ab12cd
+--- /dev/null
++++ b/test/call-end-test.cpp
+@@ -0,0 +1,50 @@
++// Host test of call-end.h: the cause the Phone app is told when TDLib discards a call.
++// Standalone (no TDLib, no libpurple):
++//   c++ -std=c++14 -Wall -Wextra -o call-end-test call-end-test.cpp && ./call-end-test
++#include "../call-end.h"
++
++#include <cstdio>
++#include <cstring>
++
++static int failures = 0;
++
++static void expect(const char *what, const char *got, const char *want)
++{
++    if (std::strcmp(got, want) != 0) {
++        std::printf("FAIL %s: got %s, want %s\n", what, got, want);
++        failures++;
++    }
++}
++
++int main()
++{
++    // Taken on another device: the server discards it here with no reason.
++    expect("incoming, empty, not answered here",
++           callEndCause(CallEndReason::Empty, false, false), "answeredElsewhere");
++    expect("incoming, no reason, not answered here",
++           callEndCause(CallEndReason::None, false, false), "answeredElsewhere");
++
++    // The caller gave up while it rang: still a missed call.
++    expect("incoming, missed", callEndCause(CallEndReason::Missed, false, false), "missed");
++    // Declined (here, or by the peer): rejected.
++    expect("incoming, declined", callEndCause(CallEndReason::Declined, false, false), "rejected");
++    expect("outgoing, declined", callEndCause(CallEndReason::Declined, true, false), "rejected");
++
++    // An empty reason on a call taken here, or on our own outgoing call, is a normal end.
++    expect("incoming, empty, answered here",
++           callEndCause(CallEndReason::Empty, false, true), "normal");
++    expect("outgoing, empty", callEndCause(CallEndReason::Empty, true, false), "normal");
++    expect("outgoing, no reason", callEndCause(CallEndReason::None, true, false), "normal");
++
++    // Every other reason is a normal end, whoever answered.
++    expect("incoming, hung up", callEndCause(CallEndReason::HungUp, false, true), "normal");
++    expect("incoming, hung up, not answered here",
++           callEndCause(CallEndReason::HungUp, false, false), "normal");
++    expect("incoming, disconnected", callEndCause(CallEndReason::Disconnected, false, false), "normal");
++    expect("incoming, upgrade", callEndCause(CallEndReason::UpgradeToGroupCall, false, false), "normal");
++    expect("incoming, other", callEndCause(CallEndReason::Other, false, false), "normal");
++
++    if (failures) return 1;
++    std::printf("call-end-test: all passed\n");
++    return 0;
++}
+diff --git a/test/call-luna-stub.cpp b/test/call-luna-stub.cpp
+new file mode 100644
+index 0000000..e6016ea
+--- /dev/null
++++ b/test/call-luna-stub.cpp
+@@ -0,0 +1,24 @@
++// The webOS call service (call-luna.cpp) registers com.palm.telegram.call on the bus and talks to
++// the Phone app. The tests have no bus, so the plug-in's calls into it do nothing here.
++#include "call-luna.h"
++
++bool callLunaInit(PurpleAccount *)
++{
++    return true;
++}
++
++void callLunaShutdown(PurpleAccount *)
++{
++}
++
++void tgcLog(const char *, ...)
++{
++}
++
++void callLunaSetCallAudio(bool)
++{
++}
++
++void callLunaPushState(const char *, const char *, const char *, bool, const char *, bool)
++{
++}
+diff --git a/test/tgcalls-video-test.cpp b/test/tgcalls-video-test.cpp
+new file mode 100644
+index 0000000..f2a0d23
+--- /dev/null
++++ b/test/tgcalls-video-test.cpp
+@@ -0,0 +1,481 @@
++// Host test of tgcalls-video.cpp: the AU bridge over real AF_UNIX SOCK_SEQPACKET sockets standing
++// in for luneos-rtc-engine's, and the session controller against a fake org.webosports.rtcengine.
++// Standalone (no TDLib, no libpurple, no luna-service2):
++//   c++ -std=c++14 -DHAVE_TGCALLS_LITE -o tgcalls-video-test tgcalls-video-test.cpp
++//       ../tgcalls-video.cpp $(pkg-config --cflags --libs glib-2.0 json-glib-1.0) -pthread
++// Run it with a scratch directory for the sockets as the only argument.
++#include "../tgcalls-video.h"
++
++#include <glib.h>
++
++#include <cerrno>
++#include <cstdio>
++#include <cstring>
++#include <mutex>
++#include <string>
++#include <vector>
++
++#include <poll.h>
++#include <sys/socket.h>
++#include <sys/un.h>
++#include <unistd.h>
++
++using namespace tgvideo;
++
++static int failures;
++#define CHECK(c, ...) do { if (!(c)) { failures++; fprintf(stderr, "FAIL %s:%d: ", __FILE__, __LINE__); \
++    fprintf(stderr, __VA_ARGS__); fprintf(stderr, "\n"); } } while (0)
++
++static std::vector<uint8_t> au(uint8_t type, size_t size, uint8_t fill)
++{
++    std::vector<uint8_t> v = {0, 0, 0, 1, (uint8_t)(0x60 | type)};
++    for (size_t i = 0; i < size; i++)
++        v.push_back((uint8_t)(fill + i));
++    return v;
++}
++
++// A listening engine socket.
++struct Server {
++    std::string path;
++    int fd = -1, peer = -1;
++    explicit Server(const std::string &p) : path(p)
++    {
++        unlink(path.c_str());
++        fd = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
++        struct sockaddr_un sa;
++        memset(&sa, 0, sizeof sa);
++        sa.sun_family = AF_UNIX;
++        memcpy(sa.sun_path, path.c_str(), path.size() + 1);
++        if (bind(fd, (struct sockaddr *)&sa, sizeof sa) < 0 || listen(fd, 1) < 0)
++            fprintf(stderr, "server %s: %s\n", path.c_str(), strerror(errno));
++    }
++    ~Server()
++    {
++        if (peer >= 0)
++            close(peer);
++        if (fd >= 0)
++            close(fd);
++        unlink(path.c_str());
++    }
++    bool accept(int timeoutMs = 2000)
++    {
++        struct pollfd p = {fd, POLLIN, 0};
++        if (poll(&p, 1, timeoutMs) <= 0)
++            return false;
++        peer = ::accept(fd, nullptr, nullptr);
++        return peer >= 0;
++    }
++    std::vector<uint8_t> recvOne(int timeoutMs = 2000)
++    {
++        struct pollfd p = {peer, POLLIN, 0};
++        std::vector<uint8_t> buf(2 * 1024 * 1024);
++        if (poll(&p, 1, timeoutMs) <= 0)
++            return {};
++        ssize_t n = recv(peer, buf.data(), buf.size(), 0);
++        buf.resize(n > 0 ? (size_t)n : 0);
++        return buf;
++    }
++    void closePeer()
++    {
++        if (peer >= 0)
++            close(peer);
++        peer = -1;
++    }
++};
++
++static void test_bridge_rx(const std::string &dir)
++{
++    AuBridge b;
++    CHECK(!b.setSockets("", std::string(200, 'x')), "a path longer than sun_path is refused");
++    Server rx(dir + "/rx.sock");
++    CHECK(b.setSockets("", rx.path), "paths set");
++    b.start(nullptr);
++    CHECK(b.running(), "running");
++    CHECK(!b.setSockets("", rx.path), "no new paths while running");
++    CHECK(rx.accept(), "the bridge connected at start");
++
++    const auto p = au(1, 100, 1), idr = au(5, 3000, 2);
++    CHECK(b.receive(p.data(), p.size()), "a P frame before any IDR: held back, keyframe wanted");
++    CHECK(!b.receive(idr.data(), idr.size()), "the IDR goes out");
++    CHECK(rx.recvOne() == idr, "the engine got the IDR whole");
++    CHECK(!b.receive(p.data(), p.size()), "then P");
++    CHECK(rx.recvOne() == p, "the engine got P");
++    CHECK(b.stats().rxSent == 2 && b.stats().rxDropped == 1, "counters");
++
++    // The engine stops reading: once the socket is full, units are dropped without blocking,
++    // and after that only an IDR gets through.
++    const auto big = au(1, 200 * 1024, 3);
++    int sends = 0;
++    bool dropped = false;
++    while (sends < 200 && !dropped) {
++        dropped = b.receive(big.data(), big.size());
++        sends++;
++    }
++    CHECK(dropped, "a full socket drops (after %d units)", sends);
++    while (!rx.recvOne(100).empty()) {
++    }
++    CHECK(b.receive(p.data(), p.size()), "after a drop P is held back");
++    CHECK(!b.receive(idr.data(), idr.size()) && rx.recvOne() == idr, "and the next IDR goes out");
++
++    // The engine goes away: the bridge connects again (not more often than every 200 ms) and
++    // starts again at an IDR.
++    rx.closePeer();
++    bool lost = false;
++    for (int i = 0; i < 5 && !lost; i++)
++        lost = b.receive(p.data(), p.size());
++    CHECK(lost, "a closed socket is noticed");
++    g_usleep(250 * 1000);
++    b.receive(p.data(), p.size());
++    CHECK(rx.accept(), "connected again");
++    CHECK(b.receive(p.data(), p.size()), "P held back after reconnecting");
++    CHECK(!b.receive(idr.data(), idr.size()) && rx.recvOne() == idr, "IDR after reconnecting");
++
++    b.stop();
++    CHECK(!b.running() && !b.receive(idr.data(), idr.size()), "stopped: nothing passed");
++    b.stop();
++
++    // The engine is not listening yet when the bridge starts: it tries again at most every
++    // 200 ms, not on every unit.
++    {
++        AuBridge late;
++        const std::string path = dir + "/late-rx.sock";
++        unlink(path.c_str());
++        CHECK(late.setSockets("", path), "late path");
++        late.start(AuBridge::TxSink());
++        Server srv(path);
++        late.receive(idr.data(), idr.size());
++        CHECK(!srv.accept(50), "no reconnect within 200 ms of the failed try");
++        g_usleep(250 * 1000);
++        late.receive(idr.data(), idr.size());
++        CHECK(srv.accept(), "reconnected after 200 ms");
++        late.stop();
++    }
++}
++
++static void test_bridge_tx(const std::string &dir)
++{
++    Server tx(dir + "/tx.sock");
++    AuBridge b;
++    CHECK(b.setSockets(tx.path, ""), "tx path only");
++    std::vector<std::vector<uint8_t>> got;
++    // std::mutex, not GMutex: ThreadSanitizer sees only the former.
++    std::mutex mx;
++    b.start([&](const uint8_t *p, size_t n) {
++        std::lock_guard<std::mutex> lock(mx);
++        got.emplace_back(p, p + n);
++    });
++    CHECK(tx.accept(), "the TX thread connected");
++    const auto a = au(5, 70000, 1), c = au(1, 10, 2), d = au(1, 500, 3);
++    for (const auto *u : {&a, &c, &d})
++        CHECK(send(tx.peer, u->data(), u->size(), 0) == (ssize_t)u->size(), "sent");
++    for (int i = 0; i < 200; i++) {
++        size_t n;
++        {
++            std::lock_guard<std::mutex> lock(mx);
++            n = got.size();
++        }
++        if (n >= 3)
++            break;
++        g_usleep(10 * 1000);
++    }
++    {
++        std::lock_guard<std::mutex> lock(mx);
++        CHECK(got.size() == 3 && got[0] == a && got[1] == c && got[2] == d, "units in order, whole (%zu)", got.size());
++    }
++    // The engine restarts: the thread connects again.
++    tx.closePeer();
++    CHECK(tx.accept(), "the TX thread connected again");
++    b.stop();
++    CHECK(b.stats().txUnits == 3, "tx counter");
++}
++
++// A fake org.webosports.rtcengine.
++struct FakeRtc {
++    struct Call {
++        std::string method, payload;
++        std::function<void(const std::string &)> reply;
++    };
++    std::vector<Call> calls;
++    bool fail = false;
++    Controller::RtcCall fn()
++    {
++        return [this](const std::string &m, const std::string &p, std::function<void(const std::string &)> r) {
++            if (fail)
++                return false;
++            calls.push_back({m, p, r});
++            return true;
++        };
++    }
++    size_t count(const std::string &m) const
++    {
++        size_t n = 0;
++        for (const auto &c : calls)
++            n += c.method == m;
++        return n;
++    }
++    // Answers the latest call of method.
++    bool reply(const std::string &m, const std::string &payload)
++    {
++        for (size_t i = calls.size(); i-- > 0;) {
++            if (calls[i].method != m)
++                continue;
++            auto r = calls[i].reply;
++            calls[i].reply = nullptr;
++            if (!r)
++                return false;
++            r(payload);
++            return true;
++        }
++        return false;
++    }
++    std::string last(const std::string &m) const
++    {
++        for (size_t i = calls.size(); i-- > 0;)
++            if (calls[i].method == m)
++                return calls[i].payload;
++        return "";
++    }
++};
++
++static const char *kCaps2 = "{\"returnValue\":true,\"cameraCount\":2,\"videoCallCapable\":true}";
++static const char *kStarted = "{\"returnValue\":true,\"txSocket\":\"/nonexistent/tx\",\"rxSocket\":\"/nonexistent/rx\"}";
++
++static bool has(const std::string &s, const char *needle)
++{
++    return s.find(needle) != std::string::npos;
++}
++
++static void test_controller()
++{
++    FakeRtc rtc;
++    std::vector<bool> sending;
++    int changes = 0, keyframes = 0;
++    Controller c(rtc.fn());
++    c.onSendingChanged = [&](bool on) { sending.push_back(on); };
++    c.onChanged = [&]() { changes++; };
++    c.onPeerKeyframeWanted = [&]() { keyframes++; };
++
++    CHECK(has(c.lineFields(), "\"incomingVideoState\":\"unavailable\"") && has(c.lineFields(), "\"outgoingVideo\":false"),
++          "idle line: %s", c.lineFields().c_str());
++    CHECK(c.payloadFields() == ",\"allowVideoCalls\":true,\"videoURI\":\"\"", "idle payload: %s", c.payloadFields().c_str());
++
++    c.setOurCamera(true);
++    CHECK(rtc.calls.empty(), "no session before the call is up");
++    c.setCallActive(true);
++    CHECK(rtc.count("capabilities") == 1, "capabilities asked");
++    CHECK(rtc.reply("capabilities", kCaps2), "caps answered");
++    CHECK(rtc.count("start") == 1, "start asked");
++    const std::string start = rtc.last("start");
++    CHECK(has(start, "\"txEnabled\":true") && has(start, "\"camera\":1") && has(start, "\"width\":640") &&
++          has(start, "\"previewShmPath\":\"/tmp/tg-rtc-preview\"") && has(start, "\"rxSocket\":\"/tmp/tg-rtc-rx.sock\""),
++          "start payload: %s", start.c_str());
++    CHECK(rtc.reply("start", kStarted), "start answered");
++    CHECK(c.running() && c.sending() && c.bridge().running(), "running and sending");
++    CHECK(sending.size() == 1 && sending[0], "the call engine was told to send");
++    CHECK(keyframes == 1, "the peer is asked for an IDR when decoding starts");
++    const std::string pf = c.payloadFields();
++    CHECK(has(pf, "\"videoURI\":\"/tmp/tg-rtc-video\"") && has(pf, "\"videoWidth\":640") &&
++          has(pf, "\"videoPreviewURI\":\"/tmp/tg-rtc-preview\"") && has(pf, "\"videoPreviewMirrored\":true") &&
++          has(pf, "\"videoPreviewOrientation\":1"), "running payload: %s", pf.c_str());
++    CHECK(has(c.lineFields(), "\"outgoingVideo\":true"), "line says we send");
++
++    // Keyframes to our encoder, at most once a second.
++    c.requestKeyframe(10 * G_USEC_PER_SEC);
++    c.requestKeyframe(10 * G_USEC_PER_SEC + 500000);
++    CHECK(rtc.count("requestKeyframe") == 1, "one keyframe request in half a second");
++    c.requestKeyframe(11 * G_USEC_PER_SEC + 100000);
++    CHECK(rtc.count("requestKeyframe") == 2, "the next after a second");
++
++    // The peer's camera: available, then streaming while frames come, then available again.
++    c.setPeerVideo(true);
++    CHECK(has(c.lineFields(), "\"incomingVideo\":true") && has(c.lineFields(), "\"incomingVideoState\":\"available\""),
++          "peer video available: %s", c.lineFields().c_str());
++    c.noteFrame(20 * G_USEC_PER_SEC);
++    const int ch0 = changes;
++    CHECK(c.tick(20 * G_USEC_PER_SEC + 100) && has(c.lineFields(), "\"streaming\""), "streaming");
++    CHECK(!c.tick(21 * G_USEC_PER_SEC), "no change while frames are recent");
++    CHECK(c.tick(22 * G_USEC_PER_SEC + 1) && has(c.lineFields(), "\"available\""), "frames stopped");
++    CHECK(changes == ch0 + 2, "each flip told");
++
++    // Camera off, peer's video not chosen: the session stops.
++    c.setOurCamera(false);
++    CHECK(rtc.count("stop") == 1 && !c.running(), "stopped");
++    CHECK(sending.size() == 2 && !sending[1], "the call engine was told to stop sending");
++    CHECK(c.payloadFields() == ",\"allowVideoCalls\":true,\"videoURI\":\"\"", "no picture now");
++    CHECK(!c.bridge().running(), "bridge stopped");
++
++    // The user chooses to see the peer: a receive-only session.
++    c.setView(true);
++    CHECK(rtc.reply("capabilities", kCaps2), "caps again");
++    const std::string rxOnly = rtc.last("start");
++    CHECK(has(rxOnly, "\"txEnabled\":false") && has(rxOnly, "\"width\":480") && has(rxOnly, "\"previewShmPath\":\"\""),
++          "receive-only start: %s", rxOnly.c_str());
++    CHECK(rtc.reply("start", kStarted) && c.running() && !c.sending(), "running, receive only");
++    CHECK(sending.size() == 2, "sending not announced for receive only");
++    CHECK(!has(c.payloadFields(), "videoPreviewURI"), "no preview without our camera");
++    c.requestKeyframe(40 * G_USEC_PER_SEC);
++    CHECK(rtc.count("requestKeyframe") == 2, "no keyframe request without TX");
++
++    // Camera on while receiving: restarted with TX.
++    const size_t stops = rtc.count("stop");
++    c.setOurCamera(true);
++    CHECK(rtc.count("stop") == stops + 1, "the receive-only session stops");
++    CHECK(rtc.reply("capabilities", kCaps2) && has(rtc.last("start"), "\"txEnabled\":true"), "restarted with TX");
++    CHECK(rtc.reply("start", kStarted) && c.sending(), "sending");
++
++    // The call ends: stopped, and the next call asks to see the peer again.
++    c.setCallActive(false);
++    CHECK(!c.running() && rtc.count("stop") == stops + 2, "call over: stopped");
++    c.setOurCamera(false);
++    c.setCallActive(true);
++    CHECK(!c.running() && rtc.count("capabilities") == 3, "peer video alone does not start without the user");
++}
++
++static void test_controller_failures()
++{
++    // A start reply after the session was closed: what it started is stopped.
++    {
++        FakeRtc rtc;
++        Controller c(rtc.fn());
++        c.setCallActive(true);
++        c.setOurCamera(true);
++        rtc.reply("capabilities", kCaps2);
++        c.setOurCamera(false);
++        CHECK(rtc.count("stop") == 0, "nothing to stop yet");
++        rtc.reply("start", kStarted);
++        CHECK(rtc.count("stop") == 1 && !c.running(), "late start stopped");
++        // A caps reply after the wish went away does nothing.
++        c.setOurCamera(true);
++        c.setOurCamera(false);
++        rtc.reply("capabilities", kCaps2);
++        CHECK(rtc.count("start") == 1, "late caps start nothing");
++    }
++    // "already running": stopped and retried once.
++    {
++        FakeRtc rtc;
++        Controller c(rtc.fn());
++        c.setCallActive(true);
++        c.setOurCamera(true);
++        rtc.reply("capabilities", kCaps2);
++        rtc.reply("start", "{\"returnValue\":false,\"errorText\":\"already running\"}");
++        CHECK(rtc.count("stop") == 1 && rtc.count("capabilities") == 2, "stop and retry");
++        rtc.reply("capabilities", kCaps2);
++        rtc.reply("start", "{\"returnValue\":false,\"errorText\":\"already running\"}");
++        CHECK(rtc.count("stop") == 1 && rtc.count("capabilities") == 2, "only one retry");
++        CHECK(!c.running(), "given up");
++        // A new wish tries again.
++        c.setOurCamera(false);
++        c.setOurCamera(true);
++        CHECK(rtc.count("capabilities") == 3, "new wish, new try");
++    }
++    // Gave up while the user also watches the peer: switching our camera off is a new wish that
++    // keeps the session wanted, and is tried (receive only).
++    {
++        FakeRtc rtc;
++        Controller c(rtc.fn());
++        c.setCallActive(true);
++        c.setPeerVideo(true);
++        c.setView(true);
++        c.setOurCamera(true);
++        for (int i = 0; i < 2; i++) {
++            rtc.reply("capabilities", kCaps2);
++            rtc.reply("start", "{\"returnValue\":false,\"errorText\":\"already running\"}");
++        }
++        const size_t caps = rtc.count("capabilities");
++        CHECK(!c.running(), "given up");
++        c.setOurCamera(false);
++        CHECK(rtc.count("capabilities") == caps + 1, "camera off while watching: tried again");
++        rtc.reply("capabilities", kCaps2);
++        CHECK(has(rtc.last("start"), "\"txEnabled\":false"), "receive only");
++    }
++    // No encoder: the camera cannot be sent; receive only if the user wants to see the peer.
++    {
++        FakeRtc rtc;
++        int changes = 0;
++        Controller c(rtc.fn());
++        c.onChanged = [&]() { changes++; };
++        c.setCallActive(true);
++        c.setOurCamera(true);
++        rtc.reply("capabilities", kCaps2);
++        const int ch0 = changes;
++        rtc.reply("start", "{\"returnValue\":false,\"errorText\":\"tx start failed\"}");
++        CHECK(!c.running() && rtc.count("capabilities") == 1, "camera only: nothing more");
++        CHECK(changes > ch0, "told");
++        c.setPeerVideo(true);
++        c.setView(true);
++        CHECK(rtc.reply("capabilities", kCaps2), "probing for receive only");
++        CHECK(has(rtc.last("start"), "\"txEnabled\":false"), "receive only, the capable reply notwithstanding");
++        rtc.reply("start", kStarted);
++        CHECK(c.running() && !c.sending() && has(c.lineFields(), "\"outgoingVideo\":false"), "showing the peer");
++    }
++    // A device without a usable camera: our camera alone starts nothing.
++    {
++        FakeRtc rtc;
++        Controller c(rtc.fn());
++        c.setCallActive(true);
++        c.setOurCamera(true);
++        rtc.reply("capabilities", "{\"returnValue\":true,\"cameraCount\":0,\"videoCallCapable\":false}");
++        CHECK(rtc.count("start") == 0, "no camera, no session");
++        c.setPeerVideo(true);
++        c.setView(true);
++        rtc.reply("capabilities", "{\"returnValue\":true,\"cameraCount\":0,\"videoCallCapable\":false}");
++        CHECK(has(rtc.last("start"), "\"txEnabled\":false") && has(rtc.last("start"), "\"camera\":0"), "receive only");
++    }
++    // The service cannot be called / says no.
++    {
++        FakeRtc rtc;
++        rtc.fail = true;
++        Controller c(rtc.fn());
++        c.setCallActive(true);
++        c.setOurCamera(true);
++        CHECK(!c.running(), "no service");
++        rtc.fail = false;
++        c.setView(true); // no peer video: no change of wish that matters, but failed is reset
++        CHECK(rtc.count("capabilities") == 1, "tried again on a new wish");
++        rtc.reply("capabilities", "{\"returnValue\":false}");
++        CHECK(rtc.count("start") == 0, "caps failure: no start");
++        rtc.reply("start", kStarted);
++        CHECK(!c.running(), "a stray reply does nothing");
++    }
++    // Unusable socket paths in the start reply.
++    {
++        FakeRtc rtc;
++        Controller c(rtc.fn());
++        c.setCallActive(true);
++        c.setOurCamera(true);
++        rtc.reply("capabilities", kCaps2);
++        rtc.reply("start", ("{\"returnValue\":true,\"txSocket\":\"" + std::string(150, 'a') + "\",\"rxSocket\":\"/x\"}").c_str());
++        CHECK(!c.running() && rtc.count("stop") == 1, "refused and stopped");
++    }
++}
++
++static void test_json()
++{
++    CHECK(jsonBool("{\"a\":true}", "a") && !jsonBool("{\"a\":false}", "a") && !jsonBool("{\"a\":1}", "a"), "bool");
++    CHECK(!jsonBool("not json", "a") && !jsonBool("[true]", "a") && !jsonBool("{}", "a"), "bool fallbacks");
++    CHECK(jsonString("{\"s\":\"x\\\"y\"}", "s") == "x\"y" && jsonString("{\"s\":3}", "s").empty(), "string");
++    CHECK(jsonInt("{\"n\":2}", "n", -1) == 2 && jsonInt("{\"n\":2.0}", "n", -1) == 2 && jsonInt("{\"n\":\"2\"}", "n", -1) == -1 &&
++          jsonInt("{}", "n", 7) == 7, "int");
++    const uint8_t three[] = {0, 0, 1, 0x65};
++    CHECK(auHasIdr(three, 4) && !auHasIdr(three, 3) && !auHasIdr(nullptr, 4), "auHasIdr");
++}
++
++int main(int argc, char **argv)
++{
++    if (argc != 2) {
++        fprintf(stderr, "usage: %s <directory for the test sockets>\n", argv[0]);
++        return 2;
++    }
++    const std::string dir = argv[1];
++    test_json();
++    test_bridge_rx(dir);
++    test_bridge_tx(dir);
++    test_controller();
++    test_controller_failures();
++    if (failures) {
++        fprintf(stderr, "%d failure(s)\n", failures);
++        return 1;
++    }
++    fprintf(stderr, "ALL OK -- tgcalls-video\n");
++    return 0;
++}
+diff --git a/test/video-rotation-test.cpp b/test/video-rotation-test.cpp
+new file mode 100644
+index 0000000..39ca82a
+--- /dev/null
++++ b/test/video-rotation-test.cpp
+@@ -0,0 +1,45 @@
++// The turn a Telegram receiver gives our camera's picture as the phone is turned
++// (tgvideo::txRotationDegrees). Header only: tgcalls-video.cpp itself needs tgcalls-lite.
++#include "tgcalls-video.h"
++#include <gtest/gtest.h>
++
++namespace {
++
++constexpr int kFront = 1, kBack = 0;
++
++TEST(VideoRotation, HeldUprightIsTheUsualTurn)
++{
++    EXPECT_EQ(tgvideo::txRotationDegrees(kFront, 0), tgvideo::kTxRotationDegrees);
++    EXPECT_EQ(tgvideo::txRotationDegrees(kBack, 0), tgvideo::kTxRotationDegrees);
++}
++
++// The front camera faces the user: the turn goes down a quarter for every quarter the phone is
++// turned left edge up (the shell's 1), and wraps.
++TEST(VideoRotation, TheFrontCameraFollowsThePhone)
++{
++    EXPECT_EQ(tgvideo::txRotationDegrees(kFront, 1), 180);
++    EXPECT_EQ(tgvideo::txRotationDegrees(kFront, 2), 90);
++    EXPECT_EQ(tgvideo::txRotationDegrees(kFront, 3), 0);
++}
++
++// The back camera looks away: the phone's turn counts the other way.
++TEST(VideoRotation, TheBackCameraCountsTheOtherWay)
++{
++    EXPECT_EQ(tgvideo::txRotationDegrees(kBack, 1), 0);
++    EXPECT_EQ(tgvideo::txRotationDegrees(kBack, 2), 90);
++    EXPECT_EQ(tgvideo::txRotationDegrees(kBack, 3), 180);
++}
++
++// Always a whole quarter turn in [0, 360), as the engine's MediaState needs.
++TEST(VideoRotation, AlwaysAQuarterTurnInRange)
++{
++    for (int camera : {kBack, kFront})
++        for (int turns = 0; turns < 4; turns++) {
++            int d = tgvideo::txRotationDegrees(camera, turns);
++            EXPECT_GE(d, 0);
++            EXPECT_LT(d, 360);
++            EXPECT_EQ(d % 90, 0);
++        }
++}
++
++} // namespace
+diff --git a/tgcalls-call.cpp b/tgcalls-call.cpp
+new file mode 100644
+index 0000000..9211633
+--- /dev/null
++++ b/tgcalls-call.cpp
+@@ -0,0 +1,285 @@
++#include "tgcalls-call.h"
++
++#ifdef HAVE_TGCALLS_LITE
++
++#include "call-luna.h"
++#include "config.h"
++#include "tgcalls-video.h"
++#include "transceiver.h"
++
++#include <call_engine.h>
++
++#include <glib.h>
++#include <purple.h>
++
++#include <cstdlib>
++#include <cstring>
++#include <memory>
++#include <vector>
++
++namespace {
++
++constexpr char kVersion[] = "7.0.0";
++constexpr size_t kKeySize = 256;
++constexpr guint kTickMs = 500;
++
++// One running call: the engine, its video (luneos-rtc-engine session, tgcalls-video.h) and the
++// timer that drives the engine's DTLS retransmissions.
++struct LiteCall {
++    std::unique_ptr<tgcalls_lite::CallEngine> engine;
++    // After engine: destroyed first, which joins the thread that feeds the engine our camera.
++    std::unique_ptr<tgvideo::Controller> video;
++    guint tickSource = 0;
++
++    ~LiteCall();
++};
++
++// The call in progress, for the Phone app's changeMedia; one call at a time, as in call-luna.cpp.
++LiteCall *g_current = nullptr;
++
++// What the Phone app asked for before the engine started (while ringing).
++struct MediaWish {
++    bool haveView = false, view = false, haveCamera = false, camera = false;
++} g_wish;
++
++// Which way the phone is held (the Phone app's changeMedia {deviceOrientation}); kept across
++// calls, since it is the phone's state and not a wish for this one.
++int g_deviceTurns = 0;
++
++void applyRotation(LiteCall &lite)
++{
++    if (lite.video && lite.video->sending())
++        lite.engine->setVideoRotation(tgvideo::txRotationDegrees(lite.video->camera(), g_deviceTurns));
++}
++
++LiteCall::~LiteCall()
++{
++    if (tickSource)
++        g_source_remove(tickSource);
++    if (g_current == this)
++        g_current = nullptr;
++    video.reset();
++    callLunaSetVideo(std::string(), std::string());
++}
++
++gboolean tick(gpointer data)
++{
++    LiteCall *lite = static_cast<LiteCall *>(data);
++    lite->engine->tick();
++    if (lite->video)
++        lite->video->tick(g_get_monotonic_time());
++    return G_SOURCE_CONTINUE;
++}
++
++void publishVideo(LiteCall &lite)
++{
++    callLunaSetVideo(lite.video->lineFields(), lite.video->payloadFields());
++    callLunaSetCallVideo(lite.video->running());
++}
++
++// Video through luneos-rtc-engine: the session follows our camera wish, the peer's camera and
++// whether the user chose to see it; the engine sends what the session encodes and the session
++// decodes what the engine receives.
++void wireVideo(LiteCall &lite, bool isVideoCall)
++{
++    lite.video.reset(new tgvideo::Controller(callLunaRtcCall));
++    tgvideo::Controller &video = *lite.video;
++    tgcalls_lite::CallEngine *engine = lite.engine.get();
++    LiteCall *call = &lite;
++
++    video.txSink = [engine](const uint8_t *au, size_t len) { engine->postVideoAccessUnit(au, len); };
++    video.onSendingChanged = [engine, call](bool on) {
++        if (on)
++            engine->setVideoRotation(tgvideo::txRotationDegrees(call->video->camera(), g_deviceTurns));
++        engine->setVideoSending(on);
++    };
++    video.onChanged = [call]() { publishVideo(*call); };
++    video.onPeerKeyframeWanted = [engine]() { engine->requestPeerKeyframe(); };
++
++    engine->onVideoAccessUnit = [call, engine](const uint8_t *au, unsigned int len) {
++        if (!call->video)
++            return;
++        call->video->noteFrame(g_get_monotonic_time());
++        if (call->video->bridge().receive(au, len))
++            engine->requestPeerKeyframe();
++    };
++    engine->onKeyframeRequested = [call]() {
++        if (call->video)
++            call->video->requestKeyframe(g_get_monotonic_time());
++    };
++    engine->onIncomingVideoChanged = [call](bool on) {
++        tgcLog("tgcalls-lite: peer camera %s", on ? "on" : "off");
++        if (call->video)
++            call->video->setPeerVideo(on);
++    };
++
++    // A video call starts with our camera on; the Phone app may have said otherwise meanwhile.
++    video.setOurCamera(g_wish.haveCamera ? g_wish.camera : isVideoCall);
++    if (g_wish.haveView)
++        video.setView(g_wish.view);
++    g_wish = MediaWish();
++    video.setCallActive(true);
++    publishVideo(lite);
++}
++
++LiteCall *liteCall(TdAccountData &account)
++{
++    return static_cast<LiteCall *>(account.getCallEngine());
++}
++
++void addServer(std::vector<tgcalls_lite::RtcServer> &list, const std::string &host, int32_t port,
++               const td::td_api::callServerTypeWebrtc &webrtc, bool turn)
++{
++    if (host.empty() || port <= 0 || port > 65535)
++        return;
++    tgcalls_lite::RtcServer server;
++    server.host = host;
++    server.port = (uint16_t)port;
++    server.isTurn = turn;
++    if (turn) {
++        server.login = webrtc.username_;
++        server.password = webrtc.password_;
++    }
++    list.push_back(std::move(server));
++}
++
++// STUN and TURN from callServerTypeWebrtc, both address families, as tdesktop's AppendServer()
++// does. Telegram reflectors (callServerTypeTelegramReflector) speak tgcalls' own ReflectorPort
++// protocol, which tgcalls-lite does not implement.
++std::vector<tgcalls_lite::RtcServer> rtcServers(const td::td_api::callStateReady &state)
++{
++    std::vector<tgcalls_lite::RtcServer> list;
++    for (const auto &server : state.servers_) {
++        if (!server || !server->type_ || server->type_->get_id() != td::td_api::callServerTypeWebrtc::ID)
++            continue;
++        const auto &webrtc = static_cast<const td::td_api::callServerTypeWebrtc &>(*server->type_);
++        if (webrtc.supports_stun_) {
++            addServer(list, server->ip_address_, server->port_, webrtc, false);
++            addServer(list, server->ipv6_address_, server->port_, webrtc, false);
++        }
++        if (webrtc.supports_turn_ && !webrtc.username_.empty() && !webrtc.password_.empty()) {
++            addServer(list, server->ip_address_, server->port_, webrtc, true);
++            addServer(list, server->ipv6_address_, server->port_, webrtc, true);
++        }
++    }
++    return list;
++}
++
++} // namespace
++
++const char *tgcallsLiteVersion()
++{
++    return kVersion;
++}
++
++bool tgcallsLiteEnabled()
++{
++    const char *engine = getenv("LUNEOS_TELEGRAM_CALL_ENGINE");
++    return !(engine && strcmp(engine, "tgvoip") == 0);
++}
++
++bool tgcallsLiteAgreed(const td::td_api::callStateReady &state)
++{
++    if (!state.protocol_)
++        return false;
++    for (const auto &version : state.protocol_->library_versions_)
++        if (version == kVersion)
++            return true;
++    return false;
++}
++
++bool tgcallsLiteStart(const td::td_api::call &call, const td::td_api::callStateReady &state,
++                      TdAccountData &account, TdTransceiver &transceiver)
++{
++    if (liteCall(account))
++        return true;
++    if (state.encryption_key_.size() != kKeySize) {
++        tgcLog("tgcalls-lite: encryption key is %zu bytes, not %zu", state.encryption_key_.size(), kKeySize);
++        return false;
++    }
++
++    auto lite = std::make_shared<LiteCall>();
++    // Our camera joins once its session runs (wireVideo): the engine starts without video.
++    lite->engine = std::make_unique<tgcalls_lite::CallEngine>(
++        g_main_context_default(), reinterpret_cast<const uint8_t *>(state.encryption_key_.data()),
++        call.is_outgoing_, false);
++    tgcalls_lite::CallEngine &engine = *lite->engine;
++
++    const auto servers = rtcServers(state);
++    const size_t applied = engine.setServers(servers);
++    tgcLog("tgcalls-lite: call %d, outgoing=%d, %zu of %zu STUN/TURN servers applied, p2p=%d",
++           (int)call.id_, (int)call.is_outgoing_, applied, servers.size(), (int)state.allow_p2p_);
++
++    const int32_t callId = call.id_;
++    engine.onOutgoingSignalingData = [callId, &transceiver](const std::vector<uint8_t> &data) {
++        auto request = td::td_api::make_object<td::td_api::sendCallSignalingData>();
++        request->call_id_ = callId;
++        request->data_.assign(reinterpret_cast<const char *>(data.data()), data.size());
++        transceiver.sendQuery(std::move(request), nullptr);
++    };
++    engine.onMediaReady = [callId]() {
++        tgcLog("tgcalls-lite: call %d media connected", (int)callId);
++    };
++
++    lite->tickSource = g_timeout_add(kTickMs, tick, lite.get());
++    g_current = lite.get();
++    wireVideo(*lite, call.is_video_);
++    account.setCallEngine(lite);
++
++    // audiod routes the voipcall sink and webcall source once it knows a VoIP call is up.
++    callLunaSetCallAudio(true);
++    if (!engine.startAudio("voipcall", "webcall"))
++        tgcLog("tgcalls-lite: call %d has no audio", (int)callId);
++    engine.start();
++
++    // Signalling that arrived before callStateReady.
++    for (const std::string &data : account.takePendingCallSignaling())
++        engine.handleIncomingSignalingData(std::vector<uint8_t>(data.begin(), data.end()));
++    return true;
++}
++
++void tgcallsLiteSignalingData(int32_t callId, const std::string &data, TdAccountData &account)
++{
++    if (!account.hasActiveCall() || account.getActiveCallId() != callId)
++        return;
++    if (LiteCall *lite = liteCall(account))
++        lite->engine->handleIncomingSignalingData(std::vector<uint8_t>(data.begin(), data.end()));
++    else
++        account.addPendingCallSignaling(data);
++}
++
++void tgcallsLiteChangeMedia(bool hasView, bool view, bool hasCamera, bool camera, int deviceTurns)
++{
++    if (deviceTurns >= 0 && deviceTurns <= 3 && deviceTurns != g_deviceTurns) {
++        g_deviceTurns = deviceTurns;
++        if (g_current)
++            applyRotation(*g_current);
++    }
++    if (!g_current || !g_current->video) {
++        // Not started yet (ringing): applied when it starts.
++        if (hasView) {
++            g_wish.haveView = true;
++            g_wish.view = view;
++        }
++        if (hasCamera) {
++            g_wish.haveCamera = true;
++            g_wish.camera = camera;
++        }
++        return;
++    }
++    if (hasView)
++        g_current->video->setView(view);
++    if (hasCamera)
++        g_current->video->setOurCamera(camera);
++}
++
++void tgcallsLiteStop(TdAccountData &account)
++{
++    g_wish = MediaWish();
++    if (!liteCall(account))
++        return;
++    tgcLog("tgcalls-lite: call %d stopped", (int)account.getActiveCallId());
++    account.setCallEngine(nullptr);
++}
++
++#endif
+diff --git a/tgcalls-call.h b/tgcalls-call.h
+new file mode 100644
+index 0000000..258c097
+--- /dev/null
++++ b/tgcalls-call.h
+@@ -0,0 +1,43 @@
++#ifndef _TGCALLS_CALL_H
++#define _TGCALLS_CALL_H
++
++// Telegram calls through tgcalls-lite: tgcalls V2 with signalling version 7.0.0 (raw encrypted
++// signalling packets relayed by TDLib, ICE through libnice, DTLS-SRTP, Opus, H.264 video through
++// luneos-rtc-engine, see tgcalls-video.h). Current clients
++// register that version (tgcalls InstanceV2Impl); libtgvoip carries a call only when the peer
++// agrees on no version at all.
++
++#include "account-data.h"
++#include <string>
++
++#ifdef HAVE_TGCALLS_LITE
++
++// The library version tgcalls-lite speaks, for callProtocol.library_versions.
++const char *tgcallsLiteVersion();
++
++// False when LUNEOS_TELEGRAM_CALL_ENGINE=tgvoip is set, to fall back to libtgvoip for testing.
++bool tgcallsLiteEnabled();
++
++// True if the agreed protocol in callStateReady names tgcallsLiteVersion().
++bool tgcallsLiteAgreed(const td::td_api::callStateReady &state);
++
++// Starts the engine for a call that reached callStateReady. Returns false if it could not start
++// (bad key, engine error); the caller then discards the call.
++bool tgcallsLiteStart(const td::td_api::call &call, const td::td_api::callStateReady &state,
++                      TdAccountData &account, TdTransceiver &transceiver);
++
++// updateNewCallSignalingData for the active call. Kept until the engine starts if it is early.
++void tgcallsLiteSignalingData(int32_t callId, const std::string &data, TdAccountData &account);
++
++// Stops the engine and its audio and video, if one is running.
++void tgcallsLiteStop(TdAccountData &account);
++
++// The Phone app's changeMedia: whether the user wants to see the peer's video (view) and to send
++// our camera. A field the Phone app left out is not changed. Before the call's engine starts, the
++// wish is kept for it.
++// deviceTurns: which way the phone is held, the shell's quarter turns; -1 when not given.
++void tgcallsLiteChangeMedia(bool hasView, bool view, bool hasCamera, bool camera, int deviceTurns = -1);
++
++#endif
++
++#endif
+diff --git a/tgcalls-video.cpp b/tgcalls-video.cpp
+new file mode 100644
+index 0000000..e8d57d0
+--- /dev/null
++++ b/tgcalls-video.cpp
+@@ -0,0 +1,579 @@
++#include "tgcalls-video.h"
++
++#ifdef HAVE_TGCALLS_LITE
++
++#include <glib.h>
++#include <json-glib/json-glib.h>
++
++#include <cerrno>
++#include <cstdio>
++#include <cstring>
++#include <memory>
++#include <vector>
++
++#include <poll.h>
++#include <sys/socket.h>
++#include <sys/un.h>
++#include <unistd.h>
++
++namespace tgvideo {
++
++namespace {
++
++// Largest access unit read from the TX socket: keyframes at 640x480 are tens of KB, at 1280x720
++// hundreds (luneos-rtc-engine docs/API.md). A larger datagram is truncated by recv() and dropped.
++constexpr size_t kTxAuMax = 1024 * 1024;
++// Send buffer asked for on the RX socket: a SOCK_SEQPACKET datagram must fit whole, so this
++// bounds the largest peer keyframe passed on.
++constexpr int kRxSndBuf = 1024 * 1024;
++constexpr int kReconnectIntervalMs = 200;
++constexpr int64_t kKeyframeMinIntervalUs = G_USEC_PER_SEC;
++// The peer's video counts as streaming while a frame came within this.
++constexpr int64_t kStreamingTimeoutUs = 2 * G_USEC_PER_SEC;
++
++// Sizes, as for WhatsApp (glue/call.c of purple-combined): what the engine renders to (and
++// encodes at, with a camera). Receive-only is portrait, as phones send; the engine letterboxes
++// other shapes.
++constexpr int kTxWidth = 640, kTxHeight = 480;
++constexpr int kRxOnlyWidth = 480, kRxOnlyHeight = 640;
++constexpr int kTxBitrate = 1200000;
++constexpr int kPreviewWidth = 320, kPreviewHeight = 240;
++// Our own inset is turned by the video app, not by a tgcalls receiver, and sargo's camera held
++// upright needs one quarter turn there (as for WhatsApp); it is not tied to kTxRotationDegrees.
++// The Phone app adds its own screen's turn to it.
++constexpr int kPreviewQuarterTurns = 1;
++
++int connectSeqpacket(const std::string &path)
++{
++    struct sockaddr_un sa;
++    memset(&sa, 0, sizeof sa);
++    sa.sun_family = AF_UNIX;
++    if (path.size() >= sizeof sa.sun_path)
++        return -1;
++    memcpy(sa.sun_path, path.c_str(), path.size() + 1);
++    int fd = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
++    if (fd < 0)
++        return -1;
++    if (connect(fd, reinterpret_cast<struct sockaddr *>(&sa), sizeof sa) < 0) {
++        close(fd);
++        return -1;
++    }
++    return fd;
++}
++
++bool fitsSunPath(const std::string &path)
++{
++    return path.size() < sizeof(sockaddr_un::sun_path);
++}
++
++std::string jsonQuote(const std::string &s)
++{
++    std::string o = "\"";
++    for (char c : s) {
++        if (c == '"' || c == '\\') {
++            o += '\\';
++            o += c;
++        } else if ((unsigned char)c < 0x20) {
++            char buf[8];
++            snprintf(buf, sizeof buf, "\\u%04x", (unsigned)(unsigned char)c);
++            o += buf;
++        } else {
++            o += c;
++        }
++    }
++    return o + "\"";
++}
++
++// The reply's root object, or nullptr; unref the parser.
++JsonObject *parseObject(const std::string &json, JsonParser **parser)
++{
++    *parser = json_parser_new();
++    if (!json_parser_load_from_data(*parser, json.c_str(), (gssize)json.size(), nullptr))
++        return nullptr;
++    JsonNode *root = json_parser_get_root(*parser);
++    return root && JSON_NODE_HOLDS_OBJECT(root) ? json_node_get_object(root) : nullptr;
++}
++
++JsonNode *member(JsonObject *obj, const char *key)
++{
++    return obj && json_object_has_member(obj, key) ? json_object_get_member(obj, key) : nullptr;
++}
++
++} // namespace
++
++bool jsonBool(const std::string &json, const char *key)
++{
++    JsonParser *parser;
++    JsonNode *n = member(parseObject(json, &parser), key);
++    bool v = n && JSON_NODE_HOLDS_VALUE(n) && json_node_get_value_type(n) == G_TYPE_BOOLEAN &&
++             json_node_get_boolean(n);
++    g_object_unref(parser);
++    return v;
++}
++
++std::string jsonString(const std::string &json, const char *key)
++{
++    JsonParser *parser;
++    JsonNode *n = member(parseObject(json, &parser), key);
++    std::string v;
++    if (n && JSON_NODE_HOLDS_VALUE(n) && json_node_get_value_type(n) == G_TYPE_STRING)
++        v = json_node_get_string(n);
++    g_object_unref(parser);
++    return v;
++}
++
++long jsonInt(const std::string &json, const char *key, long fallback)
++{
++    JsonParser *parser;
++    JsonNode *n = member(parseObject(json, &parser), key);
++    long v = fallback;
++    if (n && JSON_NODE_HOLDS_VALUE(n)) {
++        GType t = json_node_get_value_type(n);
++        if (t == G_TYPE_INT64)
++            v = (long)json_node_get_int(n);
++        else if (t == G_TYPE_DOUBLE)
++            v = (long)json_node_get_double(n);
++    }
++    g_object_unref(parser);
++    return v;
++}
++
++bool auHasIdr(const uint8_t *au, size_t len)
++{
++    if (!au)
++        return false;
++    // NAL units follow 00 00 01 (a 4-byte start code ends the same way); the NAL type is the
++    // low five bits of the byte after it.
++    for (size_t i = 0; i + 3 < len; i++) {
++        if (au[i] == 0 && au[i + 1] == 0 && au[i + 2] == 1) {
++            if ((au[i + 3] & 0x1f) == 5)
++                return true;
++            i += 2;
++        }
++    }
++    return false;
++}
++
++// --- AuBridge ---------------------------------------------------------------------------------
++
++bool AuBridge::setSockets(const std::string &txPath, const std::string &rxPath)
++{
++    if (m_running)
++        return false; // the running bridge keeps its paths
++    if (!fitsSunPath(txPath) || !fitsSunPath(rxPath)) {
++        m_txPath.clear();
++        m_rxPath.clear();
++        return false;
++    }
++    m_txPath = txPath;
++    m_rxPath = rxPath;
++    return true;
++}
++
++void AuBridge::start(TxSink sink)
++{
++    if (m_running)
++        return;
++    m_running = true;
++    m_rxWaitIdr = true;
++    m_rxSent = m_rxDropped = 0;
++    m_txUnits = 0;
++    m_rxLastConnectUs = 0;
++    rxConnect();
++    if (!m_txPath.empty() && sink) {
++        m_txStop = false;
++        m_txThread = std::thread(&AuBridge::txMain, this, m_txPath, std::move(sink));
++    }
++}
++
++void AuBridge::stop()
++{
++    if (m_running)
++        fprintf(stderr, "tg-video: bridge stopped (rx sent %llu, dropped %llu, tx %llu)\n", m_rxSent,
++                m_rxDropped, (unsigned long long)m_txUnits);
++    m_running = false;
++    if (m_rxFd >= 0) {
++        close(m_rxFd);
++        m_rxFd = -1;
++    }
++    m_txStop = true;
++    if (m_txThread.joinable())
++        m_txThread.join();
++}
++
++AuBridge::Stats AuBridge::stats() const
++{
++    Stats s;
++    s.rxSent = m_rxSent;
++    s.rxDropped = m_rxDropped;
++    s.txUnits = m_txUnits;
++    return s;
++}
++
++void AuBridge::rxConnect()
++{
++    const int64_t now = g_get_monotonic_time();
++    if (m_rxFd >= 0 || m_rxPath.empty() ||
++        (m_rxLastConnectUs && now - m_rxLastConnectUs < kReconnectIntervalMs * 1000))
++        return;
++    m_rxLastConnectUs = now;
++    int fd = connectSeqpacket(m_rxPath);
++    if (fd < 0)
++        return;
++    int size = kRxSndBuf;
++    // SO_SNDBUFFORCE passes net.core.wmem_max when we may (the service runs as root).
++    if (setsockopt(fd, SOL_SOCKET, SO_SNDBUFFORCE, &size, sizeof size) < 0 &&
++        setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &size, sizeof size) < 0)
++        fprintf(stderr, "tg-video: rx send buffer stays at the default\n");
++    m_rxFd = fd;
++    m_rxWaitIdr = true; // joining mid-stream
++    fprintf(stderr, "tg-video: rx connected\n");
++}
++
++bool AuBridge::receive(const uint8_t *au, size_t len)
++{
++    if (!m_running || !au || len == 0)
++        return false;
++    rxConnect();
++    if (m_rxFd < 0)
++        return false;
++    if (m_rxWaitIdr) {
++        if (!auHasIdr(au, len)) {
++            m_rxDropped++;
++            return true;
++        }
++        m_rxWaitIdr = false;
++    }
++    ssize_t n = send(m_rxFd, au, len, MSG_DONTWAIT | MSG_NOSIGNAL);
++    if (n == (ssize_t)len) {
++        m_rxSent++;
++        return false;
++    }
++    int err = n < 0 ? errno : EMSGSIZE;
++    m_rxDropped++;
++    m_rxWaitIdr = true;
++    if (err != EAGAIN && err != EWOULDBLOCK && err != EMSGSIZE && err != ENOBUFS) {
++        // The engine went away (session stopped or restarted): connect again later.
++        close(m_rxFd);
++        m_rxFd = -1;
++    }
++    return true;
++}
++
++void AuBridge::txMain(std::string path, TxSink sink)
++{
++    std::unique_ptr<uint8_t[]> buf(new (std::nothrow) uint8_t[kTxAuMax]);
++    if (!buf)
++        return;
++    int fd = -1;
++    while (!m_txStop) {
++        if (fd < 0) {
++            fd = connectSeqpacket(path);
++            if (fd < 0) {
++                poll(nullptr, 0, kReconnectIntervalMs);
++                continue;
++            }
++            fprintf(stderr, "tg-video: tx connected\n");
++        }
++        struct pollfd p;
++        p.fd = fd;
++        p.events = POLLIN;
++        p.revents = 0;
++        int r = poll(&p, 1, kReconnectIntervalMs);
++        if (r < 0 && errno != EINTR)
++            break;
++        if (r <= 0)
++            continue;
++        ssize_t n = recv(fd, buf.get(), kTxAuMax, MSG_TRUNC);
++        if (n <= 0) {
++            // 0: the engine closed the socket. Connect again; the session may be restarting.
++            close(fd);
++            fd = -1;
++            continue;
++        }
++        if ((size_t)n > kTxAuMax) {
++            fprintf(stderr, "tg-video: tx access unit of %zd bytes dropped\n", n);
++            continue;
++        }
++        m_txUnits++;
++        sink(buf.get(), (size_t)n);
++    }
++    if (fd >= 0)
++        close(fd);
++}
++
++// --- Controller -------------------------------------------------------------------------------
++
++Controller::Controller(RtcCall rtc, EnginePaths paths) : m_rtc(std::move(rtc)), m_paths(std::move(paths)) {}
++
++Controller::~Controller()
++{
++    // No callbacks into a call that is going away.
++    onSendingChanged = nullptr;
++    onChanged = nullptr;
++    onPeerKeyframeWanted = nullptr;
++    close();
++    txSink = nullptr;
++}
++
++bool Controller::wanted() const
++{
++    return m_callActive && (wantTx() || (m_peerVideo && m_view));
++}
++
++bool Controller::wantTx() const
++{
++    return m_ourCamera && m_canSend;
++}
++
++void Controller::changed()
++{
++    if (onChanged)
++        onChanged();
++}
++
++void Controller::setCallActive(bool on)
++{
++    if (on == m_callActive)
++        return;
++    m_callActive = on;
++    if (!on)
++        m_view = false; // a new call asks again
++    reconcile();
++}
++
++void Controller::setOurCamera(bool on)
++{
++    if (on == m_ourCamera)
++        return;
++    m_ourCamera = on;
++    m_failed = false; // a new wish may start what failed before
++    reconcile();
++    changed();
++}
++
++void Controller::setPeerVideo(bool on)
++{
++    if (on == m_peerVideo)
++        return;
++    m_peerVideo = on;
++    if (!on)
++        m_streaming = false;
++    reconcile();
++    changed();
++}
++
++void Controller::setView(bool on)
++{
++    if (on == m_view)
++        return;
++    m_view = on;
++    m_failed = false;
++    reconcile();
++}
++
++void Controller::reconcile()
++{
++    if (!wanted()) {
++        m_failed = false;
++        m_retried = false;
++        close();
++        return;
++    }
++    if (m_state == State::Running && m_tx != wantTx()) {
++        // Camera on or off: the engine takes the TX chain only at start.
++        close();
++    }
++    if (m_state != State::Idle || m_failed)
++        return; // a reply on its way reconciles again
++    m_state = State::Probing;
++    const unsigned gen = m_gen;
++    if (!m_rtc("capabilities", "{}", [this, gen](const std::string &reply) { onCaps(gen, reply); })) {
++        m_state = State::Idle;
++        m_failed = true;
++    }
++}
++
++void Controller::onCaps(unsigned gen, const std::string &reply)
++{
++    if (gen != m_gen || m_state != State::Probing)
++        return;
++    if (!jsonBool(reply, "returnValue")) {
++        fprintf(stderr, "tg-video: engine capabilities failed\n");
++        m_state = State::Idle;
++        m_failed = true;
++        return;
++    }
++    // videoCallCapable honours the device's own policy (deviceinfo_video_call): a device without a
++    // usable camera still shows the peer, it just sends nothing. With two cameras take the front
++    // one: the droid backend passes the index to droidcamsrc as the HAL id, front = 1.
++    // Only ever lowered: a TX start that failed outweighs a later "capable".
++    m_canSend = m_canSend && jsonBool(reply, "videoCallCapable");
++    m_camera = jsonInt(reply, "cameraCount", 0) >= 2 ? 1 : 0;
++    m_state = State::Idle;
++    if (!wanted()) {
++        changed(); // our camera cannot be sent after all
++        return;
++    }
++    startSession(wantTx());
++}
++
++void Controller::startSession(bool tx)
++{
++    m_tx = tx;
++    m_width = tx ? kTxWidth : kRxOnlyWidth;
++    m_height = tx ? kTxHeight : kRxOnlyHeight;
++    char payload[640];
++    snprintf(payload, sizeof payload,
++             "{\"rxSocket\":%s,\"txSocket\":%s,\"rxEnabled\":true,\"txEnabled\":%s,\"shmPath\":%s,"
++             "\"width\":%d,\"height\":%d,\"bitrate\":%d,\"camera\":%d,\"previewShmPath\":%s,"
++             "\"previewWidth\":%d,\"previewHeight\":%d}",
++             jsonQuote(m_paths.rxSocket).c_str(), jsonQuote(m_paths.txSocket).c_str(), tx ? "true" : "false",
++             jsonQuote(m_paths.shm).c_str(), m_width, m_height, kTxBitrate, m_camera,
++             jsonQuote(tx ? m_paths.preview : std::string()).c_str(), kPreviewWidth, kPreviewHeight);
++    m_state = State::Starting;
++    const unsigned gen = m_gen;
++    if (!m_rtc("start", payload, [this, gen](const std::string &reply) { onStart(gen, reply); })) {
++        m_state = State::Idle;
++        m_failed = true;
++    }
++}
++
++void Controller::onStart(unsigned gen, const std::string &reply)
++{
++    const bool ok = jsonBool(reply, "returnValue");
++    if (gen != m_gen || m_state != State::Starting) {
++        // Closed while starting: stop what this start brought up.
++        if (ok)
++            m_rtc("stop", "{}", nullptr);
++        return;
++    }
++    if (!ok) {
++        const std::string err = jsonString(reply, "errorText");
++        m_state = State::Idle;
++        if (!m_retried && err == "already running") {
++            // A session we lost track of (the service restarted during a call): stop it, start ours.
++            fprintf(stderr, "tg-video: engine already running, stopping it and retrying\n");
++            m_retried = true;
++            m_rtc("stop", "{}", nullptr);
++            reconcile();
++            return;
++        }
++        if (m_tx && err == "tx start failed") {
++            // No usable camera or encoder after all: still show the peer.
++            fprintf(stderr, "tg-video: engine cannot send video, receiving only\n");
++            m_canSend = false;
++            changed();
++            reconcile(); // receive only, if the user wants to see the peer
++            return;
++        }
++        fprintf(stderr, "tg-video: engine start failed: %s\n", err.c_str());
++        m_failed = true;
++        return;
++    }
++    std::string rx = jsonString(reply, "rxSocket"), tx = jsonString(reply, "txSocket");
++    if (rx.empty())
++        rx = m_paths.rxSocket;
++    if (tx.empty())
++        tx = m_paths.txSocket;
++    if (!m_bridge.setSockets(m_tx ? tx : std::string(), rx)) {
++        fprintf(stderr, "tg-video: unusable engine socket paths\n");
++        m_rtc("stop", "{}", nullptr);
++        m_state = State::Idle;
++        m_failed = true;
++        return;
++    }
++    m_bridge.start(m_tx ? txSink : AuBridge::TxSink());
++    m_state = State::Running;
++    m_keyframeAsked = false;
++    fprintf(stderr, "tg-video: engine running (%dx%d, tx %s)\n", m_width, m_height, m_tx ? "on" : "off");
++    if (m_tx && onSendingChanged)
++        onSendingChanged(true);
++    // The decoder joins mid-stream: it needs an IDR to start from.
++    if (onPeerKeyframeWanted)
++        onPeerKeyframeWanted();
++    changed();
++    // The wish may have changed while starting.
++    if (!wanted() || m_tx != wantTx())
++        reconcile();
++}
++
++void Controller::close()
++{
++    const State was = m_state;
++    m_gen++;
++    m_state = State::Idle;
++    if (was == State::Idle || was == State::Probing)
++        return;
++    // Starting: onStart sees the old generation and stops what it started.
++    if (was == State::Running) {
++        m_bridge.stop();
++        m_rtc("stop", "{}", nullptr);
++        if (m_tx && onSendingChanged)
++            onSendingChanged(false);
++        fprintf(stderr, "tg-video: engine session closed\n");
++        changed();
++    }
++}
++
++void Controller::requestKeyframe(int64_t nowUs)
++{
++    if (!sending())
++        return;
++    if (m_keyframeAsked && nowUs - m_lastKeyframeUs < kKeyframeMinIntervalUs)
++        return;
++    m_keyframeAsked = true;
++    m_lastKeyframeUs = nowUs;
++    m_rtc("requestKeyframe", "{}", nullptr);
++}
++
++bool Controller::tick(int64_t nowUs)
++{
++    const bool frames = m_peerVideo && m_lastFrameUs && nowUs - m_lastFrameUs < kStreamingTimeoutUs;
++    if (frames == m_streaming)
++        return false;
++    m_streaming = frames;
++    changed();
++    return true;
++}
++
++std::string Controller::lineFields() const
++{
++    const char *ivs = !m_peerVideo ? "unavailable" : m_streaming ? "streaming" : "available";
++    std::string s = ",\"incomingVideo\":";
++    s += m_peerVideo ? "true" : "false";
++    s += ",\"outgoingVideo\":";
++    s += sending() ? "true" : "false";
++    s += ",\"incomingVideoState\":\"";
++    s += ivs;
++    // A WebRTC sender turns its frames upright itself when, as here, the orientation
++    // extension is not negotiated.
++    s += "\",\"incomingVideoOrientation\":0";
++    return s;
++}
++
++std::string Controller::payloadFields() const
++{
++    std::string s = ",\"allowVideoCalls\":true,\"videoURI\":";
++    if (!running())
++        return s + "\"\"";
++    char buf[96];
++    s += jsonQuote(m_paths.shm);
++    snprintf(buf, sizeof buf, ",\"videoWidth\":%d,\"videoHeight\":%d", m_width, m_height);
++    s += buf;
++    if (m_tx) {
++        // Our own picture for the inset, mirrored for the front camera
++        // as a mirror shows the user.
++        s += ",\"videoPreviewURI\":" + jsonQuote(m_paths.preview);
++        snprintf(buf, sizeof buf, ",\"videoPreviewWidth\":%d,\"videoPreviewHeight\":%d,\"videoPreviewOrientation\":%d",
++                 kPreviewWidth, kPreviewHeight, kPreviewQuarterTurns);
++        s += buf;
++        s += ",\"videoPreviewMirrored\":";
++        s += m_camera == 1 ? "true" : "false";
++    }
++    return s;
++}
++
++} // namespace tgvideo
++
++#endif
+diff --git a/tgcalls-video.h b/tgcalls-video.h
+new file mode 100644
+index 0000000..be98ad6
+--- /dev/null
++++ b/tgcalls-video.h
+@@ -0,0 +1,187 @@
++#ifndef _TGCALLS_VIDEO_H
++#define _TGCALLS_VIDEO_H
++
++// Telegram video for tgcalls-lite calls, through luneos-rtc-engine (org.webosports.rtcengine),
++// which WhatsApp calls use too: the engine owns the camera, the H.264 encoder and decoder and the
++// gst-shm frames the Phone app shows. This file only decides when an engine session runs, moves
++// access units over the engine's two sockets, and describes the video to the Phone app. Nothing
++// here depends on TDLib or luna-service2 (the LS2 calls are a function the caller passes in), so
++// it is tested on its own (test/tgcalls-video-test.cpp).
++//
++// Everything except the TX socket reader runs on libpurple's main loop, like the call engine.
++
++#include <atomic>
++#include <cstddef>
++#include <cstdint>
++#include <functional>
++#include <mutex>
++#include <string>
++#include <thread>
++
++namespace tgvideo {
++
++// How far a Telegram receiver turns our camera's picture clockwise for the phone held upright.
++// A call to Android showed 90 arriving upside down, so three quarter turns (WhatsApp's
++// <video device_orientation> counts the other way and says one).
++constexpr int kTxRotationDegrees = 270;
++
++// The same for the phone as it is held now. deviceTurns is the Phone app's changeMedia
++// {deviceOrientation}, the shell's quarter turns: 0 top up, 1 left edge up, 2 upside down, 3 right
++// edge up. The camera turns with the phone, so its picture's turn changes by as much, against
++// the phone's turn for the front camera (HAL id 1; sargo, 10 Nov: with it, it arrived upside
++// down held sideways); the back one looks away from the user, so there it counts the other way.
++constexpr int txRotationDegrees(int camera, int deviceTurns)
++{
++    return ((kTxRotationDegrees / 90 + (camera == 1 ? -deviceTurns : deviceTurns)) % 4 + 4) % 4 * 90;
++}
++
++// The engine's AU sockets (luneos-rtc-engine docs/API.md, "AU socket wire contract"): AF_UNIX
++// SOCK_SEQPACKET, one Annex-B access unit per datagram, the engine listening on both.
++//   RX: we send the peer's access units; the engine decodes them for the Phone app.
++//   TX: the engine sends our encoded camera; a thread reads it and hands each unit to a sink.
++class AuBridge {
++public:
++    // Called on the TX thread with each encoded camera access unit.
++    using TxSink = std::function<void(const uint8_t *au, size_t len)>;
++
++    AuBridge() = default;
++    ~AuBridge() { stop(); }
++    AuBridge(const AuBridge &) = delete;
++    AuBridge &operator=(const AuBridge &) = delete;
++
++    // The paths the engine's start reply named; "" for none (no TX: no camera). False if the
++    // bridge is running (its paths stay), or, with both cleared, if a path does not fit a
++    // sockaddr_un.
++    bool setSockets(const std::string &txPath, const std::string &rxPath);
++    // Starts passing units (and the TX thread if there is a TX path). Idempotent.
++    void start(TxSink sink);
++    // Stops the TX thread (joined) and closes the RX socket. Idempotent.
++    void stop();
++    bool running() const { return m_running; }
++
++    // One of the peer's access units, as the call engine delivers them. Never blocks: a unit the
++    // socket has no room for is dropped. After a drop, and when the socket (re)connects, units
++    // are held back until the next IDR. Returns true when the peer should be asked for one.
++    bool receive(const uint8_t *au, size_t len);
++
++    struct Stats {
++        unsigned long long rxSent = 0, rxDropped = 0, txUnits = 0;
++    };
++    Stats stats() const;
++
++private:
++    void rxConnect();
++    void txMain(std::string path, TxSink sink);
++
++    std::string m_txPath, m_rxPath;
++    bool m_running = false;
++    int m_rxFd = -1;
++    bool m_rxWaitIdr = true;
++    int64_t m_rxLastConnectUs = 0;
++    unsigned long long m_rxSent = 0, m_rxDropped = 0;
++    std::atomic<unsigned long long> m_txUnits{0};
++    std::thread m_txThread;
++    std::atomic<bool> m_txStop{false};
++};
++
++// True if the Annex-B access unit holds an IDR slice (NAL type 5).
++bool auHasIdr(const uint8_t *au, size_t len);
++
++// Engine paths on the device. The engine binds them, like its own defaults, in /tmp.
++struct EnginePaths {
++    std::string rxSocket = "/tmp/tg-rtc-rx.sock";
++    std::string txSocket = "/tmp/tg-rtc-tx.sock";
++    std::string shm = "/tmp/tg-rtc-video";
++    std::string preview = "/tmp/tg-rtc-preview";
++};
++
++// When the engine session runs, and what the Phone app is told. Inputs come from the Phone app
++// (changeMedia), the call engine (the peer's camera, frames) and the call (active or not).
++//
++// A session runs while the call is up and either our camera should be on and the device can send
++// (the engine's capabilities, and no failed TX start), or the peer sends video and the user chose
++// to see it. It encodes our camera when that should be on and can be; otherwise it only decodes.
++class Controller {
++public:
++    // Calls method of org.webosports.rtcengine with payload. onReply (may be empty) gets the
++    // reply payload on the main loop. Returns false if the call could not be sent.
++    using RtcCall = std::function<bool(const std::string &method, const std::string &payload,
++                                       std::function<void(const std::string &reply)> onReply)>;
++
++    explicit Controller(RtcCall rtc, EnginePaths paths = EnginePaths());
++    ~Controller();
++    Controller(const Controller &) = delete;
++    Controller &operator=(const Controller &) = delete;
++
++    void setCallActive(bool on);
++    void setOurCamera(bool on);   // what the user wants: our camera on or off
++    void setPeerVideo(bool on);   // the peer's offer has video
++    void setView(bool on);        // the user chose to see the peer's video
++
++    // The peer asked for a keyframe of our video: passed to the encoder at most once a second.
++    void requestKeyframe(int64_t nowUs);
++    // One of the peer's access units arrived (for incomingVideoState "streaming").
++    void noteFrame(int64_t nowUs) { m_lastFrameUs = nowUs; }
++    // Call about once a second: notices the peer's frames stopping or starting. Returns true
++    // (and fires onChanged) when what the Phone app is told changed.
++    bool tick(int64_t nowUs);
++
++    // Where our encoded camera goes (called on the TX thread): the call engine's
++    // postVideoAccessUnit(). Set before the session starts.
++    AuBridge::TxSink txSink;
++    // Our camera's picture is sent: the call engine should offer video.
++    std::function<void(bool sending)> onSendingChanged;
++    // What the Phone app is told changed (republish the call state, tell audiod).
++    std::function<void()> onChanged;
++    // A session started decoding mid-stream: ask the peer for an IDR.
++    std::function<void()> onPeerKeyframeWanted;
++
++    AuBridge &bridge() { return m_bridge; }
++    bool running() const { return m_state == State::Running; }
++    bool sending() const { return running() && m_tx; }
++    bool streaming() const { return m_streaming; }
++
++    // JSON members (each starting with ',') for the call state the Phone app reads.
++    std::string lineFields() const;     // on the line
++    std::string payloadFields() const;  // at the top level
++
++    // The camera the session opens (HAL id; 1 is the front one where there are two).
++    int camera() const { return m_camera; }
++
++private:
++    enum class State { Idle, Probing, Starting, Running };
++    void reconcile();
++    void close();
++    void startSession(bool tx);
++    void onCaps(unsigned gen, const std::string &reply);
++    void onStart(unsigned gen, const std::string &reply);
++    bool wanted() const;
++    bool wantTx() const;
++    void changed();
++
++    RtcCall m_rtc;
++    EnginePaths m_paths;
++    AuBridge m_bridge;
++    State m_state = State::Idle;
++    unsigned m_gen = 0;         // bumped on every close: replies of an older session are ignored
++    bool m_callActive = false, m_ourCamera = false, m_peerVideo = false, m_view = false;
++    bool m_failed = false;      // a start failed: no retry until the wish changes
++    bool m_retried = false;     // one stop-and-retry after "already running"
++    bool m_canSend = true;      // capabilities: videoCallCapable
++    bool m_tx = false;          // the running (or starting) session encodes our camera
++    int m_camera = 0;
++    int m_width = 0, m_height = 0;
++    int64_t m_lastKeyframeUs = 0;
++    bool m_keyframeAsked = false;
++    int64_t m_lastFrameUs = 0;
++    bool m_streaming = false;
++};
++
++// Tiny readers for the engine's flat JSON replies.
++bool jsonBool(const std::string &json, const char *key);
++std::string jsonString(const std::string &json, const char *key);
++long jsonInt(const std::string &json, const char *key, long fallback);
++
++} // namespace tgvideo
++
++#endif
