@@ -1,0 +1,117 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 4 Nov 2026 17:03:31 +0100
+Subject: [PATCH 13/20] droid: free buffer pool configs, and skip allocation
+ entries without a pool
+
+droidvdec and droidcamsrc look through the downstream allocation pools
+for one with a droid media buffer allocator. For each pool they got its
+config, which is a copy that the caller frees, and never freed it.
+
+An allocation query entry may also give only a size and no pool. For
+such an entry gst_buffer_pool_get_config(NULL) returned NULL,
+gst_buffer_pool_config_get_allocator() then failed without setting the
+allocator, and the uninitialised pointer was dereferenced. Skip entries
+without a pool.
+
+droideglsink leaked the config of its previous pool when it could not be
+reused for other caps.
+
+Also drop a second "count" in droidvdec that shadowed the first.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/sailfishos/gst-droid/pull/91]
+---
+ gst/droidcamsrc/gstdroidcamsrc.c   | 12 +++++++++---
+ gst/droidcodec/gstdroidvdec.c      | 15 ++++++++++-----
+ gst/droideglsink/gstdroideglsink.c |  3 +++
+ 3 files changed, 22 insertions(+), 8 deletions(-)
+
+diff --git a/gst/droidcamsrc/gstdroidcamsrc.c b/gst/droidcamsrc/gstdroidcamsrc.c
+index 495692b..c5e7c23 100644
+--- a/gst/droidcamsrc/gstdroidcamsrc.c
++++ b/gst/droidcamsrc/gstdroidcamsrc.c
+@@ -1815,15 +1815,21 @@ gst_droidcamsrc_vfsrc_negotiate (GstDroidCamSrcPad * data)
+     count = gst_query_get_n_allocation_pools (query);
+ 
+     for (i = 0; i < count; ++i) {
+-      GstAllocator *allocator;
++      GstAllocator *allocator = NULL;
+       GstStructure *config;
++      gboolean droid;
+ 
+       gst_query_parse_nth_allocation_pool (query, i, &pool, &size, &min, &max);
++      /* an entry may give only a size and no pool */
++      if (!pool)
++        continue;
+       config = gst_buffer_pool_get_config (pool);
+       gst_buffer_pool_config_get_allocator (config, &allocator, NULL);
+-      if (allocator
++      droid = allocator
+           && g_strcmp0 (allocator->mem_type,
+-              GST_ALLOCATOR_DROID_MEDIA_BUFFER) == 0) {
++          GST_ALLOCATOR_DROID_MEDIA_BUFFER) == 0;
++      gst_structure_free (config);
++      if (droid) {
+         break;
+       } else {
+         gst_object_unref (pool);
+diff --git a/gst/droidcodec/gstdroidvdec.c b/gst/droidcodec/gstdroidvdec.c
+index 304239a..b5a7040 100644
+--- a/gst/droidcodec/gstdroidvdec.c
++++ b/gst/droidcodec/gstdroidvdec.c
+@@ -979,15 +979,21 @@ gst_droidvdec_decide_allocation (GstVideoDecoder * decoder, GstQuery * query)
+     gint count = gst_query_get_n_allocation_pools (query);
+ 
+     for (i = 0; i < count; ++i) {
+-      GstAllocator *allocator;
++      GstAllocator *allocator = NULL;
+       GstStructure *config;
++      gboolean droid;
+ 
+       gst_query_parse_nth_allocation_pool (query, i, &pool, &size, &min, &max);
++      /* an entry may give only a size and no pool */
++      if (!pool)
++        continue;
+       config = gst_buffer_pool_get_config (pool);
+       gst_buffer_pool_config_get_allocator (config, &allocator, NULL);
+-      if (allocator
++      droid = allocator
+           && g_strcmp0 (allocator->mem_type,
+-              GST_ALLOCATOR_DROID_MEDIA_BUFFER) == 0) {
++          GST_ALLOCATOR_DROID_MEDIA_BUFFER) == 0;
++      gst_structure_free (config);
++      if (droid) {
+         break;
+       } else {
+         gst_object_unref (pool);
+@@ -1019,8 +1025,7 @@ gst_droidvdec_decide_allocation (GstVideoDecoder * decoder, GstQuery * query)
+         GST_ERROR_OBJECT (decoder, "Failed to set buffer pool configuration");
+       }
+ 
+-      gint count = gst_query_get_n_allocation_pools (query);
+-      if (count == 0) {
++      if (gst_query_get_n_allocation_pools (query) == 0) {
+         gst_query_add_allocation_pool(query, pool, size, min, max);
+       }
+     }
+diff --git a/gst/droideglsink/gstdroideglsink.c b/gst/droideglsink/gstdroideglsink.c
+index ac02af6..442adc8 100644
+--- a/gst/droideglsink/gstdroideglsink.c
++++ b/gst/droideglsink/gstdroideglsink.c
+@@ -176,12 +176,15 @@ gst_droideglsink_propose_allocation (GstBaseSink * bsink, GstQuery * query)
+               NULL) && gst_caps_is_equal (caps, pool_caps)) {
+         gst_buffer_pool_config_set_params (config, caps, size, min, max);
+ 
++        /* takes the config, also when it fails */
+         if (gst_buffer_pool_set_config (previous_pool, config)) {
+           pool = previous_pool;
+           sink->invalidated_signal_id = previous_pool_signal_id;
+ 
+           previous_pool = NULL;
+         }
++      } else if (config) {
++        gst_structure_free (config);
+       }
+     }
+ 
