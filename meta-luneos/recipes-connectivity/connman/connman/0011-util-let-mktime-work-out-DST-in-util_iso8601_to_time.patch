@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 30 Oct 2026 18:44:32 +0100
+Subject: [PATCH] util: let mktime() work out DST in util_iso8601_to_timeval()
+
+util_iso8601_to_timeval() passes a struct tm to mktime() that was never
+initialised: strptime() fills in the date and time but not tm_isdst, so
+mktime() takes whatever was on the stack. A stale 0 in summer, or a
+stale positive value in winter, moves the time by an hour; valgrind
+reports the uninitialised read when service_load() parses "Modified".
+
+util_timeval_to_iso8601() writes local time (despite the "Z"), so the
+string carries no DST information. Clear the struct and set tm_isdst to
+-1 so mktime() decides from the time zone rules. Only the hour repeated
+when DST ends stays ambiguous, as the format cannot express it.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/shared/util.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/src/shared/util.c b/src/shared/util.c
+index bda2d2b..a15cbab 100644
+--- a/src/shared/util.c
++++ b/src/shared/util.c
+@@ -96,6 +96,8 @@ void util_iso8601_to_timeval(char *str, struct timeval *time)
+ 	time_t t;
+ 	char *p;
+ 
++	memset(&tm, 0, sizeof(tm));
++
+ 	p = strptime(str, "%FT%T", &tm);
+ 	if (!p)
+ 		return;
+@@ -106,6 +108,13 @@ void util_iso8601_to_timeval(char *str, struct timeval *time)
+ 			return;
+ 	}
+ 
++	/*
++	 * util_timeval_to_iso8601() writes local time, so this is local
++	 * time too, and whether DST was in effect is not in the string:
++	 * let mktime() work it out. strptime() does not set tm_isdst.
++	 */
++	tm.tm_isdst = -1;
++
+ 	t = mktime(&tm);
+ 	if (t < 0)
+ 		return;

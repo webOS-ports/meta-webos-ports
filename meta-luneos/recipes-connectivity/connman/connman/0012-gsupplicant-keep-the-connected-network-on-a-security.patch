@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 10 Nov 2026 08:35:29 +0100
+Subject: [PATCH] gsupplicant: keep the connected network on a security change
+
+signal_bss_changed() removes a network whenever the security computed
+for one of its BSSs changes, and adds the BSS back as a new network.
+For the BSS we are associated with that takes the connected service
+down with it: connman disconnects, drops the address and offers the
+same access point again under the other security.
+
+The associated BSS cannot really change its security while we stay
+associated. An access point that is reconfigured drops its stations
+first, so CurrentBSS goes to "/" and current_network is cleared before
+the new security shows up. A change reported while still connected
+comes from a bad scan result.
+
+Seen with MediaTek's wlan_drv_gen2 (MT6739): after an active scan
+while connected it reports the associated BSS with its IEs cut short,
+the SSID element followed by zero padding, while every other BSS of
+the same scan is complete. wpa_supplicant then publishes an empty RSN
+KeyMgmt with Privacy still set, bss_compute_security() returns WEP and
+the WPA2 network is removed. Any scan while connected (a settings
+page refreshing its list is enough) drops Wi-Fi.
+
+Ignore the change for the associated BSS of the current network and
+log it. The security is computed again on every property change, so
+the next good scan result brings the BSS back in line, and a genuine
+change is applied by the first update after the association has gone.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ gsupplicant/supplicant.c | 23 ++++++++++++++++++++++-
+ 1 file changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/gsupplicant/supplicant.c b/gsupplicant/supplicant.c
+index 9d9c99e..2ea231c 100644
+--- a/gsupplicant/supplicant.c
++++ b/gsupplicant/supplicant.c
+@@ -3076,7 +3076,28 @@ static void signal_bss_changed(const char *path, DBusMessageIter *iter)
+ 	old_security = network->security;
+ 	bss_compute_security(bss);
+ 
+-	if (old_security != bss->security) {
++	/*
++	 * The BSS we are associated with cannot change its security
++	 * without the association going down first: an access point
++	 * that is reconfigured drops its stations, CurrentBSS goes to
++	 * "/" and current_network is cleared. A change reported while
++	 * still connected comes from a bad scan result, for example a
++	 * driver that reports the connected BSS with its IEs cut short
++	 * after an active scan, so the RSN element is missing and only
++	 * Privacy is left (computed as WEP). Acting on it would remove
++	 * the network and with it the connected service.
++	 *
++	 * Leave the network as it is. bss->security is recomputed on
++	 * every property change, so the next good scan result brings
++	 * it back in line, and a real change is applied by the first
++	 * update after the association has gone.
++	 */
++	if (old_security != bss->security &&
++			network == interface->current_network &&
++			bss == network->best_bss) {
++		SUPPLICANT_DBG("Ignoring security change of connected BSS "
++			       "%s with path %s", bss->ssid, bss->path);
++	} else if (old_security != bss->security) {
+ 		struct g_supplicant_bss *new_bss;
+ 
+ 		SUPPLICANT_DBG("New network security for %s with path %s",
