@@ -39,6 +39,16 @@ FASTBOOT_BOOT_IMAGE ?= "${KERNEL_IMAGETYPE}.fastboot"
 FASTBOOT_DEBUG_BOOT_IMAGE ?= ""
 FASTBOOT_BOOT_DEPENDS ?= "virtual/kernel:do_deploy"
 
+# The init_boot image, on a device that launched with Android 13 or later. There
+# boot holds only the kernel and our initramfs is in init_boot, so a package
+# that wrote boot alone would start our kernel on the stock generic ramdisk.
+# luneos-bootimg-gki deploys it from the same task as the boot image, so
+# FASTBOOT_BOOT_DEPENDS covers it (meta-android-halium.inc sets it for
+# ANDROID_BOOTIMG_INIT_BOOT = "1"). It goes to init_<partition> next to every
+# boot partition, in both modes: the debug image differs only in its cmdline,
+# which lives in the boot header, not in init_boot.
+FASTBOOT_INIT_BOOT_IMAGE ?= ""
+
 # Where the boot image goes. Both slots by default, so it boots whichever slot
 # the bootloader picks; a machine that keeps Android on the other slot says
 # "boot", which fastboot writes to the current slot.
@@ -68,6 +78,13 @@ do_deploy() {
         cp "${DEPLOY_DIR_IMAGE}/${FASTBOOT_DEBUG_BOOT_IMAGE}" ${WORKDIR}/build/boot-debug.img
     fi
 
+    if [ -n "${FASTBOOT_INIT_BOOT_IMAGE}" ] ; then
+        if [ ! -e "${DEPLOY_DIR_IMAGE}/${FASTBOOT_INIT_BOOT_IMAGE}" ] ; then
+            bbfatal "init_boot image ${DEPLOY_DIR_IMAGE}/${FASTBOOT_INIT_BOOT_IMAGE} doesn't exist."
+        fi
+        cp "${DEPLOY_DIR_IMAGE}/${FASTBOOT_INIT_BOOT_IMAGE}" ${WORKDIR}/build/init_boot.img
+    fi
+
     vbmeta_line=""
     if [ -n "${FASTBOOT_VBMETA_PARTITION}" ] ; then
         if [ -e "${DEPLOY_DIR_IMAGE}/${FASTBOOT_VBMETA_IMAGE}" ] ; then
@@ -87,14 +104,35 @@ PYEOF
     fi
 
     boot_lines=""
+    flashed="vbmeta, boot"
+    [ -n "${FASTBOOT_INIT_BOOT_IMAGE}" ] && flashed="$flashed, init_boot"
     for part in ${FASTBOOT_BOOT_PARTITIONS} ; do
         boot_lines="$boot_lines
 fastboot flash $part \$BOOT"
+        if [ -n "${FASTBOOT_INIT_BOOT_IMAGE}" ] ; then
+            case $part in
+            *_a|*_b)
+                boot_lines="$boot_lines
+fastboot flash init_$part init_boot.img"
+                ;;
+            *)
+                # A bare "boot" is the current slot. fastboot adds the suffix
+                # only for partitions the bootloader reports as slotted, and the
+                # BraX3's lk does not report init_boot at all: a bare
+                # "flash init_boot" fails with "partition does not exist", while
+                # init_boot_b by name is written. So name the slot.
+                boot_lines="$boot_lines
+SLOT=\$(fastboot getvar current-slot 2>&1 | sed -n 's/^current-slot: *//p')
+[ -n \"\$SLOT\" ] || { echo \"cannot read the current slot\"; exit 1; }
+fastboot flash init_${part}_\$SLOT init_boot.img"
+                ;;
+            esac
+        fi
     done
 
     cat > ${WORKDIR}/build/flash.sh <<FLASHEOF
 #!/bin/sh
-# Flash LuneOS to ${MACHINE} over fastboot: vbmeta, boot and userdata.
+# Flash LuneOS to ${MACHINE} over fastboot: $flashed and userdata.
 #
 # The bootloader has to be unlocked first, which wipes the device:
 #
