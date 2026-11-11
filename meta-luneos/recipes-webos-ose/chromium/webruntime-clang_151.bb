@@ -5,7 +5,7 @@ require chromium-host-llvm.inc
 
 PROVIDES = "virtual/webruntime"
 
-PR = "r1"
+PR = "r3"
 
 # Restated here as well as in webruntime_151.bb: this file is reached through
 
@@ -231,19 +231,25 @@ do_configure:prepend() {
 
 # Parallelism for do_compile.
 # ---------------------------------------------------------------------------
-# webruntime-common.inc feeds PARALLEL_MAKE straight into NINJA_OPTS, and
-# local.conf sets "-j 64" globally, so this is the per-recipe override.
+# webruntime-common.inc feeds PARALLEL_MAKE straight into NINJA_OPTS, so this
+# is the per-recipe override of the global value.
 #
-# The host is a Threadripper 2990WX, 32 cores / 64 threads, 125 GB. It is only
-# that roomy when the BlueStacks guest is down AND its hugepage pool has been
-# released - qemu reserves 32768 x 2 MB, and that 64 GB stays reserved even
-# after the VM exits, showing up as "used" that no process accounts for
-# (check HugePages_Total in /proc/meminfo; free it with
-# sysctl vm.nr_hugepages=0). With the guest running, drop this to about 24.
+# It used to be a fixed "-j 64", tuned for a Threadripper 2990WX (32 cores /
+# 64 threads, 125 GB) and lowered by hand to about 24 whenever the BlueStacks
+# guest held its 64 GB hugepage pool. On the 16-core, 30 GB OSL arm64 builder
+# the same -j 64 started 64 jobs and had to be stopped. webruntime_ninja_jobs()
+# (webruntime-common.inc) now takes the smaller of the CPU count and
+# MemAvailable / 2 GiB. The 2 GiB comes from the OSL arm64 build of 2026-11-10:
+# at -j 12 it never had less than 12 GB of its 30 GB free, i.e. at most
+# 1.5 GB per job, link included. On the workstation that gives about 54 jobs
+# with the guest down and about 22 with its hugepages reserved - the same
+# numbers that used to be set by hand.
+#
+# To pin a value anyway, set PARALLEL_MAKE:pn-webruntime-clang in local.conf.
 #
 # concurrent_links stays at 1 regardless: Chromium sizes it from MemTotal at
 # 30-50 GB per link, and the libcbe.so lld invocation is the single biggest
 # allocation in the build. Running several of those at once is what pushed the
 # box to 3 GB free on 2026-08-20.
 GN_ARGS += "concurrent_links=1"
-PARALLEL_MAKE = "-j 64"
+PARALLEL_MAKE = "-j ${@webruntime_ninja_jobs(d, 2)}"
