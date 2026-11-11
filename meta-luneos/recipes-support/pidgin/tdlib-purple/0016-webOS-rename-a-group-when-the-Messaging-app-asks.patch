@@ -1,0 +1,326 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sun, 8 Nov 2026 15:13:12 +0100
+Subject: [PATCH] webOS: rename a group when the Messaging app asks
+
+The app's group rename reaches the plug-in as the transport's
+"webos-im-group-rename" signal (account, the group's purple name, the
+new name), taken (TRUE) by the plug-in whose account it is.
+
+TDLib's setChatTitle gives the title, for a basic group and a
+supergroup alike. The name is sent without the blanks around it; one
+longer than Telegram keeps (128 characters, as TDLib 1.8.67's
+ChatManager::MAX_TITLE_LENGTH counts them, by Unicode code point) is
+cut there, never inside a character, as TDLib's clean_name would cut
+it anyway, so that what is sent is what the group gets. A name that is
+empty after that, or not UTF-8, is not taken, nor is a chat that is
+not a group we are in.
+
+Why a rename failed (no rights) is told in the group, and logged by
+the chat's id, without the name. The new title comes back as TDLib's
+updateChatTitle, which renames the chat in the buddy list and so the
+thread, and as messageChatChangeTitle, our own shown as a notice as
+one made elsewhere is.
+
+The cut is webos::groupTitle in webos-send.cpp. Unit tests in
+test/webos-commands-test.cpp.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ td-client.cpp                |  30 +++++++++
+ td-client.h                  |   3 +
+ tdlib-purple.cpp             |  11 ++++
+ test/test-transceiver.cpp    |   1 +
+ test/webos-commands-test.cpp | 122 +++++++++++++++++++++++++++++++++++
+ webos-send.cpp               |  27 ++++++++
+ webos-send.h                 |   9 +++
+ 7 files changed, 203 insertions(+)
+
+diff --git a/td-client.cpp b/td-client.cpp
+index 161f937..7236349 100644
+--- a/td-client.cpp
++++ b/td-client.cpp
+@@ -2672,6 +2672,36 @@ bool PurpleTdClient::removeFromGroup(const char *purpleChatName, const std::vect
+     return true;
+ }
+ 
++bool PurpleTdClient::renameGroup(const char *purpleChatName, const char *name)
++{
++    const td::td_api::chat *chat = getCommandGroup(purpleChatName, "rename group");
++    if (!chat || (!getBasicGroupId(*chat).valid() && !getSupergroupId(*chat).valid()))
++        return false;
++    ChatId chatId = getId(*chat);
++
++    // The name is not logged, the chat's id being enough to go on
++    std::string title = webos::groupTitle(name);
++    if (title.empty()) {
++        purple_debug_warning(config::pluginId, "Cannot rename chat %" G_GINT64_FORMAT ": no name\n",
++                             chatId.value());
++        return false;
++    }
++    // A longer name is cut by groupTitle as TDLib's clean_name would cut it, so that what is sent
++    // is what Telegram keeps
++
++    auto request = td::td_api::make_object<td::td_api::setChatTitle>(chatId.value(), title);
++    m_transceiver.sendQuery(std::move(request), [this, chatId](uint64_t, TdObjectPtr object) {
++        if (object && (object->get_id() == td::td_api::ok::ID))
++            return;
++        purple_debug_warning(config::pluginId, "Failed to rename chat %" G_GINT64_FORMAT "\n", chatId.value());
++        // TRANSLATOR: In-chat error message, argument is a reason (text)
++        commandResponse(chatId, _("Cannot rename group: {}"), std::move(object));
++    });
++    // The new title comes as updateChatTitle, which renames the chat in the buddy list, and as a
++    // message of the change, as one made elsewhere does
++    return true;
++}
++
+ bool PurpleTdClient::leaveGroupChat(const char *purpleChatName)
+ {
+     const td::td_api::chat *chat = getCommandGroup(purpleChatName, "leave group");
+diff --git a/td-client.h b/td-client.h
+index e59306d..a933413 100644
+--- a/td-client.h
++++ b/td-client.h
+@@ -56,6 +56,9 @@ public:
+     // Take these buddies out of the group chat of this purple name; those not known, and we
+     // ourselves, are left out. False if no one is left to take out.
+     bool removeFromGroup(const char *purpleChatName, const std::vector<std::string> &memberNames);
++    // Give the group chat of this purple name this title, as webos::groupTitle makes it. False if
++    // that is empty.
++    bool renameGroup(const char *purpleChatName, const char *name);
+     // Leave the group chat of this purple name, keeping what it holds
+     bool leaveGroupChat(const char *purpleChatName);
+     // Vote in a poll for these options, by their text; none takes the vote back
+diff --git a/tdlib-purple.cpp b/tdlib-purple.cpp
+index fd91d3b..619a367 100644
+--- a/tdlib-purple.cpp
++++ b/tdlib-purple.cpp
+@@ -582,6 +582,15 @@ static gboolean tgprpl_group_remove_cb(PurpleAccount *account, const char *chat,
+     return tdClient->removeFromGroup(chat, webos::splitMembers(membersJoined)) ? TRUE : FALSE;
+ }
+ 
++// webOS: give the group chat of this purple name a new title
++static gboolean tgprpl_group_rename_cb(PurpleAccount *account, const char *chat, const char *name, void * /*data*/)
++{
++    PurpleTdClient *tdClient = getWebosCommandClient(account);
++    if (!tdClient)
++        return FALSE;
++    return tdClient->renameGroup(chat, name) ? TRUE : FALSE;
++}
++
+ // webOS: leave the group chat of this purple name
+ static gboolean tgprpl_group_leave_cb(PurpleAccount *account, const char *chat, void * /*data*/)
+ {
+@@ -630,6 +639,8 @@ static void connectWebosSignals()
+                           PURPLE_CALLBACK(tgprpl_group_invite_cb), NULL);
+     purple_signal_connect(conversations, "webos-im-group-remove", purple_get_core(),
+                           PURPLE_CALLBACK(tgprpl_group_remove_cb), NULL);
++    purple_signal_connect(conversations, "webos-im-group-rename", purple_get_core(),
++                          PURPLE_CALLBACK(tgprpl_group_rename_cb), NULL);
+     purple_signal_connect(conversations, "webos-im-group-leave", purple_get_core(),
+                           PURPLE_CALLBACK(tgprpl_group_leave_cb), NULL);
+     purple_signal_connect(conversations, "webos-im-send-poll-vote", purple_get_core(),
+diff --git a/test/test-transceiver.cpp b/test/test-transceiver.cpp
+index 228b62d..162fe97 100644
+--- a/test/test-transceiver.cpp
++++ b/test/test-transceiver.cpp
+@@ -818,6 +818,7 @@ static void compareRequests(const Function &actual, const Function &expected,
+         case createNewBasicGroupChat::ID:
+         case addChatMembers::ID:
+         case setPollAnswer::ID:
++        case setChatTitle::ID:
+         case discardCall::ID:
+             ASSERT_EQ(to_string(expected), to_string(actual));
+             break;
+diff --git a/test/webos-commands-test.cpp b/test/webos-commands-test.cpp
+index 6d9030d..5e4072b 100644
+--- a/test/webos-commands-test.cpp
++++ b/test/webos-commands-test.cpp
+@@ -550,6 +550,128 @@ TEST_F(WebosCommandTest, RemoveFromLeftGroup)
+     tgl.verifyNoRequests();
+ }
+ 
++TEST(WebosSendTest, GroupTitle)
++{
++    ASSERT_EQ("Physics", webos::groupTitle("Physics"));
++    // Blanks at either end, Unicode's too, go; those inside stay as they are
++    ASSERT_EQ("Natural  Philosophy", webos::groupTitle(" \t\nNatural  Philosophy \xc2\xa0\xe3\x80\x80"));
++    ASSERT_EQ("Optics", webos::groupTitle("\xe3\x80\x80\xc2\xa0 Optics"));
++    ASSERT_EQ("", webos::groupTitle(""));
++    ASSERT_EQ("", webos::groupTitle(" \t\xc2\xa0 "));
++    ASSERT_EQ("", webos::groupTitle(nullptr));
++    // Not UTF-8
++    ASSERT_EQ("", webos::groupTitle("Ph\xffysics"));
++    ASSERT_EQ("", webos::groupTitle("Physics \xe2\x82"));
++
++    // Cut at 128 characters, not bytes, and never inside one
++    std::string exact;
++    for (size_t i = 0; i < webos::GroupTitleMaxLength; i++)
++        exact += "\xc3\xa9"; // é
++    ASSERT_EQ(exact, webos::groupTitle(exact.c_str()));
++    ASSERT_EQ(exact, webos::groupTitle((exact + "\xf0\x9f\x8d\x8e").c_str())); // 🍎
++    std::string ascii(webos::GroupTitleMaxLength - 1, 'a');
++    ASSERT_EQ(ascii + "\xf0\x9f\x8d\x8e", webos::groupTitle((ascii + "\xf0\x9f\x8d\x8e" "b").c_str()));
++    // A blank where it is cut goes too
++    ASSERT_EQ(ascii, webos::groupTitle((ascii + " b").c_str()));
++}
++
++using GroupRenameCallback = gboolean (*)(PurpleAccount *, const char *, const char *, void *);
++
++TEST_F(WebosCommandTest, RenameBasicGroup)
++{
++    login();
++    addBasicGroup();
++    auto rename = reinterpret_cast<GroupRenameCallback>(getConnectedSignal("webos-im-group-rename"));
++    ASSERT_NE(nullptr, rename);
++
++    ASSERT_TRUE(rename(account, groupChatPurpleName.c_str(), " Natural Philosophy ", nullptr));
++    tgl.verifyRequest(setChatTitle(groupChatId, "Natural Philosophy"));
++    tgl.reply(make_object<ok>());
++    prpl.verifyNoEvents();
++
++    // TDLib tells of it as of a rename made elsewhere: the chat is renamed, which renames the
++    // thread, and the message of the change, ours, is a notice in it
++    tgl.update(make_object<updateChatTitle>(groupChatId, "Natural Philosophy"));
++    prpl.verifyEvents(AliasChatEvent(groupChatPurpleName, "Natural Philosophy"));
++    tgl.update(make_object<updateNewMessage>(makeMessage(
++        100, selfId, groupChatId, true, 10001, make_object<messageChatChangeTitle>("Natural Philosophy")
++    )));
++    tgl.verifyRequest(viewMessages(groupChatId, {100}, nullptr, true));
++    prpl.verifyEvents(
++        ServGotJoinedChatEvent(connection, 2, groupChatPurpleName, "Natural Philosophy"),
++        ConversationWriteEvent(groupChatPurpleName, NotificationWho,
++                               selfFirstName + " " + selfLastName + " changed group name to Natural Philosophy",
++                               PURPLE_MESSAGE_SYSTEM, 10001)
++    );
++
++    // Not allowed
++    ASSERT_TRUE(rename(account, groupChatPurpleName.c_str(), "Optics", nullptr));
++    tgl.verifyRequest(setChatTitle(groupChatId, "Optics"));
++    tgl.reply(make_object<error>(400, "Not enough rights to change chat title"));
++    prpl.verifyEvents(
++        ConversationWriteEvent(groupChatPurpleName, NotificationWho,
++                               "Cannot rename group: code 400 (Not enough rights to change chat title)",
++                               PURPLE_MESSAGE_SYSTEM, 0)
++    );
++}
++
++TEST_F(WebosCommandTest, RenameSupergroup)
++{
++    login();
++    addSupergroup();
++    auto rename = reinterpret_cast<GroupRenameCallback>(getConnectedSignal("webos-im-group-rename"));
++    ASSERT_NE(nullptr, rename);
++
++    // Too long: what Telegram keeps
++    std::string longName(webos::GroupTitleMaxLength + 10, 'x');
++    ASSERT_TRUE(rename(account, groupChatPurpleName.c_str(), longName.c_str(), nullptr));
++    tgl.verifyRequest(setChatTitle(groupChatId, std::string(webos::GroupTitleMaxLength, 'x')));
++    tgl.reply(make_object<ok>());
++    prpl.verifyNoEvents();
++}
++
++TEST_F(WebosCommandTest, RenameNotTaken)
++{
++    login();
++    addBasicGroup();
++    auto rename = reinterpret_cast<GroupRenameCallback>(getConnectedSignal("webos-im-group-rename"));
++    ASSERT_NE(nullptr, rename);
++
++    ASSERT_FALSE(rename(otherAccount(), groupChatPurpleName.c_str(), "Optics", nullptr));
++    setProtocol("prpl-jabber");
++    ASSERT_FALSE(rename(account, groupChatPurpleName.c_str(), "Optics", nullptr));
++    setProtocol(config::pluginId);
++    ASSERT_FALSE(rename(nullptr, groupChatPurpleName.c_str(), "Optics", nullptr));
++    // Not a group, or not one known
++    ASSERT_FALSE(rename(account, purpleUserName(0).c_str(), "Optics", nullptr));
++    ASSERT_FALSE(rename(account, "chat7001", "Optics", nullptr));
++    ASSERT_FALSE(rename(account, nullptr, "Optics", nullptr));
++    // No name
++    ASSERT_FALSE(rename(account, groupChatPurpleName.c_str(), "", nullptr));
++    ASSERT_FALSE(rename(account, groupChatPurpleName.c_str(), "  ", nullptr));
++    ASSERT_FALSE(rename(account, groupChatPurpleName.c_str(), nullptr, nullptr));
++    tgl.verifyNoRequests();
++}
++
++// A group we have left
++TEST_F(WebosCommandTest, RenameLeftGroup)
++{
++    login();
++    tgl.update(make_object<updateBasicGroup>(make_object<basicGroup>(
++        groupId, 2, make_object<chatMemberStatusLeft>(), true, 0
++    )));
++    tgl.update(make_object<updateNewChat>(makeChat(
++        groupChatId, make_object<chatTypeBasicGroup>(groupId), "Physics", nullptr, 0, 0, 0
++    )));
++    tgl.update(makeUpdateChatListMain(groupChatId));
++    prpl.discardEvents();
++    tgl.verifyNoRequests();
++    auto rename = reinterpret_cast<GroupRenameCallback>(getConnectedSignal("webos-im-group-rename"));
++    ASSERT_NE(nullptr, rename);
++    ASSERT_FALSE(rename(account, groupChatPurpleName.c_str(), "Optics", nullptr));
++    tgl.verifyNoRequests();
++}
++
+ using GroupLeaveCallback = gboolean (*)(PurpleAccount *, const char *, void *);
+ 
+ TEST_F(WebosCommandTest, LeaveGroup)
+diff --git a/webos-send.cpp b/webos-send.cpp
+index f28595a..8ee2821 100644
+--- a/webos-send.cpp
++++ b/webos-send.cpp
+@@ -56,6 +56,33 @@ std::vector<std::string> splitMembers(const char *membersJoined)
+     return members;
+ }
+ 
++// Without the blanks, as Unicode has them, at either end
++static std::string trimBlanks(const char *start, const char *end)
++{
++    while (start < end && g_unichar_isspace(g_utf8_get_char(start)))
++        start = g_utf8_next_char(start);
++    while (end > start) {
++        const char *last = g_utf8_prev_char(end);
++        if (!g_unichar_isspace(g_utf8_get_char(last)))
++            break;
++        end = last;
++    }
++    return std::string(start, end);
++}
++
++std::string groupTitle(const char *name)
++{
++    if (!name || !g_utf8_validate(name, -1, nullptr))
++        return std::string();
++    std::string trimmed = trimBlanks(name, name + strlen(name));
++    const char *start   = trimmed.c_str();
++    const char *end     = start;
++    for (size_t count = 0; (*end != '\0') && (count < GroupTitleMaxLength); count++)
++        end = g_utf8_next_char(end);
++    // What is cut may leave a blank at the end
++    return trimBlanks(start, end);
++}
++
+ bool pollOptionIds(const std::vector<std::string> &options, const std::vector<std::string> &chosen,
+                    std::vector<int32_t> &optionIds)
+ {
+diff --git a/webos-send.h b/webos-send.h
+index 644b706..48c8350 100644
+--- a/webos-send.h
++++ b/webos-send.h
+@@ -23,6 +23,15 @@ bool parseServiceMessageId(const char *serviceMessageId, int64_t &chatId, int64_
+ // buddy name, in order, without empty ones
+ std::vector<std::string> splitMembers(const char *membersJoined);
+ 
++// The longest group title Telegram keeps, in characters (Unicode code points), as TDLib counts
++// them: ChatManager::MAX_TITLE_LENGTH in TDLib 1.8.67
++constexpr size_t GroupTitleMaxLength = 128;
++
++// A group's new title, "webos-im-group-rename": the name without the blanks around it, cut to
++// GroupTitleMaxLength characters, never inside one. Empty if nothing is left, or the name is not
++// UTF-8.
++std::string groupTitle(const char *name);
++
+ // A poll vote, "webos-im-send-poll-vote": the options chosen, by their text, as positions among the
+ // poll's options, each once and in the poll's order. False if one of them is not an option.
+ // None chosen takes the vote back.

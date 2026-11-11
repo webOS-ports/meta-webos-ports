@@ -1,0 +1,297 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Mon, 9 Nov 2026 22:20:21 +0100
+Subject: [PATCH] webOS: carry Telegram calls with tgcalls-lite alone, without
+ libtgvoip
+
+NoTgvoip=ON builds the call path on tgcalls-lite only: libtgvoip is
+neither looked up nor linked, VoIPController is the empty stand-in, and
+LUNEOS_TELEGRAM_CALL_ENGINE no longer selects libtgvoip.
+
+We offer only tgcalls-lite's version, 7.0.0, which Telegram Desktop,
+Android and iOS all register (tgcalls InstanceV2Impl). libtgvoip only
+carried a call when the peer agreed on no version at all, which no
+current official client does; such a peer is now told the call cannot
+be carried, and the call is discarded. libtgvoip's echo cancellation,
+noise suppression and gain control only ever applied on that path.
+
+Without tgcalls-lite, NoTgvoip disables calls.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ CMakeLists.txt              | 16 +++++++++++-----
+ account-data.h              |  2 +-
+ buildopt.h.in               |  2 ++
+ call.cpp                    | 15 +++++++++++++++
+ test/CMakeLists.txt         |  5 +++--
+ test/call-protocol-test.cpp | 29 +++++++++++++++++++++++++++++
+ test/test-transceiver.cpp   |  4 ++++
+ tgcalls-call.cpp            |  4 ++++
+ tgcalls-call.h              |  5 +++--
+ 9 files changed, 72 insertions(+), 10 deletions(-)
+ create mode 100644 test/call-protocol-test.cpp
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index e10e85d..bc8f27e 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -12,6 +12,7 @@ include(cmake/tdlib-version.cmake)
+ set(NoLottie FALSE CACHE BOOL "Disable animated sticker conversion")
+ set(NoTranslations FALSE CACHE BOOL "Disable translation support")
+ set(NoVoip FALSE CACHE BOOL "Disable voice call support")
++set(NoTgvoip FALSE CACHE BOOL "Carry calls with tgcalls-lite alone, without libtgvoip")
+ set(NoPidgin FALSE CACHE BOOL "Build without Pidgin's headers, so without what only its conversation window can do")
+ set(tgvoip_INCLUDE_DIRS "" CACHE STRING "libtgvoip headers, when not found with pkg-config")
+ set(tgvoip_LIBRARIES "" CACHE STRING "libtgvoip and what it needs, when not found with pkg-config")
+@@ -26,7 +27,7 @@ if (NOT NoPkgConfig)
+     pkg_check_modules(GModule REQUIRED gmodule-2.0)
+     # The types of files pasted, by their content, as file managers tell them
+     pkg_check_modules(GIO REQUIRED gio-2.0)
+-    if (NOT NoVoip)
++    if (NOT NoVoip AND NOT NoTgvoip)
+         # libtgvoip does not install a .pc file of its own; one given by hand is used as it is
+         if ("${tgvoip_LIBRARIES}" STREQUAL "")
+             pkg_check_modules(tgvoip tgvoip)
+@@ -35,7 +36,7 @@ if (NOT NoPkgConfig)
+             message(STATUS "tgvoip library not found, disabling voice call support")
+             set(NoVoip TRUE)
+         endif ("${tgvoip_LIBRARIES}" STREQUAL "")
+-    endif(NOT NoVoip)
++    endif(NOT NoVoip AND NOT NoTgvoip)
+     pkg_check_modules(fmt REQUIRED fmt)
+     if (NOT NoLottie)
+         pkg_check_modules(rlottie REQUIRED rlottie)
+@@ -71,6 +72,11 @@ else (IS_ABSOLUTE "${SHARE_INSTALL_PREFIX}")
+     set(LOCALE_DIR "${CMAKE_INSTALL_PREFIX}/${SHARE_INSTALL_PREFIX}/locale")
+ endif (IS_ABSOLUTE "${SHARE_INSTALL_PREFIX}")
+ 
++# Without libtgvoip, tgcalls-lite is the only call engine: no calls without it
++if (NoTgvoip AND NOT NoVoip AND "${tgcalls_lite_INCLUDE_DIRS}" STREQUAL "")
++    message(STATUS "NoTgvoip without tgcalls-lite, disabling voice call support")
++    set(NoVoip TRUE)
++endif ()
+ configure_file(buildopt.h.in buildopt.h)
+ configure_file(config.cpp.in config.cpp)
+ 
+@@ -137,7 +143,7 @@ if (NOT lunaservice_INCLUDE_DIRS STREQUAL "")
+ endif (NOT lunaservice_INCLUDE_DIRS STREQUAL "")
+ target_link_libraries(telegram-tdlib PRIVATE ${lunaservice_LIBRARIES})
+ 
+-if (NOT NoVoip)
++if (NOT NoVoip AND NOT NoTgvoip)
+     target_link_libraries(telegram-tdlib PRIVATE ${tgvoip_LIBRARIES})
+     if (tgvoip_NO_DSP)
+         # libtgvoip was built with --disable-dsp: EchoCanceller.h gates its webrtc:: members on
+@@ -145,10 +151,10 @@ if (NOT NoVoip)
+         # webrtc types we didn't build.
+         target_compile_definitions(telegram-tdlib PRIVATE TGVOIP_NO_DSP)
+     endif (tgvoip_NO_DSP)
+-endif (NOT NoVoip)
++endif (NOT NoVoip AND NOT NoTgvoip)
+ 
+ # tgcalls-lite (luneos-synergy-connectors, im/telegram/plugin/tgcalls-lite): calls with the tgcalls
+-# V2 protocol current clients speak, next to libtgvoip. Its headers need C++17.
++# V2 protocol current clients speak, next to libtgvoip, or alone with NoTgvoip. Its headers need C++17.
+ set(tgcalls_lite_INCLUDE_DIRS "" CACHE STRING "tgcalls-lite headers; empty builds without it")
+ set(tgcalls_lite_LIBRARIES "" CACHE STRING "tgcalls-lite library (libtgcalls-lite.a)")
+ if (NOT NoVoip AND NOT tgcalls_lite_INCLUDE_DIRS STREQUAL "")
+diff --git a/account-data.h b/account-data.h
+index 06aff4f..d29c09a 100644
+--- a/account-data.h
++++ b/account-data.h
+@@ -14,7 +14,7 @@
+ #include <list>
+ #include <purple.h>
+ 
+-#ifndef NoVoip
++#if !defined(NoVoip) && !defined(NoTgvoip)
+ #include <VoIPController.h>
+ #else
+ 
+diff --git a/buildopt.h.in b/buildopt.h.in
+index 9b411b5..0ded74e 100644
+--- a/buildopt.h.in
++++ b/buildopt.h.in
+@@ -36,6 +36,8 @@
+ 
+ #cmakedefine NoVoip
+ 
++#cmakedefine NoTgvoip
++
+ #cmakedefine NoPidgin
+ 
+ #endif
+diff --git a/call.cpp b/call.cpp
+index 206e1f2..66e7e7b 100644
+--- a/call.cpp
++++ b/call.cpp
+@@ -90,6 +90,7 @@ static bool activateCall(const td::td_api::call &call, const std::string &buddyN
+         return false;
+     const td::td_api::callStateReady &state = static_cast<const td::td_api::callStateReady &>(*call.state_);
+ 
++#ifndef NoTgvoip
+     if (state.protocol_->max_layer_ < 74) {
+         // libtgvoip crashes with openssl assertion failure if it goes into if(!useMTProto2) branch
+         // of VoIPController::ProcessIncomingPacket
+@@ -101,6 +102,7 @@ static bool activateCall(const td::td_api::call &call, const std::string &buddyN
+ 
+         return false;
+     }
++#endif
+ 
+ #ifdef HAVE_TGCALLS_LITE
+     // The peer agreed on tgcalls-lite's version: tgcalls V2 media, not libtgvoip's.
+@@ -115,6 +117,16 @@ static bool activateCall(const td::td_api::call &call, const std::string &buddyN
+     }
+ #endif
+ 
++#ifdef NoTgvoip
++    // Built without libtgvoip: a peer that did not agree on tgcalls-lite's version cannot be
++    // carried. Current Telegram clients all register it (tgcalls InstanceV2Impl).
++    tgcLog("activateCall: peer did not agree on our tgcalls version; no other engine");
++    if (!buddyName.empty())
++        showMessageTextIm(account, buddyName.c_str(), NULL,
++                          "Discarding call: the other side's Telegram does not support this call protocol",
++                          time(NULL), PURPLE_MESSAGE_SYSTEM);
++    return false;
++#else
+     tgvoip::VoIPController *voip = account.getCallData();
+     if (!voip)
+         return false;
+@@ -170,6 +182,7 @@ static bool activateCall(const td::td_api::call &call, const std::string &buddyN
+         showMessageTextIm(account, buddyName.c_str(), NULL, message,
+                           time(NULL), PURPLE_MESSAGE_SYSTEM);
+     }
++#endif // NoTgvoip
+ 
+ #endif
+     return true;
+@@ -182,12 +195,14 @@ static void deactivateCall(TdAccountData &account)
+ #ifdef HAVE_TGCALLS_LITE
+     tgcallsLiteStop(account);
+ #endif
++#ifndef NoTgvoip
+     // Also for a tgcalls-lite call or one that never started: libtgvoip aborts when a
+     // VoIPController is deleted without Stop(), and Stop() on an idle one does nothing harmful.
+     tgvoip::VoIPController *voip = account.getCallData();
+     if (voip)
+         voip->Stop();
+ #endif
++#endif
+ }
+ 
+ static void notifyCallError(const td::td_api::callStateError &error, const std::string &buddyName,
+diff --git a/test/CMakeLists.txt b/test/CMakeLists.txt
+index 8107df6..6619b5f 100644
+--- a/test/CMakeLists.txt
++++ b/test/CMakeLists.txt
+@@ -25,6 +25,7 @@ add_executable(tests EXCLUDE_FROM_ALL
+     clipboard-test.cpp
+     thumbnail-test.cpp
+     formatted-text-test.cpp
++    call-protocol-test.cpp
+     test-transceiver.cpp
+     libpurple-mock.cpp
+     printout.cpp
+@@ -92,8 +93,8 @@ endif (NOT NoTranslations)
+ if (NOT tgvoip_INCLUDE_DIRS STREQUAL "")
+     target_include_directories(tests SYSTEM PRIVATE ${tgvoip_INCLUDE_DIRS})
+ endif (NOT tgvoip_INCLUDE_DIRS STREQUAL "")
+-if (NOT NoVoip)
++if (NOT NoVoip AND NOT NoTgvoip)
+     target_link_libraries(tests PRIVATE ${tgvoip_LIBRARIES})
+-endif (NOT NoVoip)
++endif (NOT NoVoip AND NOT NoTgvoip)
+ 
+ add_custom_target(run-tests ${CMAKE_CURRENT_BINARY_DIR}/tests DEPENDS tests)
+diff --git a/test/call-protocol-test.cpp b/test/call-protocol-test.cpp
+new file mode 100644
+index 0000000..f8c2a3e
+--- /dev/null
++++ b/test/call-protocol-test.cpp
+@@ -0,0 +1,29 @@
++// Calls no engine can carry. Built without libtgvoip (NoTgvoip), a call whose peer did not agree on
++// tgcalls-lite's version is refused: discarded, with a notice, and not shown as active.
++#include "fixture.h"
++#include "buildopt.h"
++
++class CallProtocolTest: public CommTest {};
++
++#if defined(NoTgvoip) && !defined(NoVoip)
++TEST_F(CallProtocolTest, NoAgreedVersionDiscarded)
++{
++    loginWithOneContact();
++
++    // Ready, but on a version we do not speak (tgcalls' legacy one): nothing can carry it
++    std::vector<std::string> versions{"2.4.4"};
++    tgl.update(make_object<updateCall>(make_object<call>(
++        5, 0, userIds[0], false, false,
++        make_object<callStateReady>(make_object<callProtocol>(true, true, 65, 92, std::move(versions)),
++                                    std::vector<object_ptr<callServer>>(), "", std::string(256, 'k'),
++                                    std::vector<std::string>(), true, false, ""))));
++
++    tgl.verifyRequest(discardCall(5, true, "", 0, false, 0));
++    prpl.verifyEvents(
++        NewConversationEvent(PURPLE_CONV_TYPE_IM, account, purpleUserName(0)),
++        ConversationWriteEvent(purpleUserName(0), purpleUserName(0),
++                               "Discarding call: the other side's Telegram does not support this call protocol",
++                               PURPLE_MESSAGE_SYSTEM, 0)
++    );
++}
++#endif
+diff --git a/test/test-transceiver.cpp b/test/test-transceiver.cpp
+index 12d1b30..b53dfa1 100644
+--- a/test/test-transceiver.cpp
++++ b/test/test-transceiver.cpp
+@@ -808,6 +808,10 @@ static void compareRequests(const Function &actual, const Function &expected,
+             compare(static_cast<const editMessageText &>(actual), static_cast<const editMessageText &>(expected),
+                     m_inputPhotoPaths);
+             break;
++        // Compared in full
++        case discardCall::ID:
++            ASSERT_EQ(to_string(expected), to_string(actual));
++            break;
+         default: ASSERT_TRUE(false) << "Unsupported request " << requestToString(actual);
+     }
+ }
+diff --git a/tgcalls-call.cpp b/tgcalls-call.cpp
+index 9211633..06dbd20 100644
+--- a/tgcalls-call.cpp
++++ b/tgcalls-call.cpp
+@@ -174,8 +174,12 @@ const char *tgcallsLiteVersion()
+ 
+ bool tgcallsLiteEnabled()
+ {
++#ifdef NoTgvoip
++    return true;   // the only engine there is
++#else
+     const char *engine = getenv("LUNEOS_TELEGRAM_CALL_ENGINE");
+     return !(engine && strcmp(engine, "tgvoip") == 0);
++#endif
+ }
+ 
+ bool tgcallsLiteAgreed(const td::td_api::callStateReady &state)
+diff --git a/tgcalls-call.h b/tgcalls-call.h
+index 258c097..a035cce 100644
+--- a/tgcalls-call.h
++++ b/tgcalls-call.h
+@@ -4,8 +4,8 @@
+ // Telegram calls through tgcalls-lite: tgcalls V2 with signalling version 7.0.0 (raw encrypted
+ // signalling packets relayed by TDLib, ICE through libnice, DTLS-SRTP, Opus, H.264 video through
+ // luneos-rtc-engine, see tgcalls-video.h). Current clients
+-// register that version (tgcalls InstanceV2Impl); libtgvoip carries a call only when the peer
+-// agrees on no version at all.
++// register that version (tgcalls InstanceV2Impl). Built with NoTgvoip it is the only engine and
++// a peer that agrees on no version is refused; otherwise libtgvoip carries such a call.
+ 
+ #include "account-data.h"
+ #include <string>
+@@ -16,6 +16,7 @@
+ const char *tgcallsLiteVersion();
+ 
+ // False when LUNEOS_TELEGRAM_CALL_ENGINE=tgvoip is set, to fall back to libtgvoip for testing.
++// Always true with NoTgvoip, where there is nothing to fall back to.
+ bool tgcallsLiteEnabled();
+ 
+ // True if the agreed protocol in callStateReady names tgcallsLiteVersion().
