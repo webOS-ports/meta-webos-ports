@@ -268,8 +268,8 @@ FILES:${PN} += " \
 # mount --bind /tmp/luna-session /run/luna-session/
 # export XDG_RUNTIME_DIR=/run/luna-session
 # export XDG_SESSION_TYPE=wayland
-# -- /etc/gbinder.conf comes from libgbinder now, with the API level set per
-#    machine through GBINDER_API_LEVEL
+# -- /etc/gbinder.conf comes from libgbinder, and luneos-device-config sets
+#    the API level from the vendor in /etc/gbinder.d/10-luneos-device.conf
 #
 # Then:
 # 0. waydroid init (just once, but needs network !)
