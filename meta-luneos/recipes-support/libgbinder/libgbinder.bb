@@ -9,7 +9,9 @@ DEPENDS = "glib-2.0 libglibutil"
 
 inherit pkgconfig
 
-SRC_URI = "git://github.com/mer-hybris/libgbinder.git;branch=master;protocol=https"
+SRC_URI = "git://github.com/mer-hybris/libgbinder.git;branch=master;protocol=https \
+    file://0001-gbinder-Don-t-record-offsets-of-NULL-buffer-objects.patch \
+"
 
 PV = "1.1.52"
 SRCREV = "e906afcffbfa51b7fbefe042a13b933d9e8dfdd9"
@@ -53,10 +55,10 @@ RDEPENDS:libgbinder-tools = "libgbinder"
 # This is used only where there is no Android container to read properties from;
 # 30 is mid-range of the presets (28, 29, 30, 31, 33, 35, 36).
 #
-# PACKAGE_ARCH: machines sharing TUNE_PKGARCH would otherwise collide in sstate.
+# The value is the same for every machine, so the package stays tune-arch.
+# Making it MACHINE_ARCH again would rehash every tune-arch recipe above it
+# (libgbinder-radio, ofono-binder-plugin, ...) on each MACHINE switch.
 GBINDER_API_LEVEL ?= "30"
-
-PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 do_install:append() {
     install -d ${D}${sysconfdir}

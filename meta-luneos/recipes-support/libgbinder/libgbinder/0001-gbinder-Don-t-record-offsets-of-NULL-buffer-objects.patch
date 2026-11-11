@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 21:41:25 +0100
+Subject: [PATCH] [gbinder] Don't record offsets of NULL buffer objects.
+
+libhwbinder writes a buffer object with a NULL address into the parcel
+data but leaves it out of the object offsets (Parcel::writeObject), so
+the binder driver never translates it and the parent's pointer stays
+NULL. An empty hidl_vec or a NULL hidl_string therefore reaches a HIDL
+service as a NULL pointer.
+
+libgbinder recorded every buffer object. The driver then pointed the
+empty buffer into the target's transaction buffer, and the service saw
+a non-NULL pointer of length 0. Trustonic's Gatekeeper HAL
+(gatekeeper.trustonic.so) accepts a first enrolment only when the
+current password and handle are NULL, so every enroll() from libgbinder
+with empty vectors failed with ERROR_INVALID (-1), while the same call
+from Android's gatekeeperd succeeded against the same HAL.
+
+Skip the offset for a NULL buffer, as is already done for NULL binder
+objects.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/gbinder_writer.c | 15 +++++++++++++--
+ 1 file changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/src/gbinder_writer.c b/src/gbinder_writer.c
+index 6d59ffa..041754b 100644
+--- a/src/gbinder_writer.c
++++ b/src/gbinder_writer.c
+@@ -950,8 +950,19 @@ gbinder_writer_data_append_buffer_object(
+     n = data->io->encode_buffer_object(buf->data + offset, ptr, size, parent);
+     /* Fix the data size */
+     g_byte_array_set_size(buf, offset + n);
+-    /* Record the offset */
+-    gbinder_writer_data_record_offset(data, offset);
++    /*
++     * Record the offset, but not for a NULL buffer. libhwbinder writes
++     * such an object into the data but leaves it out of the offsets
++     * (Parcel::writeObject), so the driver never translates it and the
++     * pointer in the parent (e.g. an empty hidl_vec) stays NULL on the
++     * receiving side. Recorded, the driver would point it at the target's
++     * buffer and the receiver would see a non-NULL pointer of length 0,
++     * which some HALs reject (Trustonic Gatekeeper's enroll() takes a
++     * first enrolment only when the current password is NULL).
++     */
++    if (ptr) {
++        gbinder_writer_data_record_offset(data, offset);
++    }
+     /* The driver seems to require each buffer to be 8-byte aligned */
+     data->buffers_size += G_ALIGN8(size);
+     return index;
+-- 
+2.53.0
+

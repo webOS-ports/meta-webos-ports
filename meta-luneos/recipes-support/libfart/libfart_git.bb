@@ -25,8 +25,8 @@ SRC_URI = " \
 
 S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}"
 
-# libgbinder is MACHINE_ARCH, and opencv/tensorflow-lite tuning differs per
-# machine, so do not let this be shared as an allarch/tune-only package.
+# opencv/tensorflow-lite tuning differs per machine, so do not let this be
+# shared as an allarch/tune-only package.
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 inherit pkgconfig
