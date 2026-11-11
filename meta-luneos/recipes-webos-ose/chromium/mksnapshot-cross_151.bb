@@ -75,12 +75,12 @@ DEPENDS += "rust-native"
 #   KeyError: 'RUST_TARGET_PATH'
 inherit rust-common
 
-# webruntime-repo_151.inc adds these and creates the matching shims under
-# third_party/{node,rust-toolchain} in do_configure:prepend, but line 37 above
+# webruntime-repo_151.inc adds these and creates the matching shims and links under
+# third_party/{node,rust-toolchain} and depot_tools in do_configure:prepend, but line 37 above
 # is a plain "DEPENDS =" assignment that runs after the require and wipes them.
 # The shims are still created, so they end up as dangling symlinks and ninja
 # reports the tool "missing and no known rule to make it".
-DEPENDS += "bindgen-cli-native nodejs24-native"
+DEPENDS += "bindgen-cli-native nodejs24-native gn-native ninja-native gperf-native"
 
 # Same reason as the rust args: without clang_base_path, //build/config/compiler
 # reads //third_party/llvm-build/Release+Asserts/cr_build_revision to identify
@@ -121,9 +121,9 @@ GN_ARGS:append = "\
 # the same treatment as webruntime-clang. Without this it falls back to the
 # global PARALLEL_MAKE and compiled V8 at -j 16 on a 64-thread box, leaving it
 # the long pole of the qemux86-64 appliance build with two thirds of the CPU
-# idle. See the parallelism note in webruntime-clang_151.bb for the memory
-# reasoning; V8 alone is far lighter than Chromium's link so this is safe.
-PARALLEL_MAKE = "-j 48"
+# idle. See the parallelism note in webruntime-clang_151.bb; V8 alone is far
+# lighter than Chromium and its link, so it gets 1 GiB per job rather than 2.
+PARALLEL_MAKE = "-j ${@webruntime_ninja_jobs(d, 1)}"
 
 EXTRA_OEGN = "--root=${S}/src --dotfile=mksnapshot.gn"
 

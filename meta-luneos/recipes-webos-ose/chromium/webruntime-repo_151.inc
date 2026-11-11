@@ -81,8 +81,10 @@ WEBRUNTIME_REPO_VERSION = "151"
 # checkout"), which are non-fatal per task but still make bitbake exit non-zero.
 # With the name present it emits a single webos-enh-sub-warning instead, which
 # ERROR_QA:remove below drops - same approach as mksnapshot-cross_151.bb.
+# main, which has pull requests #20 (browser-shell video state) and #21 (the
+# Widevine bridge's media changes).
 SRC_URI = "git://github.com/webos-ports/chromium151.git;protocol=https;branch=main;name=chromium"
-SRCREV = "30383bc93972a871593951026b11be5d838228dd"
+SRCREV = "6384e27a9746d086ba69bf6cc9bf47f20ddbf1ec"
 
 ERROR_QA:remove = "webos-enh-sub-warning"
 WARN_QA:remove = "webos-enh-sub-warning"
@@ -113,9 +115,60 @@ CHROMIUM_OSS_PKG_INFO_CHKSUM = ""
 # nodejs24-native is meta-oe master's 24.19.0 renamed, so it does not displace
 # nodejs-native 22 for the Enact/enyo tooling - see
 # meta-luneos/recipes-devtools/nodejs24.
-DEPENDS += "nodejs24-native bindgen-cli-native"
+DEPENDS += "nodejs24-native bindgen-cli-native gn-native ninja-native gperf-native esbuild-native"
+
+# devtools-frontend's rollup 4.60.4 loads a native addon for the build host,
+# and node_modules carries only @rollup/rollup-linux-x64-gnu. The wasm-node
+# package of the same version has the identical rollup JavaScript and loads
+# WebAssembly bindings instead; do_configure:prepend puts its loader in.
+SRC_URI += "https://registry.npmjs.org/@rollup/wasm-node/-/wasm-node-4.60.4.tgz;name=rollup-wasm-node;downloadfilename=rollup-wasm-node-4.60.4.tgz;subdir=rollup-wasm-node"
+SRC_URI[rollup-wasm-node.sha256sum] = "a70354216d534b0b7cba485954570eea539389459bdf1a4cf02c9514607c74e6"
+
+# Chromium links with its CIPD mold (buildtools/third_party/mold/cipd/mold),
+# an x86-64 prebuilt, wherever use_mold defaults on: a clang build for an x64
+# or arm64 linux toolchain that is not official (build/config/compiler/
+# compiler.gni). In the graph for halium-arm64 that is 62 links - the rust host
+# build scripts, clang_x64 host tools, v8_snapshot_clang_arm64 and ANGLE's
+# libEGL/libGLESv2/libvk_swiftshader. Turn it off so they link with OE's lld
+# like every other link in the build. :append so that it survives any later
+# plain assignment of GN_ARGS (webruntime-common.inc sets it with "=").
+GN_ARGS:append = " use_mold=false"
 
 do_configure:prepend() {
+    # gn and ninja: the repo's depot_tools/{gn,ninja} point at the x86-64
+    # prebuilts in src/buildtools/linux64/gn and src/third_party/ninja/ninja,
+    # which do not run on any other build host ("Exec format error" on an
+    # aarch64 builder). webruntime-common.inc puts depot_tools first on PATH
+    # and calls ${S}/depot_tools/ninja directly, so repoint the two links at
+    # OE's. gn-native is pinned to Chromium's gn_version by
+    # recipes-devtools/gn/gn_git.bbappend.
+    ln -sfn ${STAGING_BINDIR_NATIVE}/gn ${S}/depot_tools/gn
+    ln -sfn ${STAGING_BINDIR_NATIVE}/ninja ${S}/depot_tools/ninja
+
+    # gperf: third_party/blink/renderer/build/scripts/scripts.gni hardcodes
+    # //third_party/gperf/cipd/bin/gperf on a linux host, an x86-64 prebuilt
+    # (12 Blink generator edges), so point it at gperf-native.
+    ln -sfn ${STAGING_BINDIR_NATIVE}/gperf ${S}/src/third_party/gperf/cipd/bin/gperf
+
+    # esbuild: devtools-frontend's ts_library.py and esbuild.js both run
+    # third_party/esbuild/esbuild (devtools_paths.esbuild_path(), and
+    # ESBUILD_BINARY_PATH for the npm package), an x86-64 binary. They are
+    # scripts, so the path is not on any ninja command line. Same version
+    # (0.25.1), which the npm package's JavaScript checks.
+    devtools=${S}/src/third_party/devtools-frontend/src
+    ln -sfn ${STAGING_BINDIR_NATIVE}/esbuild $devtools/third_party/esbuild/esbuild
+
+    # rollup: see SRC_URI above. Replace only the native loader, after checking
+    # that the rest of the package is the release we fetched.
+    wasm=${UNPACKDIR}/rollup-wasm-node/package
+    grep -q '"version": "4.60.4"' $devtools/node_modules/rollup/package.json || \
+        bbfatal "devtools-frontend's rollup is no longer 4.60.4; update rollup-wasm-node"
+    cmp -s $wasm/dist/shared/rollup.js $devtools/node_modules/rollup/dist/shared/rollup.js || \
+        bbfatal "rollup-wasm-node's rollup.js differs from devtools-frontend's"
+    install -m 0644 $wasm/dist/native.js $devtools/node_modules/rollup/dist/native.js
+    install -d $devtools/node_modules/rollup/dist/wasm-node
+    install -m 0644 $wasm/dist/wasm-node/* $devtools/node_modules/rollup/dist/wasm-node/
+
     # node: the graph calls third_party/node/node.py 3990 times and node.py
     # hardcodes this path with no environment override, so point it at the
     # nodejs24-native binary.
@@ -144,6 +197,12 @@ do_configure:prepend() {
     printf '#!/bin/sh\nexit 0\n' > ${S}/src/third_party/rust-toolchain/bin/rustfmt
     chmod +x ${S}/src/third_party/rust-toolchain/bin/rustfmt
 }
+
+# The V8 snapshot tools run on the build host, so build them for its CPU rather
+# than always for x86-64 (aarch64 build hosts).
+SRC_URI:append = " \
+    file://0001-cros-build-the-V8-snapshot-toolchain-for-the-build-host-CPU.patch \
+"
 
 # Halium specific patch for DRI
 SRC_URI:append:halium = " \
