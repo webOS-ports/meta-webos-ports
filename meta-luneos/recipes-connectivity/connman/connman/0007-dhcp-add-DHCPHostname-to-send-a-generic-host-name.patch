@@ -1,0 +1,173 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 29 Oct 2026 15:44:53 +0100
+Subject: [PATCH] dhcp: add DHCPHostname to send a generic host name
+
+ConnMan puts the system host name into DHCP option 12 of every DISCOVER
+and REQUEST (dhcp_initialize() and ipv4ll_start_client(), through
+connman_utsname_get_hostname()). On a phone that is usually the device
+model or the owner's name, and every network the device joins logs it
+next to the MAC address. There is no way to change what is sent without
+changing the system host name, which other software relies on.
+
+Add a [General] DHCPHostname option, read the way VendorClassID is. When
+it is set, it is sent instead of the system host name; when it is set to
+an empty value, no host name is sent at all. A host name the DHCP server
+assigned to the service earlier is still sent back to that server, as
+before. Without the option nothing changes.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ doc/connman.conf.5.in |  6 ++++++
+ src/dhcp.c            | 19 +++++++++++++++++--
+ src/main.c            | 15 +++++++++++++++
+ src/main.conf         |  6 ++++++
+ 4 files changed, 44 insertions(+), 2 deletions(-)
+
+diff --git a/doc/connman.conf.5.in b/doc/connman.conf.5.in
+index a81ac7b..396f0a8 100644
+--- a/doc/connman.conf.5.in
++++ b/doc/connman.conf.5.in
+@@ -164,6 +164,12 @@ Set DHCP option 60 (Vendor Class ID) to the given string. This option can
+ be used by DHCP servers to identify specific clients without having to
+ rely on MAC address ranges, etc
+ .TP
++.BI DHCPHostname= string
++Send the given string in DHCP option 12 (Host Name) instead of the system
++host name, which often identifies the device model. An empty value sends
++no host name. A host name the DHCP server assigned to the service is
++still sent back to that server. Default is the system host name.
++.TP
+ .BI EnableOnlineCheck=true\ \fR|\fB\ false
+ Enable or disable use of HTTP GET as an online status check.
+ When a service is in a READY state, and is selected as default,
+diff --git a/src/dhcp.c b/src/dhcp.c
+index c84f1de..629e166 100644
+--- a/src/dhcp.c
++++ b/src/dhcp.c
+@@ -183,6 +183,21 @@ static void dhcp_debug(const char *str, void *data)
+ }
+ 
+ static void ipv4ll_lost_cb(GDHCPClient *dhcp_client, gpointer user_data);
++
++/*
++ * The host name to put in DHCP option 12. DHCPHostname in main.conf
++ * replaces the system host name, which often names the device model; an
++ * empty DHCPHostname sends no host name at all.
++ */
++static const char *dhcp_get_hostname(void)
++{
++	const char *hostname = connman_setting_get_string("DHCPHostname");
++
++	if (hostname)
++		return *hostname ? hostname : NULL;
++
++	return connman_utsname_get_hostname();
++}
+ static void ipv4ll_available_cb(GDHCPClient *ipv4ll_client, gpointer user_data);
+ 
+ static int ipv4ll_start_client(struct connman_dhcp *dhcp)
+@@ -212,7 +227,7 @@ static int ipv4ll_start_client(struct connman_dhcp *dhcp)
+ 	g_dhcp_client_set_id(ipv4ll_client);
+ 
+ 	if (dhcp->network) {
+-		hostname = connman_utsname_get_hostname();
++		hostname = dhcp_get_hostname();
+ 		if (hostname)
+ 			g_dhcp_client_set_send(ipv4ll_client,
+ 						G_DHCP_HOST_NAME, hostname);
+@@ -605,7 +620,7 @@ static int dhcp_initialize(struct connman_dhcp *dhcp)
+ 
+ 		hostname = __connman_service_get_hostname(service);
+ 		if (!hostname)
+-			hostname = connman_utsname_get_hostname();
++			hostname = dhcp_get_hostname();
+ 
+ 		if (hostname)
+ 			g_dhcp_client_set_send(dhcp_client,
+diff --git a/src/main.c b/src/main.c
+index 7090926..136202e 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -119,6 +119,7 @@ static struct {
+ 	bool persistent_tethering_mode;
+ 	bool enable_6to4;
+ 	char *vendor_class_id;
++	char *dhcp_hostname;
+ 	bool enable_online_check;
+ 	bool enable_online_to_ready_transition;
+ 	enum service_online_check_mode online_check_mode;
+@@ -155,6 +156,7 @@ static struct {
+ 	.persistent_tethering_mode = false,
+ 	.enable_6to4 = false,
+ 	.vendor_class_id = NULL,
++	.dhcp_hostname = NULL,
+ 	.enable_online_check = true,
+ 	.enable_online_to_ready_transition = false,
+ 	.online_check_mode = CONNMAN_SERVICE_ONLINE_CHECK_MODE_UNKNOWN,
+@@ -193,6 +195,7 @@ static struct {
+ #define CONF_PERSISTENT_TETHERING_MODE  "PersistentTetheringMode"
+ #define CONF_ENABLE_6TO4                "Enable6to4"
+ #define CONF_VENDOR_CLASS_ID            "VendorClassID"
++#define CONF_DHCP_HOSTNAME              "DHCPHostname"
+ #define CONF_ENABLE_ONLINE_CHECK        "EnableOnlineCheck"
+ #define CONF_ENABLE_ONLINE_TO_READY_TRANSITION "EnableOnlineToReadyTransition"
+ #define CONF_ONLINE_CHECK_MODE          "OnlineCheckMode"
+@@ -230,6 +233,7 @@ static const char *supported_options[] = {
+ 	CONF_PERSISTENT_TETHERING_MODE,
+ 	CONF_ENABLE_6TO4,
+ 	CONF_VENDOR_CLASS_ID,
++	CONF_DHCP_HOSTNAME,
+ 	CONF_ENABLE_ONLINE_CHECK,
+ 	CONF_ENABLE_ONLINE_TO_READY_TRANSITION,
+ 	CONF_ONLINE_CHECK_MODE,
+@@ -635,6 +639,13 @@ static void parse_config(GKeyFile *config, const char *file)
+ 
+ 	g_clear_error(&error);
+ 
++	string = __connman_config_get_string(config, GENERAL_GROUP,
++					CONF_DHCP_HOSTNAME, &error);
++	if (!error)
++		connman_settings.dhcp_hostname = string;
++
++	g_clear_error(&error);
++
+ 	/* EnableOnlineCheck */
+ 
+ 	boolean = __connman_config_get_bool(config, GENERAL_GROUP,
+@@ -1028,6 +1039,9 @@ char *connman_setting_get_string(const char *key)
+ 	if (g_str_equal(key, CONF_VENDOR_CLASS_ID))
+ 		return connman_settings.vendor_class_id;
+ 
++	if (g_str_equal(key, CONF_DHCP_HOSTNAME))
++		return connman_settings.dhcp_hostname;
++
+ 	if (g_str_equal(key, CONF_ONLINE_CHECK_IPV4_URL))
+ 		return connman_settings.online_check_ipv4_url;
+ 
+@@ -1343,6 +1357,7 @@ int main(int argc, char *argv[])
+ 	g_strfreev(connman_settings.blacklisted_interfaces);
+ 	g_strfreev(connman_settings.tethering_technologies);
+ 	g_free(connman_settings.vendor_class_id);
++	g_free(connman_settings.dhcp_hostname);
+ 	g_free(connman_settings.online_check_ipv4_url);
+ 	g_free(connman_settings.online_check_ipv6_url);
+ 	g_free(connman_settings.localtime);
+diff --git a/src/main.conf b/src/main.conf
+index da1307d..3685954 100644
+--- a/src/main.conf
++++ b/src/main.conf
+@@ -84,6 +84,12 @@
+ # Default value is true.
+ # AllowDomainnameUpdates = true
+ 
++# Host name to send in DHCP requests (option 12) instead of the
++# system host name. Set it to an empty value to send no host name.
++# A host name the DHCP server assigned to the service is still sent
++# back to that server. Default is the system host name.
++# DHCPHostname =
++
+ # Keep only a single connected technology at any time. When a new
+ # service is connected by the user or a better one is found according
+ # to PreferredTechnologies, the new service is kept connected and all

@@ -1,0 +1,177 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 09:18:37 +0100
+Subject: [PATCH] service: retry a saved Wi-Fi network after a failed auto
+ reconnect
+
+When a saved Wi-Fi network drops and connman's automatic reconnect
+fails, the service is left in the failure state. Auto-connect skips
+services in that state (is_ignore(), and do_auto_connect() since
+"service: Allow only user connection after WiFi failure"), so nothing
+tries again. The device stays offline until the user connects by hand
+or the network drops out of the scan results and comes back as a new
+service.
+
+Seen on an HP TouchPad (ath6kl) next to an access point whose 2.4 GHz
+radio was timing out transmissions: the AP stopped answering for a few
+seconds, two reconnects failed with connect-failed ("Authentication
+with <bssid> timed out" in wpa_supplicant), and Wi-Fi stayed down for
+11 minutes with the AP back and in range.
+
+Retry such a service on a back-off timer, 10 s doubling to 5 minutes,
+reset once it is connected again or the user connects it. It is
+limited to saved, auto-connect Wi-Fi services that failed during an
+automatic connect with connect-failed, dhcp-failed or a connect
+timeout. Failures that point at the credentials or the AP refusing the
+station (invalid-key, auth-failed, blocked) are still left for the
+user, for the reason given in that upstream commit: retrying an old
+passphrase can get the station locked out by the AP.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/service.c | 96 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 96 insertions(+)
+
+diff --git a/src/service.c b/src/service.c
+index 42e50df..cb04384 100644
+--- a/src/service.c
++++ b/src/service.c
+@@ -161,6 +161,8 @@ struct connman_service {
+ 	char *name;
+ 	char *passphrase;
+ 	bool roaming;
++	guint auto_retry_timer;
++	unsigned int auto_retry_seconds;
+ 	struct connman_ipconfig *ipconfig_ipv4;
+ 	struct connman_ipconfig *ipconfig_ipv6;
+ 	struct connman_network *network;
+@@ -6925,6 +6927,92 @@ static void service_complete(struct connman_service *service)
+ 	service_save(service);
+ }
+ 
++/*
++ * A saved Wi-Fi network whose automatic reconnect failed stays in the
++ * failure state, and auto-connect skips services in that state (see
++ * is_ignore() and do_auto_connect()), so after one bad moment at the
++ * access point the device stayed offline until the user connected by
++ * hand or the network dropped out of the scan results.
++ *
++ * Retry such a service on a back-off timer, but only when the failure
++ * says nothing about the credentials: a wrong or changed passphrase
++ * (invalid-key, auth-failed) or an AP that refuses the station (blocked)
++ * must not be retried, or the AP may lock the device out.
++ */
++#define AUTO_RETRY_MIN_SECONDS	10
++#define AUTO_RETRY_MAX_SECONDS	300
++
++static bool auto_retry_wanted(const struct connman_service *service)
++{
++	if (service->type != CONNMAN_SERVICE_TYPE_WIFI)
++		return false;
++
++	if (service->connect_reason != CONNMAN_SERVICE_CONNECT_REASON_AUTO)
++		return false;
++
++	if (!service->favorite || !service->autoconnect)
++		return false;
++
++	switch (service->error) {
++	case CONNMAN_SERVICE_ERROR_UNKNOWN:	/* connect timed out */
++	case CONNMAN_SERVICE_ERROR_CONNECT_FAILED:
++	case CONNMAN_SERVICE_ERROR_DHCP_FAILED:
++		return true;
++	default:
++		return false;
++	}
++}
++
++static void auto_retry_cancel(struct connman_service *service)
++{
++	if (service->auto_retry_timer) {
++		g_source_remove(service->auto_retry_timer);
++		service->auto_retry_timer = 0;
++	}
++
++	service->auto_retry_seconds = 0;
++}
++
++static gboolean auto_retry_run(gpointer user_data)
++{
++	struct connman_service *service = user_data;
++
++	service->auto_retry_timer = 0;
++
++	if (service->state != CONNMAN_SERVICE_STATE_FAILURE ||
++			!auto_retry_wanted(service))
++		return G_SOURCE_REMOVE;
++
++	connman_info("%s: retrying after %s",
++			connman_service_get_identifier(service),
++			error2string(service->error) ?: "connect timeout");
++
++	clear_error(service);
++	__connman_service_clear_error(service);
++	do_auto_connect(service, CONNMAN_SERVICE_CONNECT_REASON_AUTO);
++
++	return G_SOURCE_REMOVE;
++}
++
++static void auto_retry_schedule(struct connman_service *service)
++{
++	if (service->auto_retry_timer || !auto_retry_wanted(service))
++		return;
++
++	if (service->auto_retry_seconds < AUTO_RETRY_MIN_SECONDS)
++		service->auto_retry_seconds = AUTO_RETRY_MIN_SECONDS;
++	else if (service->auto_retry_seconds < AUTO_RETRY_MAX_SECONDS / 2)
++		service->auto_retry_seconds *= 2;
++	else
++		service->auto_retry_seconds = AUTO_RETRY_MAX_SECONDS;
++
++	DBG("service %p retry in %u s", service, service->auto_retry_seconds);
++
++	service->auto_retry_timer =
++		g_timeout_add_seconds(service->auto_retry_seconds,
++					auto_retry_run, service);
++}
++
+ static DBusMessage *clear_property(DBusConnection *conn,
+ 					DBusMessage *msg, void *user_data)
+ {
+@@ -8141,6 +8229,8 @@ static void service_free(gpointer user_data)
+ 
+ 	reply_pending(service, ENOENT);
+ 
++	auto_retry_cancel(service);
++
+ 	if (service->nameservers_timeout) {
+ 		g_source_remove(service->nameservers_timeout);
+ 		dns_changed(service);
+@@ -9452,6 +9542,7 @@ static int service_indicate_state(struct connman_service *service)
+ 
+ 	case CONNMAN_SERVICE_STATE_READY:
+ 		clear_error(service);
++		auto_retry_cancel(service);
+ 
+ 		if (service->new_service &&
+ 				__connman_stats_service_register(service) == 0) {
+@@ -9546,6 +9637,8 @@ static int service_indicate_state(struct connman_service *service)
+ 		break;
+ 
+ 	case CONNMAN_SERVICE_STATE_FAILURE:
++		auto_retry_schedule(service);
++
+ 		if (service->connect_reason == CONNMAN_SERVICE_CONNECT_REASON_USER ||
+ 			service->connect_reason == CONNMAN_SERVICE_CONNECT_REASON_NATIVE) {
+ 			result = connman_agent_report_error(service,
+@@ -10095,6 +10188,9 @@ int __connman_service_connect(struct connman_service *service,
+ 	if (!is_ipconfig_usable(service))
+ 		return -ENOLINK;
+ 
++	if (reason == CONNMAN_SERVICE_CONNECT_REASON_USER)
++		auto_retry_cancel(service);
++
+ 	__connman_service_clear_error(service);
+ 
+ 	if (service->network && service->autoconnect &&
