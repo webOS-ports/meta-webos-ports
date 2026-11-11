@@ -1,0 +1,2559 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 7 Nov 2026 17:30:23 +0100
+Subject: [PATCH] webOS: do what the Messaging app asks: edit, delete, groups,
+ places, contact cards and mentions
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+* Edit a sent message when the Messaging app asks
+
+The Messaging app can now edit a message the user sent. Its command
+reaches imlibpurpleservice, which emits webos-im-send-edit for every
+account with the chat, the message's serviceMessageId and the new
+text. The first handler that returns TRUE takes the command.
+
+Connect to it, with the reaction signal, once for the whole process.
+For a Telegram account the handler takes the chat and message ids
+from the serviceMessageId ("<chatId>:<messageId>", as the plug-in
+gives one to each message it shows). It turns the text into plain
+text as send_im does and asks TDLib to editMessageText. It returns
+FALSE for another plug-in's account, for an account not connected, for
+an id it cannot read, for a chat it does not know, and for a text that
+is not one plain message, so the transport can log a command no one
+took. If TDLib refuses the edit, the chat says so. A successful edit
+comes back as updateMessageContent, which the plug-in already shows.
+
+The parsing of the id is in webos-send.cpp, without TDLib or
+libpurple, so it can be tested on its own. The test mock now keeps
+what is connected to a signal, so a test can call it, and gives an
+account the protocol id it was made with.
+
+* Delete a message for everyone when the Messaging app asks
+
+The Messaging app can now delete a message. imlibpurpleservice emits
+webos-im-send-delete for every account with the chat and the
+message's serviceMessageId.
+
+For a Telegram account, take the chat and message ids from the
+serviceMessageId and ask TDLib to deleteMessages with revoke set, so
+the message goes for everyone in the chat. TDLib (1.8.67) checks
+whether a message can be deleted for the others only for bots: for a
+user account it deletes the message here and hands the request on to
+Telegram, revoke and all. The deletion
+comes back as updateDeleteMessages, which the plug-in already shows.
+If TDLib refuses, the chat says so. The handler returns FALSE for
+another plug-in's account, an account not connected, an id it cannot
+read and a chat it does not know.
+
+* Create a group when the Messaging app asks
+
+The Messaging app can now start a group chat. imlibpurpleservice emits
+webos-im-group-create for every account with the group's name and its
+members, buddy names joined by "\x1f".
+
+For a Telegram account, find each member's Telegram user the way
+send_im finds whom a message is for (by "id<n>" buddy name, phone
+number, display name or username), and ask TDLib to
+createNewBasicGroupChat with them. The handler returns FALSE, without
+creating anything, if the name is empty, if there are no members, or
+if any member is not exactly one known user: a group without someone
+the user picked is not what was asked for. A member named twice is
+added once.
+
+The new chat comes as updateNewChat and a first "created the group"
+message, which give it a conversation as any group chat gets one, so
+the app has a thread at once. TDLib answers with the chat and those it
+could not add (for their privacy settings, say); they are named in the
+new chat. If TDLib refuses the group, an error notice says so.
+
+The existing createGroup, behind libpurple's join-chat dialog, is left
+as it is: it finds members by display name only and ignores TDLib's
+answer.
+
+* Add members to a group when the Messaging app asks
+
+The Messaging app can now add people to a group chat. imlibpurpleservice
+emits webos-im-group-invite for every account with the group chat's
+purple name and the members, buddy names joined by "\x1f".
+
+For a Telegram account, find the group, which has to be one we are a
+member of, and each member's user the way send_im finds whom a message
+is for. Add them to a supergroup with one addChatMembers, and to a
+basic group with one addChatMember each (TDLib's addChatMembers is for
+supergroups and channels only), forwarding none of the earlier
+messages, as the plug-in's libpurple invite does. The handler returns
+FALSE, adding no one, for a chat that is not such a group, for no
+members, and for a member that is not exactly one known user. Those
+added show up as updates to the members and messages of their joining;
+those TDLib could not add, and any error, are told in the group.
+
+addChatMember answers with failedToAddMembers, not ok, since TDLib
+023ee0971 (1.8.27 development). The libpurple invite took that answer
+for an error and said "Cannot add user to group" after a successful
+add; take either.
+
+* Leave a group when the Messaging app asks
+
+The Messaging app can now leave a group chat. imlibpurpleservice emits
+webos-im-group-leave for every account with the group chat's purple
+name.
+
+For a Telegram account, find the group, which has to be one we are a
+member of, and ask TDLib to leaveChat. The handler returns FALSE for
+any other chat. Our leaving comes back as a change of our membership
+and a message of it; an error is told in the group.
+
+This is leaveChat alone. leaveGroup, behind libpurple's "leave", also
+deletes the chat's history and takes it off the chat list. The app
+keeps the thread after leaving, and the user deletes it there if they
+want to.
+
+* Send a location as a location, a named one as a venue
+
+The Messaging app can now share a place. It sends an ordinary message
+whose text is a plain form of it ("📍 Name https://maps.google.com/?q=
+lat,lon"), and imlibpurpleservice sets "webos-send-location" =
+"<latitude>\x1f<longitude>\x1f<name>" on the conversation just before
+serv_send_im or serv_chat_send, and frees it as soon as that returns.
+
+Copy it in send_im and chat_send, as the data is gone afterwards, and
+never free or clear it: it is the transport's. When it holds a
+latitude and a longitude in range, send an inputMessageLocation, or,
+when the place has a name, an inputMessageVenue with the name as its
+title and no address, provider or id, which TDLib accepts. A reply
+target the transport gave goes with it. When the data is not a usable
+location, or not there, the text goes as before, so a client that
+cannot show a place still gets one.
+
+What is sent this way is carried, with the reply target, through the
+private chat created when there was none yet; the reply target was
+lost there before.
+
+The parsing is in webos-send.cpp, with g_ascii_strtod, which reads
+"50.45" whatever the locale's decimal point.
+
+* Send a contact card as a Telegram contact
+
+The Messaging app can now share a contact. It sends an ordinary
+message whose text is the card's name and numbers, and
+imlibpurpleservice sets "webos-send-contact" to the vCard (3.0, with FN
+and TEL lines) on the conversation around serv_send_im or
+serv_chat_send.
+
+Copy it in send_im and chat_send, never freeing or clearing it, and,
+when the card has a phone number, send an inputMessageContact instead
+of the text. The number is the first TEL; the first and last name come
+from N, or, where it has no given name, all of FN goes as the first
+name, or the family name, as TDLib's contact has the first name to
+show. The whole card goes along as the contact's vCard. If someone on
+Telegram has that number, as far as the plug-in knows the users, the
+contact names them, so the other side can write to them from it; the
+number is compared by its digits alone, and never when it has none, as
+a user whose number we do not know has an empty one. A card without a
+number goes as its text.
+
+The card is read in webos-send.cpp: folded lines, grouped properties
+("item1.TEL"), quoted parameters, backslash escapes, and the "tel:"
+URI vCard 4.0 may give.
+
+* Make the "@name" mentions of an outgoing message links
+
+The Messaging app can now mention a member in a message. The text has
+"@<name>" where each mention goes, and imlibpurpleservice sets
+"webos-send-mentions" on the conversation around serv_send_im or
+serv_chat_send: records "<id>\x1f<name>" joined by "\x1e", the id being
+the mentioned buddy's name.
+
+Copy it in send_im and chat_send, never freeing or clearing it. Find
+each mentioned user the way send_im finds whom a message is for, find
+each "@<name>" in the text TDLib is given (after markup is stripped and
+the message split, in each part), and give it a textEntityTypeMentionName
+entity for that user. The text stays as it is, so it reads the same to
+a client that makes nothing of the entity. TDLib counts an entity's
+offset and length in UTF-16 code units, which is how they are counted
+here: an emoji outside the Basic Multilingual Plane is two. A mention
+of someone not exactly one known user, or whose "@<name>" is not in
+the text, gets no entity.
+
+A mention is looked for after the one before it first, then anywhere,
+so two people of the same name each get their own; and "@Ann" is not
+taken from "@Anna" where there is a "@Ann" that a word does not go on
+from. This, the records and the UTF-16 count are in webos-send.cpp.
+
+* Take someone out of a group when the Messaging app asks
+
+The app's removeFromGroup reaches the plug-in as the transport's
+"webos-im-group-remove" signal (account, the group's purple name, the
+members "\x1f"-joined), as an invite comes as "webos-im-group-invite".
+The members are named as the group's member list names them: "id<n>"
+for a buddy, else the display name.
+
+Each member is set to chatMemberStatusLeft with setChatMemberStatus,
+as libpurple's /kick already does. TDLib (1.8.67) takes a member out
+of a basic group with the server's messages.deleteChatUser, and out of
+a supergroup with a short ban that it lifts a second later, so that
+they may be added again or come back by an invite link.
+banChatMember would keep them out of a supergroup for good, and delete
+all they wrote there.
+
+A member who is not one known user is left out, as are we ourselves
+(that would be leaving, a command of its own); the others are still
+taken out, and the signal is not taken if no one is left. Why one
+could not be taken out (no rights, not a member) is told in the group,
+and logged by the user's and chat's ids, without their names.
+
+Unit tests in test/webos-commands-test.cpp.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ CMakeLists.txt               |   1 +
+ account-data.h               |  14 +-
+ client-utils.cpp             | 150 +++++-
+ client-utils.h               |   6 +-
+ td-client.cpp                | 291 ++++++++++-
+ td-client.h                  |  32 +-
+ tdlib-purple.cpp             | 142 +++++-
+ test/CMakeLists.txt          |   2 +
+ test/libpurple-mock.cpp      |  17 +-
+ test/libpurple-mock.h        |   3 +
+ test/test-transceiver.cpp    |  10 +-
+ test/webos-commands-test.cpp | 909 +++++++++++++++++++++++++++++++++++
+ webos-send.cpp               | 328 +++++++++++++
+ webos-send.h                 |  83 ++++
+ 14 files changed, 1941 insertions(+), 47 deletions(-)
+ create mode 100644 test/webos-commands-test.cpp
+ create mode 100644 webos-send.cpp
+ create mode 100644 webos-send.h
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index bc8f27e..dcf848d 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -104,6 +104,7 @@ add_library(telegram-tdlib SHARED
+     log-history.cpp
+     clipboard.cpp
+     thumbnail.cpp
++    webos-send.cpp
+ )
+ 
+ #target_compile_options(telegram-tdlib PRIVATE -Wmissing-declarations)
+diff --git a/account-data.h b/account-data.h
+index d29c09a..c7b606f 100644
+--- a/account-data.h
++++ b/account-data.h
+@@ -5,6 +5,7 @@
+ #include "identifiers.h"
+ #include "transceiver.h"
+ #include "clipboard.h"
++#include "webos-send.h"
+ #include <td/telegram/td_api.h>
+ 
+ #include <deque>
+@@ -236,10 +237,15 @@ public:
+     std::string  username;
+     std::string  message;
+     PurpleXfer  *fileUpload;
+-
+-    NewPrivateChatForMessage(uint64_t requestId, const char *username, const char *message)
+-    : PendingRequest(requestId), username(username), message(message ? message : nullptr),
+-      fileUpload(nullptr) {}
++    // webOS: what the message is sent as, and what it replies to, when the chat is there
++    webos::OutgoingExtras extras;
++    int64_t               replyToMsgId = 0;
++
++    NewPrivateChatForMessage(uint64_t requestId, const char *username, const char *message,
++                             int64_t replyToMsgId = 0,
++                             const webos::OutgoingExtras &extras = webos::OutgoingExtras())
++    : PendingRequest(requestId), username(username), message(message ? message : ""),
++      fileUpload(nullptr), extras(extras), replyToMsgId(replyToMsgId) {}
+ 
+     NewPrivateChatForMessage(uint64_t requestId, const char *username, PurpleXfer *upload)
+     : PendingRequest(requestId), username(username), fileUpload(upload) {}
+diff --git a/client-utils.cpp b/client-utils.cpp
+index 88df7da..1ad9b70 100644
+--- a/client-utils.cpp
++++ b/client-utils.cpp
+@@ -1,4 +1,5 @@
+ #include "client-utils.h"
++#include "webos-send.h"
+ #include "purple-info.h"
+ #include "buildopt.h"
+ #include "config.h"
+@@ -1505,9 +1506,113 @@ static size_t getAlbumSize(const std::vector<MessagePart> &parts, size_t first)
+     return size;
+ }
+ 
+-int transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiver,
+-                    TdAccountData &account, TdTransceiver::ResponseCb response, int64_t replyToMsgId)
++// webOS: a reply_to for a message, or null
++static td::td_api::object_ptr<td::td_api::InputMessageReplyTo> makeReplyTo(int64_t replyToMsgId)
++{
++    if (replyToMsgId == 0)
++        return nullptr;
++    // Built by field name: TDLib keeps adding fields to inputMessageReplyToMessage
++    auto replyTo = td::td_api::make_object<td::td_api::inputMessageReplyToMessage>();
++    replyTo->message_id_ = replyToMsgId;
++    return replyTo;
++}
++
++// webOS: what the message is in place of its text, if the transport gave one we can send; else
++// null, and the text, which the app writes so it stands for the rest, goes as it would
++static td::td_api::object_ptr<td::td_api::InputMessageContent>
++makeNativeContent(const webos::OutgoingExtras &extras, const TdAccountData &account)
++{
++    if (!extras.location.empty()) {
++        webos::SendLocation location;
++        if (webos::parseSendLocation(extras.location.c_str(), location)) {
++            auto point = td::td_api::make_object<td::td_api::location>();
++            point->latitude_  = location.latitude;
++            point->longitude_ = location.longitude;
++            if (location.name.empty()) {
++                auto content = td::td_api::make_object<td::td_api::inputMessageLocation>();
++                content->location_ = std::move(point);
++                return content;
++            }
++            // A named place: a venue, the name as its title and no address, provider or id
++            auto venue = td::td_api::make_object<td::td_api::venue>();
++            venue->location_ = std::move(point);
++            venue->title_    = location.name;
++            auto content = td::td_api::make_object<td::td_api::inputMessageVenue>();
++            content->venue_ = std::move(venue);
++            return content;
++        }
++        purple_debug_warning(config::pluginId, "Sending the text: not a location: '%s'\n",
++                             extras.location.c_str());
++    }
++
++    if (!extras.contact.empty()) {
++        webos::SendContact contact;
++        if (webos::parseVCardContact(extras.contact, contact)) {
++            auto card = td::td_api::make_object<td::td_api::contact>();
++            card->phone_number_ = contact.phoneNumber;
++            card->first_name_   = contact.firstName;
++            card->last_name_    = contact.lastName;
++            // All of the card goes, for a client that shows more of it
++            card->vcard_        = extras.contact;
++            // Someone on Telegram by this number can be written to from the card. Looked up only
++            // with digits, as a user whose number is not known has an empty one.
++            std::string             digits = webos::phoneDigits(contact.phoneNumber);
++            const td::td_api::user *user   = digits.empty() ? nullptr : account.getUserByPhone(digits.c_str());
++            card->user_id_      = user ? user->id_ : 0;
++            auto content = td::td_api::make_object<td::td_api::inputMessageContact>();
++            content->contact_ = std::move(card);
++            return content;
++        }
++        // Not logged: a contact card is personal
++        purple_debug_warning(config::pluginId, "Sending the text: a contact card without a phone number\n");
++    }
++    return nullptr;
++}
++
++// webOS: the users the transport's mentions name, by record; 0 for one not exactly one known user
++static std::vector<int64_t> resolveMentions(const std::vector<webos::MentionRecord> &mentions,
++                                            TdAccountData &account)
+ {
++    std::vector<int64_t> userIds;
++    for (const webos::MentionRecord &mention: mentions) {
++        // The way send_im finds whom a message is for
++        std::vector<const td::td_api::user *> users = getUsersByPurpleName(mention.id.c_str(), account, "mention");
++        userIds.push_back((users.size() == 1) ? users[0]->id_ : 0);
++    }
++    return userIds;
++}
++
++// webOS: a text with the mentions in it, each a link to whom it names. Its "@<name>" stays as it
++// is, as the text a client shows.
++static td::td_api::object_ptr<td::td_api::formattedText>
++makeMentionedText(td::td_api::object_ptr<td::td_api::formattedText> formatted,
++                  const std::vector<webos::MentionRecord> &mentions, const std::vector<int64_t> &mentionUserIds)
++{
++    for (const webos::MentionSpan &span: webos::findMentionSpans(formatted->text_, mentions)) {
++        int64_t userId = mentionUserIds[span.record];
++        if (userId != 0)
++            formatted->entities_.push_back(td::td_api::make_object<td::td_api::textEntity>(
++                span.offset, span.length, td::td_api::make_object<td::td_api::textEntityTypeMentionName>(userId)
++            ));
++    }
++    return formatted;
++}
++
++int transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiver,
++                    TdAccountData &account, TdTransceiver::ResponseCb response, int64_t replyToMsgId,
++                    const webos::OutgoingExtras &extras)
++{
++    td::td_api::object_ptr<td::td_api::InputMessageContent> nativeContent = makeNativeContent(extras, account);
++    if (nativeContent) {
++        auto sendMessageRequest = td::td_api::make_object<td::td_api::sendMessage>();
++        sendMessageRequest->chat_id_               = chatId.value();
++        sendMessageRequest->reply_to_              = makeReplyTo(replyToMsgId);
++        sendMessageRequest->input_message_content_ = std::move(nativeContent);
++        uint64_t requestId = transceiver.sendQuery(std::move(sendMessageRequest), response);
++        account.addPendingRequest<SendMessageRequest>(requestId, chatId, nullptr);
++        return 0;
++    }
++
+     std::vector<MessagePart> parts;
+     parseMessage(message, parts, account);
+     if (parts.size() > MAX_MESSAGE_PARTS)
+@@ -1530,6 +1635,8 @@ int transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiv
+         }
+     }
+ 
++    std::vector<webos::MentionRecord> mentions       = webos::parseMentions(extras.mentions.c_str());
++    std::vector<int64_t>              mentionUserIds = resolveMentions(mentions, account);
+     bool first = true;
+     for (size_t i = 0; i < parts.size(); i++) {
+         const MessagePart &input = parts[i];
+@@ -1540,22 +1647,16 @@ int transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiv
+                 auto sendMessageRequest = td::td_api::make_object<td::td_api::sendMessage>();
+                 sendMessageRequest->chat_id_ = chatId.value();
+                 sendMessageRequest->input_message_content_ = makeAttachment(input);
+-                if (replyToMsgId != 0 && first) {
+-                    auto replyTo = td::td_api::make_object<td::td_api::inputMessageReplyToMessage>();
+-                    replyTo->message_id_ = replyToMsgId;
+-                    sendMessageRequest->reply_to_ = std::move(replyTo);
+-                }
++                if (first)
++                    sendMessageRequest->reply_to_ = makeReplyTo(replyToMsgId);
+                 requestId = transceiver.sendQuery(std::move(sendMessageRequest), response);
+             } else {
+                 auto sendAlbumRequest = td::td_api::make_object<td::td_api::sendMessageAlbum>();
+                 sendAlbumRequest->chat_id_ = chatId.value();
+                 for (size_t j = i; j < i + albumSize; j++)
+                     sendAlbumRequest->input_message_contents_.push_back(makeAttachment(parts[j]));
+-                if (replyToMsgId != 0 && first) {
+-                    auto replyTo = td::td_api::make_object<td::td_api::inputMessageReplyToMessage>();
+-                    replyTo->message_id_ = replyToMsgId;
+-                    sendAlbumRequest->reply_to_ = std::move(replyTo);
+-                }
++                if (first)
++                    sendAlbumRequest->reply_to_ = makeReplyTo(replyToMsgId);
+                 requestId = transceiver.sendQuery(std::move(sendAlbumRequest), response);
+             }
+             account.addPendingRequest<SendMessageRequest>(requestId, chatId, nullptr);
+@@ -1567,12 +1668,9 @@ int transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiv
+         td::td_api::object_ptr<td::td_api::sendMessage> sendMessageRequest = td::td_api::make_object<td::td_api::sendMessage>();
+         sendMessageRequest->chat_id_ = chatId.value();
+         // webOS native reply: set a real reply_to on the FIRST part only (a multi-part send shouldn't
+-        // reply N times). Built by field name: TDLib keeps adding fields to inputMessageReplyToMessage.
+-        if (replyToMsgId != 0 && first) {
+-            auto replyTo = td::td_api::make_object<td::td_api::inputMessageReplyToMessage>();
+-            replyTo->message_id_ = replyToMsgId;
+-            sendMessageRequest->reply_to_ = std::move(replyTo);
+-        }
++        // reply N times).
++        if (first)
++            sendMessageRequest->reply_to_ = makeReplyTo(replyToMsgId);
+         first = false;
+         char *tempFileName = NULL;
+         bool  hasImage     = false;
+@@ -1588,13 +1686,15 @@ int transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiv
+ #else
+             content->photo_ = td::td_api::make_object<td::td_api::inputFileLocal>(tempFileName);
+ #endif
+-            content->caption_ = makeFormattedText(input.text, input.formats, 0, input.text.size());
++            content->caption_ = makeMentionedText(makeFormattedText(input.text, input.formats, 0, input.text.size()),
++                                                  mentions, mentionUserIds);
+ 
+             sendMessageRequest->input_message_content_ = std::move(content);
+             purple_debug_misc(config::pluginId, "Sending photo %s\n", tempFileName);
+         } else {
+             td::td_api::object_ptr<td::td_api::inputMessageText> content = td::td_api::make_object<td::td_api::inputMessageText>();
+-            content->text_ = makeFormattedText(input.text, input.formats, 0, input.text.size());
++            content->text_ = makeMentionedText(makeFormattedText(input.text, input.formats, 0, input.text.size()),
++                                               mentions, mentionUserIds);
+             sendMessageRequest->input_message_content_ = std::move(content);
+         }
+ 
+@@ -1607,6 +1707,16 @@ int transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiv
+     return 0;
+ }
+ 
++bool getEditedText(const char *message, std::string &text, TdAccountData &account)
++{
++    std::vector<MessagePart> parts;
++    parseMessage(message, parts, account);
++    if ((parts.size() != 1) || parts[0].isImage || parts[0].text.empty())
++        return false;
++    text = std::move(parts[0].text);
++    return true;
++}
++
+ std::string getSenderDisplayName(const td::td_api::chat &chat, const TgMessageInfo &message,
+                                  PurpleAccount *account)
+ {
+diff --git a/client-utils.h b/client-utils.h
+index d220f76..0059fe0 100644
+--- a/client-utils.h
++++ b/client-utils.h
+@@ -129,7 +129,11 @@ struct ParsedEdit {
+ ParsedEdit parseEdit(const char *message, const TdAccountData &account);
+ bool isSameFormattedText(const td::td_api::formattedText &a, const td::td_api::formattedText &b);
+ int  transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiver,
+-                     TdAccountData &account, TdTransceiver::ResponseCb response, int64_t replyToMsgId = 0);
++                     TdAccountData &account, TdTransceiver::ResponseCb response, int64_t replyToMsgId = 0,
++                     const webos::OutgoingExtras &extras = webos::OutgoingExtras());
++// webOS: the text a message given as to send_im becomes, for editing a message to. False if it is
++// not plain text that fits in one message.
++bool getEditedText(const char *message, std::string &text, TdAccountData &account);
+ 
+ void requestRecoveryEmailConfirmation(PurpleConnection *gc, const char *emailInfo);
+ 
+diff --git a/td-client.cpp b/td-client.cpp
+index 10ebccc..f8003aa 100644
+--- a/td-client.cpp
++++ b/td-client.cpp
+@@ -2378,7 +2378,275 @@ void PurpleTdClient::sendReaction(int64_t chatId, int64_t messageId, const std::
+     }
+ }
+ 
+-int PurpleTdClient::sendMessage(const char *buddyName, const char *message, int64_t replyToMsgId)
++void PurpleTdClient::commandResponse(ChatId chatId, const char *failure, TdObjectPtr object)
++{
++    if (object && (object->get_id() != td::td_api::error::ID))
++        return;
++    std::string             errorMessage = formatMessage(failure, getDisplayedError(object));
++    const td::td_api::chat *chat         = m_data.getChat(chatId);
++    purple_debug_warning(config::pluginId, "%s\n", errorMessage.c_str());
++    if (chat)
++        showChatNotification(m_data, *chat, errorMessage.c_str());
++}
++
++// The chat a webOS message command names by its TDLib id, or NULL if it is not known
++const td::td_api::chat *PurpleTdClient::getCommandChat(int64_t tdlibChatId, const char *command)
++{
++    const td::td_api::chat *chat = m_data.getChat(ChatId::fromString(std::to_string(tdlibChatId).c_str()));
++    if (!chat)
++        purple_debug_warning(config::pluginId, "Cannot %s: no chat %" G_GINT64_FORMAT "\n", command,
++                             tdlibChatId);
++    return chat;
++}
++
++bool PurpleTdClient::editMessage(int64_t tdlibChatId, int64_t messageId, const char *message)
++{
++    const td::td_api::chat *chat = getCommandChat(tdlibChatId, "edit message");
++    if (!chat)
++        return false;
++    ChatId      chatId = getId(*chat);
++    std::string text;
++    if (!getEditedText(message, text, m_data)) {
++        purple_debug_warning(config::pluginId, "Cannot edit message %" G_GINT64_FORMAT
++                             ": the new text is not one plain message\n", messageId);
++        return false;
++    }
++
++    // Built by field name, as TDLib keeps adding fields
++    auto content = td::td_api::make_object<td::td_api::inputMessageText>();
++    content->text_ = td::td_api::make_object<td::td_api::formattedText>();
++    content->text_->text_ = std::move(text);
++    auto request = td::td_api::make_object<td::td_api::editMessageText>();
++    request->chat_id_               = chatId.value();
++    request->message_id_            = messageId;
++    request->input_message_content_ = std::move(content);
++    // The edited message comes back as an updateMessageContent, which shows it
++    m_transceiver.sendQuery(std::move(request), [this, chatId](uint64_t, TdObjectPtr object) {
++        // TRANSLATOR: In-chat error message, argument will be a reason (text)
++        commandResponse(chatId, _("Failed to edit message: {}"), std::move(object));
++    });
++    return true;
++}
++
++bool PurpleTdClient::deleteMessage(int64_t tdlibChatId, int64_t messageId)
++{
++    const td::td_api::chat *chat = getCommandChat(tdlibChatId, "delete message");
++    if (!chat)
++        return false;
++    ChatId chatId = getId(*chat);
++
++    // revoke: for everyone. TDLib checks that a message can be deleted for the others only for
++    // bots; for us it deletes the message here and hands the request on to Telegram.
++    auto request = td::td_api::make_object<td::td_api::deleteMessages>();
++    request->chat_id_ = tdlibChatId;
++    request->message_ids_.push_back(messageId);
++    request->revoke_ = true;
++    // The deletion comes back as updateDeleteMessages, which the plug-in already shows
++    m_transceiver.sendQuery(std::move(request), [this, chatId](uint64_t, TdObjectPtr object) {
++        // TRANSLATOR: In-chat error message, argument will be a reason (text)
++        commandResponse(chatId, _("Failed to delete message: {}"), std::move(object));
++    });
++    return true;
++}
++
++bool PurpleTdClient::getCommandUsers(const std::vector<std::string> &memberNames, const char *command,
++                                     std::vector<int64_t> &userIds)
++{
++    userIds.clear();
++    for (const std::string &name: memberNames) {
++        // The way send_im finds whom a message is for; this logs why it found none or many
++        std::vector<const td::td_api::user *> users = getUsersByPurpleName(name.c_str(), m_data, command);
++        if (users.size() != 1)
++            return false;
++        if (std::find(userIds.begin(), userIds.end(), users[0]->id_) == userIds.end())
++            userIds.push_back(users[0]->id_);
++    }
++    return true;
++}
++
++void PurpleTdClient::showFailedToAddMembers(int64_t tdlibChatId, const td::td_api::failedToAddMembers &failed)
++{
++    std::string names;
++    for (const auto &member: failed.failed_to_add_members_) {
++        if (!member)
++            continue;
++        const td::td_api::user *user = m_data.getUser(UserId::fromString(std::to_string(member->user_id_).c_str()));
++        if (!names.empty())
++            names += ", ";
++        names += user ? m_data.getDisplayName(*user) : std::to_string(member->user_id_);
++    }
++    if (names.empty())
++        return;
++    // TRANSLATOR: In-chat error message, argument is a list of names
++    std::string message = formatMessage(_("Could not add to the group: {}"), names);
++    purple_debug_warning(config::pluginId, "%s\n", message.c_str());
++    const td::td_api::chat *chat = m_data.getChat(ChatId::fromString(std::to_string(tdlibChatId).c_str()));
++    if (chat)
++        showChatNotification(m_data, *chat, message.c_str());
++}
++
++bool PurpleTdClient::createGroupWithMembers(const char *title, const std::vector<std::string> &memberNames)
++{
++    if (!title || !*title || memberNames.empty()) {
++        purple_debug_warning(config::pluginId, "Cannot create group: no %s\n",
++                             memberNames.empty() ? "members" : "name");
++        return false;
++    }
++    auto request = td::td_api::make_object<td::td_api::createNewBasicGroupChat>();
++    if (!getCommandUsers(memberNames, "add to new group", request->user_ids_))
++        return false;
++    request->title_ = title;
++
++    // The new chat comes as updateNewChat and its first message, "created the group", which give
++    // it a conversation as any group chat gets one
++    std::string groupTitle = title;
++    m_transceiver.sendQuery(std::move(request), [this, groupTitle](uint64_t, TdObjectPtr object) {
++        if (object && (object->get_id() == td::td_api::createdBasicGroupChat::ID)) {
++            auto &created = static_cast<const td::td_api::createdBasicGroupChat &>(*object);
++            if (created.failed_to_add_members_)
++                showFailedToAddMembers(created.chat_id_, *created.failed_to_add_members_);
++        } else {
++            std::string message = getDisplayedError(object);
++            purple_debug_warning(config::pluginId, "Failed to create group %s: %s\n", groupTitle.c_str(),
++                                 message.c_str());
++            purple_notify_error(purple_account_get_connection(m_account),
++                                // TRANSLATOR: Error dialog, title
++                                _("Failed to create group"), groupTitle.c_str(), message.c_str());
++        }
++    });
++    return true;
++}
++
++const td::td_api::chat *PurpleTdClient::getCommandGroup(const char *purpleChatName, const char *command)
++{
++    ChatId                  chatId = getTdlibChatId(purpleChatName ? purpleChatName : "");
++    const td::td_api::chat *chat   = chatId.valid() ? m_data.getChat(chatId) : nullptr;
++    if (!chat || !m_data.isGroupChatWithMembership(*chat)) {
++        purple_debug_warning(config::pluginId, "Cannot %s: %s is not a group we are a member of\n", command,
++                             purpleChatName ? purpleChatName : "");
++        return nullptr;
++    }
++    return chat;
++}
++
++void PurpleTdClient::addMembersResponse(ChatId chatId, TdObjectPtr object)
++{
++    if (object && (object->get_id() == td::td_api::failedToAddMembers::ID))
++        showFailedToAddMembers(chatId.value(), static_cast<const td::td_api::failedToAddMembers &>(*object));
++    else
++        // TRANSLATOR: In-chat error message, argument is a reason (text)
++        commandResponse(chatId, _("Cannot add user to group: {}"), std::move(object));
++}
++
++bool PurpleTdClient::inviteToGroup(const char *purpleChatName, const std::vector<std::string> &memberNames)
++{
++    const td::td_api::chat *chat = getCommandGroup(purpleChatName, "add to group");
++    if (!chat)
++        return false;
++    std::vector<int64_t> userIds;
++    if (memberNames.empty() || !getCommandUsers(memberNames, "add to group", userIds))
++        return false;
++    ChatId chatId = getId(*chat);
++
++    // TDLib's addChatMembers is for supergroups and channels only; a basic group takes one at a time
++    if (getSupergroupId(*chat).valid()) {
++        auto request = td::td_api::make_object<td::td_api::addChatMembers>();
++        request->chat_id_  = chatId.value();
++        request->user_ids_ = std::move(userIds);
++        m_transceiver.sendQuery(std::move(request), [this, chatId](uint64_t, TdObjectPtr object) {
++            addMembersResponse(chatId, std::move(object));
++        });
++    } else if (getBasicGroupId(*chat).valid()) {
++        for (int64_t userId: userIds) {
++            // As addUserToChat, which libpurple's invite goes to: none of the earlier messages
++            auto request = td::td_api::make_object<td::td_api::addChatMember>();
++            request->chat_id_       = chatId.value();
++            request->user_id_       = userId;
++            request->forward_limit_ = 0;
++            m_transceiver.sendQuery(std::move(request), [this, chatId](uint64_t, TdObjectPtr object) {
++                addMembersResponse(chatId, std::move(object));
++            });
++        }
++    } else
++        return false;
++    // Those added come as updates to the members, and messages of their joining
++    return true;
++}
++
++bool PurpleTdClient::removeFromGroup(const char *purpleChatName, const std::vector<std::string> &memberNames)
++{
++    const td::td_api::chat *chat = getCommandGroup(purpleChatName, "remove from group");
++    if (!chat || (!getBasicGroupId(*chat).valid() && !getSupergroupId(*chat).valid()))
++        return false;
++    ChatId chatId = getId(*chat);
++
++    // The members are named as the chat's member list names them: "id<n>" for a buddy, else the
++    // display name. Neither is logged, the user's id being enough to go on.
++    std::vector<int64_t> userIds;
++    for (size_t i = 0; i < memberNames.size(); i++) {
++        std::vector<const td::td_api::user *> users = getUsersByPurpleName(memberNames[i].c_str(), m_data, nullptr);
++        if (users.size() != 1) {
++            purple_debug_warning(config::pluginId,
++                                 "Cannot remove member %zu of %zu from chat %" G_GINT64_FORMAT ": %s\n",
++                                 i + 1, memberNames.size(), chatId.value(),
++                                 users.empty() ? "no such user" : "more than one user of that name");
++            continue;
++        }
++        int64_t userId = users[0]->id_;
++        // That would be leaving the group, which is a command of its own
++        if (userId == m_data.options.myUserId) {
++            purple_debug_warning(config::pluginId,
++                                 "Not removing ourselves from chat %" G_GINT64_FORMAT "\n", chatId.value());
++            continue;
++        }
++        if (std::find(userIds.begin(), userIds.end(), userId) == userIds.end())
++            userIds.push_back(userId);
++    }
++    if (userIds.empty())
++        return false;
++
++    // As kickUserFromChat: a member set to "left" is taken out of a basic group, and out of a
++    // supergroup by a ban lifted at once, so that they may be added again or come back by a link.
++    // banChatMember would keep them out of a supergroup, and delete all they wrote in it.
++    for (int64_t userId: userIds) {
++        auto request = td::td_api::make_object<td::td_api::setChatMemberStatus>();
++        request->chat_id_   = chatId.value();
++        request->member_id_ = td::td_api::make_object<td::td_api::messageSenderUser>(userId);
++        request->status_    = td::td_api::make_object<td::td_api::chatMemberStatusLeft>();
++        m_transceiver.sendQuery(std::move(request), [this, chatId, userId](uint64_t, TdObjectPtr object) {
++            if (object && (object->get_id() == td::td_api::ok::ID))
++                return;
++            purple_debug_warning(config::pluginId,
++                                 "Failed to remove user %" G_GINT64_FORMAT " from chat %" G_GINT64_FORMAT "\n",
++                                 userId, chatId.value());
++            // TRANSLATOR: In-chat error message, argument is a reason (text)
++            commandResponse(chatId, _("Cannot remove user from group: {}"), std::move(object));
++        });
++    }
++    // Those taken out come as updates to the members, and messages of their leaving
++    return true;
++}
++
++bool PurpleTdClient::leaveGroupChat(const char *purpleChatName)
++{
++    const td::td_api::chat *chat = getCommandGroup(purpleChatName, "leave group");
++    if (!chat)
++        return false;
++    ChatId chatId = getId(*chat);
++
++    // Unlike leaveGroup, behind libpurple's "leave", which deletes the history and takes the chat
++    // off the list too: the app keeps the thread, and the user deletes it there if they want to.
++    // Our leaving comes back as a change of our membership and a message of it.
++    m_transceiver.sendQuery(td::td_api::make_object<td::td_api::leaveChat>(chatId.value()),
++                            [this, chatId](uint64_t, TdObjectPtr object) {
++        // TRANSLATOR: In-chat error message, argument is a reason (text)
++        commandResponse(chatId, _("Failed to leave group: {}"), std::move(object));
++    });
++    return true;
++}
++
++int PurpleTdClient::sendMessage(const char *buddyName, const char *message, int64_t replyToMsgId,
++                                const webos::OutgoingExtras &extras)
+ {
+     // Auth-input fallback: while waiting for a login code, 2FA password or display name (asked
+     // for through the "Telegram" chat because there is no request UI), take a message sent to that
+@@ -2433,7 +2701,8 @@ int PurpleTdClient::sendMessage(const char *buddyName, const char *message, int6
+     }
+ 
+     if (chat) {
+-        int ret = transmitMessage(getId(*chat), message, m_transceiver, m_data, &PurpleTdClient::sendMessageResponse, replyToMsgId);
++        int ret = transmitMessage(getId(*chat), message, m_transceiver, m_data, &PurpleTdClient::sendMessageResponse,
++                                  replyToMsgId, extras);
+         if (ret < 0)
+             return ret;
+         // Message shall not be echoed: tdlib will shortly present it as a new message and it will be displayed then
+@@ -2443,7 +2712,7 @@ int PurpleTdClient::sendMessage(const char *buddyName, const char *message, int6
+         td::td_api::object_ptr<td::td_api::createPrivateChat> createChat =
+             td::td_api::make_object<td::td_api::createPrivateChat>(privateUser->id_, false);
+         uint64_t requestId = m_transceiver.sendQuery(std::move(createChat), &PurpleTdClient::sendMessageCreatePrivateChatResponse);
+-        m_data.addPendingRequest<NewPrivateChatForMessage>(requestId, buddyName, message);
++        m_data.addPendingRequest<NewPrivateChatForMessage>(requestId, buddyName, message, replyToMsgId, extras);
+         return 0;
+     }
+ 
+@@ -3139,7 +3408,8 @@ bool PurpleTdClient::joinChat(const char *chatName)
+     return conv ? true : false;
+ }
+ 
+-int PurpleTdClient::sendGroupMessage(int purpleChatId, const char *message, int64_t replyToMsgId)
++int PurpleTdClient::sendGroupMessage(int purpleChatId, const char *message, int64_t replyToMsgId,
++                                     const webos::OutgoingExtras &extras)
+ {
+     const td::td_api::chat *chat = m_data.getChatByPurpleId(purpleChatId);
+ 
+@@ -3149,7 +3419,8 @@ int PurpleTdClient::sendGroupMessage(int purpleChatId, const char *message, int6
+         purple_debug_misc(config::pluginId, "purple id %d (chat %s) is not a group we a member of\n",
+                              purpleChatId, chat->title_.c_str());
+     else {
+-        int ret = transmitMessage(getId(*chat), message, m_transceiver, m_data, &PurpleTdClient::sendMessageResponse, replyToMsgId);
++        int ret = transmitMessage(getId(*chat), message, m_transceiver, m_data, &PurpleTdClient::sendMessageResponse,
++                                  replyToMsgId, extras);
+         if (ret < 0)
+             return ret;
+         return 0;
+@@ -3415,9 +3686,14 @@ void PurpleTdClient::chatActionResponse(uint64_t requestId, td::td_api::object_p
+     int32_t expectedId = 0;
+     switch (request->type) {
+         case ChatActionRequest::Type::Kick:
+-        case ChatActionRequest::Type::Invite:
+             expectedId = td::td_api::ok::ID;
+             break;
++        case ChatActionRequest::Type::Invite:
++            // addChatMember answers with those it could not add since TDLib 023ee0971 (1.8.27
++            // development), with ok before
++            expectedId = (object && (object->get_id() == td::td_api::failedToAddMembers::ID)) ?
++                         td::td_api::failedToAddMembers::ID : td::td_api::ok::ID;
++            break;
+         case ChatActionRequest::Type::GenerateInviteLink:
+             expectedId = td::td_api::chatInviteLink::ID;
+             break;
+@@ -3801,7 +4077,8 @@ void PurpleTdClient::sendMessageCreatePrivateChatResponse(uint64_t requestId, td
+ 
+         if (chat) {
+             int ret = transmitMessage(getId(*chat), request->message.c_str(), m_transceiver, m_data,
+-                                      &PurpleTdClient::sendMessageResponse);
++                                      &PurpleTdClient::sendMessageResponse, request->replyToMsgId,
++                                      request->extras);
+             // Messages copied from libpurple
+             if (ret == -E2BIG) {
+                 // TRANSLATOR: In-chat error message
+diff --git a/td-client.h b/td-client.h
+index 05d0ab3..ce761a9 100644
+--- a/td-client.h
++++ b/td-client.h
+@@ -37,11 +37,27 @@ public:
+     // store-teardown hook both build the paths through these so they always match exactly.
+     static std::string getDatabaseDir(const char *username);
+     static std::string getFilesDir(const char *username);
+-    int  sendMessage(const char *buddyName, const char *message, int64_t replyToMsgId = 0);
++    int  sendMessage(const char *buddyName, const char *message, int64_t replyToMsgId = 0,
++                     const webos::OutgoingExtras &extras = webos::OutgoingExtras());
+     // webOS reactions (SEND): add (remove=false) or remove (remove=true) MY `emoji` reaction on a
+     // message via TDLib add/removeMessageReaction. Called from the webos-im-send-reaction handler.
+     void sendReaction(int64_t chatId, int64_t messageId, const std::string &emoji, bool remove);
+     void sendReactionResponse(uint64_t requestId, td::td_api::object_ptr<td::td_api::Object> object);
++    // webOS message commands, from the transport's signals. Each returns whether it was started;
++    // what goes wrong after that is told in the chat.
++    // Edit a text message we sent to the text that message, as given to send_im, becomes
++    bool editMessage(int64_t chatId, int64_t messageId, const char *message);
++    // Delete a message for everyone in the chat, as far as Telegram lets us
++    bool deleteMessage(int64_t chatId, int64_t messageId);
++    // Create a basic group of us and these buddies, named as they are to send_im
++    bool createGroupWithMembers(const char *title, const std::vector<std::string> &memberNames);
++    // Add these buddies to the group chat of this purple name
++    bool inviteToGroup(const char *purpleChatName, const std::vector<std::string> &memberNames);
++    // Take these buddies out of the group chat of this purple name; those not known, and we
++    // ourselves, are left out. False if no one is left to take out.
++    bool removeFromGroup(const char *purpleChatName, const std::vector<std::string> &memberNames);
++    // Leave the group chat of this purple name, keeping what it holds
++    bool leaveGroupChat(const char *purpleChatName);
+     void sendTyping(const char *buddyName, bool isTyping);
+     void sendReadReceipts(PurpleConversation *conversation);
+     // Fills a tab just opened with the chat's latest messages, as set; false if it is to be tried
+@@ -68,7 +84,8 @@ public:
+     void createGroup(const char *name, int type, const std::vector<std::string> &basicGroupMembers);
+     BasicGroupMembership getBasicGroupMembership(const char *purpleChatName);
+     void leaveGroup(const std::string &purpleChatName, bool deleteSupergroup);
+-    int  sendGroupMessage(int purpleChatId, const char *message, int64_t replyToMsgId = 0);
++    int  sendGroupMessage(int purpleChatId, const char *message, int64_t replyToMsgId = 0,
++                          const webos::OutgoingExtras &extras = webos::OutgoingExtras());
+     void setGroupDescription(int purpleChatId, const char *description);
+     void kickUserFromChat(PurpleConversation *conv, const char *name);
+     // webOS: archive (true) / unarchive (false) the chat backing this conversation.
+@@ -342,6 +359,17 @@ private:
+                       std::shared_ptr<td::td_api::formattedText> caption);
+     void finishOpeningFile(ChatId chatId, const std::string &key, FileUse use, const std::string &description,
+                            const std::string &path, bool picture, const std::string &error);
++    // webOS message commands: an error in answer to one is told in the chat, after the words given
++    void commandResponse(ChatId chatId, const char *failure, TdObjectPtr object);
++    const td::td_api::chat *getCommandChat(int64_t tdlibChatId, const char *command);
++    // The group chat of this purple name, if we are a member of it
++    const td::td_api::chat *getCommandGroup(const char *purpleChatName, const char *command);
++    void addMembersResponse(ChatId chatId, TdObjectPtr object);
++    // The Telegram users of these buddies, each named as to send_im; false if any is not one known user
++    bool getCommandUsers(const std::vector<std::string> &memberNames, const char *command,
++                         std::vector<int64_t> &userIds);
++    // Names in the chat those TDLib could not add to it
++    void showFailedToAddMembers(int64_t tdlibChatId, const td::td_api::failedToAddMembers &failed);
+ };
+ 
+ #endif
+diff --git a/tdlib-purple.cpp b/tdlib-purple.cpp
+index 0c4767e..fff80b9 100644
+--- a/tdlib-purple.cpp
++++ b/tdlib-purple.cpp
+@@ -8,6 +8,7 @@
+ #include "pidgin-ui.h"
+ #include "receiving.h"
+ #include "clipboard.h"
++#include "webos-send.h"
+ #include <purple.h>
+ #include <glib/gstdio.h>
+ 
+@@ -508,6 +509,113 @@ static void tgprpl_send_reaction_cb(PurpleAccount *account, const char *targetId
+     tdClient->sendReaction(chatId, messageId, emoji ? emoji : "", removeFlag && removeFlag[0] == '1');
+ }
+ 
++// The webOS message commands (edit, delete, group create/invite/leave) come as gboolean signals
++// that imlibpurpleservice emits for EVERY account, and the first handler to return TRUE takes the
++// command. The client of a Telegram account that is connected, or NULL.
++static PurpleTdClient *getWebosCommandClient(PurpleAccount *account)
++{
++    if (!account || (g_strcmp0(purple_account_get_protocol_id(account), config::pluginId) != 0))
++        return nullptr;
++    return getTdClient(account);
++}
++
++// webOS: edit a sent message. serviceMessageId is "<chatId>:<messageId>", as given to the message
++// when it was shown; text is in the form send_im gets a message in.
++static gboolean tgprpl_send_edit_cb(PurpleAccount *account, const char *chat, const char *serviceMessageId,
++                                    const char *text, void * /*data*/)
++{
++    PurpleTdClient *tdClient = getWebosCommandClient(account);
++    if (!tdClient)
++        return FALSE;
++    int64_t chatId, messageId;
++    if (!webos::parseServiceMessageId(serviceMessageId, chatId, messageId)) {
++        purple_debug_warning(config::pluginId, "Cannot edit message '%s' in %s: not a message id\n",
++                             serviceMessageId ? serviceMessageId : "", chat ? chat : "");
++        return FALSE;
++    }
++    return tdClient->editMessage(chatId, messageId, text) ? TRUE : FALSE;
++}
++
++// webOS: delete a message for everyone, by its serviceMessageId
++static gboolean tgprpl_send_delete_cb(PurpleAccount *account, const char *chat, const char *serviceMessageId,
++                                      void * /*data*/)
++{
++    PurpleTdClient *tdClient = getWebosCommandClient(account);
++    if (!tdClient)
++        return FALSE;
++    int64_t chatId, messageId;
++    if (!webos::parseServiceMessageId(serviceMessageId, chatId, messageId)) {
++        purple_debug_warning(config::pluginId, "Cannot delete message '%s' in %s: not a message id\n",
++                             serviceMessageId ? serviceMessageId : "", chat ? chat : "");
++        return FALSE;
++    }
++    return tdClient->deleteMessage(chatId, messageId) ? TRUE : FALSE;
++}
++
++// webOS: create a basic group with these members, "\x1f"-joined buddy names
++static gboolean tgprpl_group_create_cb(PurpleAccount *account, const char *name, const char *membersJoined,
++                                       void * /*data*/)
++{
++    PurpleTdClient *tdClient = getWebosCommandClient(account);
++    if (!tdClient)
++        return FALSE;
++    return tdClient->createGroupWithMembers(name, webos::splitMembers(membersJoined)) ? TRUE : FALSE;
++}
++
++// webOS: add these members, "\x1f"-joined buddy names, to the group chat of this purple name
++static gboolean tgprpl_group_invite_cb(PurpleAccount *account, const char *chat, const char *membersJoined,
++                                       void * /*data*/)
++{
++    PurpleTdClient *tdClient = getWebosCommandClient(account);
++    if (!tdClient)
++        return FALSE;
++    return tdClient->inviteToGroup(chat, webos::splitMembers(membersJoined)) ? TRUE : FALSE;
++}
++
++// webOS: take these members, "\x1f"-joined buddy names, out of the group chat of this purple name
++static gboolean tgprpl_group_remove_cb(PurpleAccount *account, const char *chat, const char *membersJoined,
++                                       void * /*data*/)
++{
++    PurpleTdClient *tdClient = getWebosCommandClient(account);
++    if (!tdClient)
++        return FALSE;
++    return tdClient->removeFromGroup(chat, webos::splitMembers(membersJoined)) ? TRUE : FALSE;
++}
++
++// webOS: leave the group chat of this purple name
++static gboolean tgprpl_group_leave_cb(PurpleAccount *account, const char *chat, void * /*data*/)
++{
++    PurpleTdClient *tdClient = getWebosCommandClient(account);
++    if (!tdClient)
++        return FALSE;
++    return tdClient->leaveGroupChat(chat) ? TRUE : FALSE;
++}
++
++// Connects, once for the whole process, the signals of the webOS transport, which registers them
++// at init, before any account logs in. The callbacks pick out the Telegram accounts.
++static void connectWebosSignals()
++{
++    static bool s_connected = false;
++    if (s_connected)
++        return;
++    s_connected = true;
++    void *conversations = purple_conversations_get_handle();
++    purple_signal_connect(conversations, "webos-im-send-reaction", purple_get_core(),
++                          PURPLE_CALLBACK(tgprpl_send_reaction_cb), NULL);
++    purple_signal_connect(conversations, "webos-im-send-edit", purple_get_core(),
++                          PURPLE_CALLBACK(tgprpl_send_edit_cb), NULL);
++    purple_signal_connect(conversations, "webos-im-send-delete", purple_get_core(),
++                          PURPLE_CALLBACK(tgprpl_send_delete_cb), NULL);
++    purple_signal_connect(conversations, "webos-im-group-create", purple_get_core(),
++                          PURPLE_CALLBACK(tgprpl_group_create_cb), NULL);
++    purple_signal_connect(conversations, "webos-im-group-invite", purple_get_core(),
++                          PURPLE_CALLBACK(tgprpl_group_invite_cb), NULL);
++    purple_signal_connect(conversations, "webos-im-group-remove", purple_get_core(),
++                          PURPLE_CALLBACK(tgprpl_group_remove_cb), NULL);
++    purple_signal_connect(conversations, "webos-im-group-leave", purple_get_core(),
++                          PURPLE_CALLBACK(tgprpl_group_leave_cb), NULL);
++}
++
+ static void tgprpl_login (PurpleAccount *acct)
+ {
+     purple_debug_misc(config::pluginId, "version %s\n", config::versionString);
+@@ -530,14 +638,7 @@ static void tgprpl_login (PurpleAccount *acct)
+     purple_signal_connect(purple_conversations_get_handle(), "chat-joined",
+                           acct, PURPLE_CALLBACK(conversationCreated), acct);
+ 
+-    // Connect once (process-wide) to the transport's send-reaction signal; the callback filters to
+-    // Telegram accounts. The transport registers the signal at init, before any account logs in.
+-    static bool s_sendReactionConnected = false;
+-    if (!s_sendReactionConnected) {
+-        s_sendReactionConnected = true;
+-        purple_signal_connect(purple_conversations_get_handle(), "webos-im-send-reaction",
+-                              purple_get_core(), PURPLE_CALLBACK(tgprpl_send_reaction_cb), NULL);
+-    }
++    connectWebosSignals();
+ }
+ 
+ static void tgprpl_close (PurpleConnection *gc)
+@@ -585,6 +686,25 @@ static int64_t readReplyToStash(PurpleConversation *conv)
+     return msgId;
+ }
+ 
++// webOS: what the transport put with the message being sent, copied: it frees the data right after
++// send_im or chat_send returns, and is the one to free it, so it stays where it is
++static webos::OutgoingExtras readOutgoingExtras(PurpleConversation *conv)
++{
++    webos::OutgoingExtras extras;
++    if (conv) {
++        const char *location = static_cast<const char *>(purple_conversation_get_data(conv, "webos-send-location"));
++        if (location)
++            extras.location = location;
++        const char *contact = static_cast<const char *>(purple_conversation_get_data(conv, "webos-send-contact"));
++        if (contact)
++            extras.contact = contact;
++        const char *mentions = static_cast<const char *>(purple_conversation_get_data(conv, "webos-send-mentions"));
++        if (mentions)
++            extras.mentions = mentions;
++    }
++    return extras;
++}
++
+ static int tgprpl_send_im (PurpleConnection *gc, const char *who, const char *message, PurpleMessageFlags flags)
+ {
+     PurpleTdClient *tdClient = static_cast<PurpleTdClient *>(purple_connection_get_protocol_data(gc));
+@@ -592,9 +712,10 @@ static int tgprpl_send_im (PurpleConnection *gc, const char *who, const char *me
+     PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_IM, who,
+                                                                      purple_connection_get_account(gc));
+     int64_t replyToMsgId = readReplyToStash(conv);
++    webos::OutgoingExtras extras = readOutgoingExtras(conv);
+     if (sendEdit(tdClient, conv, message))
+         return 0;
+-    return tdClient->sendMessage(who, message, replyToMsgId);
++    return tdClient->sendMessage(who, message, replyToMsgId, extras);
+ }
+ 
+ static unsigned int tgprpl_send_typing (PurpleConnection *gc, const char *who, PurpleTypingState typing)
+@@ -846,9 +967,10 @@ static int tgprpl_send_chat (PurpleConnection *gc, int id, const char *message,
+     // webOS native reply: read the reply target the transport stashed on this chat conversation.
+     PurpleConversation *conv = purple_find_chat(gc, id);
+     int64_t replyToMsgId = readReplyToStash(conv);
++    webos::OutgoingExtras extras = readOutgoingExtras(conv);
+     if (sendEdit(tdClient, conv, message))
+         return 0;
+-    return tdClient->sendGroupMessage(id, message, replyToMsgId);
++    return tdClient->sendGroupMessage(id, message, replyToMsgId, extras);
+ }
+ 
+ static void tgprpl_rename_buddy(PurpleConnection *gc, const char *who, const char *alias)
+diff --git a/test/CMakeLists.txt b/test/CMakeLists.txt
+index 6619b5f..c9c2bb0 100644
+--- a/test/CMakeLists.txt
++++ b/test/CMakeLists.txt
+@@ -26,6 +26,7 @@ add_executable(tests EXCLUDE_FROM_ALL
+     thumbnail-test.cpp
+     formatted-text-test.cpp
+     call-protocol-test.cpp
++    webos-commands-test.cpp
+     test-transceiver.cpp
+     libpurple-mock.cpp
+     printout.cpp
+@@ -54,6 +55,7 @@ add_executable(tests EXCLUDE_FROM_ALL
+     ../log-history.cpp
+     ../clipboard.cpp
+     ../thumbnail.cpp
++    ../webos-send.cpp
+ )
+ 
+ # C++17, not the plugin's C++14: GoogleTest requires it from 1.17 on.
+diff --git a/test/libpurple-mock.cpp b/test/libpurple-mock.cpp
+index 6ced015..91657a4 100644
+--- a/test/libpurple-mock.cpp
++++ b/test/libpurple-mock.cpp
+@@ -139,6 +139,8 @@ PurpleAccount *purple_account_new(const char *username, const char *protocol_id)
+     account->username = strdup(username);
+     account->alias = nullptr;
+     account->proxy_info = NULL;
++    account->protocol_id = protocol_id ? strdup(protocol_id) : nullptr;
++    account->gc = NULL;
+ 
+     g_accounts.emplace_back();
+     g_accounts.back().account = account;
+@@ -162,6 +164,7 @@ void purple_account_destroy(PurpleAccount *account)
+     free(account->username);
+     free(account->alias);
+     g_slist_free_full(account->deny, g_free);
++    free(account->protocol_id);
+ 
+     auto it = std::find_if(g_accounts.begin(), g_accounts.end(),
+                            [account](const AccountInfo &info) { return (info.account == account); });
+@@ -182,7 +185,7 @@ void purple_account_destroy(PurpleAccount *account)
+ 
+ const char *purple_account_get_protocol_id(const PurpleAccount *account)
+ {
+-    return "";
++    return account->protocol_id ? account->protocol_id : "";
+ }
+ 
+ PurpleAccount *purple_accounts_find(const char *name, const char *protocol)
+@@ -1931,10 +1934,14 @@ gboolean purple_conversation_has_focus(PurpleConversation *conv)
+     return (conv->ui_ops != NULL);
+ }
+ 
++static std::map<std::string, PurpleCallback> g_connectedSignals;
++
++// Kept, so that a test can call what the plug-in connected as the signal's emitter would
+ gulong purple_signal_connect(void *instance, const char *signal,
+ 	void *handle, PurpleCallback func, void *data)
+ {
+-    return 0;
++    g_connectedSignals[signal] = func;
++    return g_connectedSignals.size();
+ }
+ 
+ void purple_signal_disconnect(void *instance, const char *signal,
+@@ -1990,3 +1997,9 @@ void purple_conversation_set_name(PurpleConversation *conv, const char *name)
+ }
+ 
+ };
++
++extern "C++" PurpleCallback getConnectedSignal(const char *signal)
++{
++    auto it = g_connectedSignals.find(signal);
++    return (it != g_connectedSignals.end()) ? it->second : nullptr;
++}
+diff --git a/test/libpurple-mock.h b/test/libpurple-mock.h
+index 4b043b8..91bbb36 100644
+--- a/test/libpurple-mock.h
++++ b/test/libpurple-mock.h
+@@ -28,6 +28,9 @@ void setCustomSmileys(bool supported);
+ // Whether the front-end has request dialogs, so that purple_request_input asks; on by default
+ void setRequestInputSupported(bool supported);
+ void clearConversationData();
++// What the plug-in connected to a signal, or NULL. Connections stay for the whole run, as the
++// plug-in makes some only once.
++PurpleCallback getConnectedSignal(const char *signal);
+ 
+ using RoomlistData = std::vector<std::pair<PurpleRoomlistFieldType, std::string>>;
+ 
+diff --git a/test/test-transceiver.cpp b/test/test-transceiver.cpp
+index b53dfa1..426ef92 100644
+--- a/test/test-transceiver.cpp
++++ b/test/test-transceiver.cpp
+@@ -332,6 +332,12 @@ static void compare(const object_ptr<InputMessageContent> &actual,
+             compare(actualVoice.caption_, expectedVoice.caption_);
+             break;
+         }
++        // Nothing in these that a test could not give in full
++        case inputMessageLocation::ID:
++        case inputMessageVenue::ID:
++        case inputMessageContact::ID:
++            ASSERT_EQ(to_string(expected), to_string(actual));
++            break;
+         default:
+             ASSERT_TRUE(false) << "Unsupported input message content";
+     }
+@@ -808,7 +814,9 @@ static void compareRequests(const Function &actual, const Function &expected,
+             compare(static_cast<const editMessageText &>(actual), static_cast<const editMessageText &>(expected),
+                     m_inputPhotoPaths);
+             break;
+-        // Compared in full
++        // As above: compared in full
++        case createNewBasicGroupChat::ID:
++        case addChatMembers::ID:
+         case discardCall::ID:
+             ASSERT_EQ(to_string(expected), to_string(actual));
+             break;
+diff --git a/test/webos-commands-test.cpp b/test/webos-commands-test.cpp
+new file mode 100644
+index 0000000..b7fa5f0
+--- /dev/null
++++ b/test/webos-commands-test.cpp
+@@ -0,0 +1,909 @@
++// The webOS message commands, which imlibpurpleservice gives the plug-in as signals, and what it
++// puts with an outgoing message as conversation data
++#include "fixture.h"
++#include "libpurple-mock.h"
++#include "config.h"
++#include "webos-send.h"
++#include "purple-info.h"
++#include <cstring>
++
++// Who a notice in a group chat is from, as group-chat-test.cpp has it
++static const char *NotificationWho = " ";
++
++using EditCallback = gboolean (*)(PurpleAccount *, const char *, const char *, const char *, void *);
++
++class WebosCommandTest: public CommTest {
++protected:
++    void SetUp() override;
++    void TearDown() override;
++    // Another plug-in's account, which the commands are given for too
++    PurpleAccount *otherAccount();
++    // Our own account, connected, as if it were another plug-in's
++    void setProtocol(const char *protocolId)
++    {
++        free(account->protocol_id);
++        account->protocol_id = strdup(protocolId);
++    }
++    PurpleAccount *m_otherAccount = nullptr;
++    // As loginWithOneContact, but with the contact offline, as webOS shows a user whose status
++    // TDLib gives as userStatusOffline
++    void login();
++    const int64_t     groupId             = 700;
++    const int64_t     groupChatId         = 7000;
++    const std::string groupChatPurpleName = "chat" + std::to_string(groupChatId);
++    // A group we are in, made known after login
++    void addBasicGroup();
++    void addSupergroup();
++    std::string serviceMessageId(int64_t chatId, int64_t messageId)
++    {
++        return std::to_string(chatId) + ":" + std::to_string(messageId);
++    }
++};
++
++void WebosCommandTest::SetUp()
++{
++    CommTest::SetUp();
++    // What these tests check is done for the Messaging app only
++    setUiName("Palm Messaging");
++    // The commands are for every account, and the plug-in takes only its own
++    account->protocol_id = strdup(config::pluginId);
++}
++
++void WebosCommandTest::TearDown()
++{
++    CommTest::TearDown();
++    if (m_otherAccount)
++        purple_account_destroy(m_otherAccount);
++    m_otherAccount = nullptr;
++}
++
++PurpleAccount *WebosCommandTest::otherAccount()
++{
++    if (!m_otherAccount)
++        m_otherAccount = purple_account_new("someone@example.org", "prpl-jabber");
++    return m_otherAccount;
++}
++
++void WebosCommandTest::login()
++{
++    CommTest::login(
++        {standardUpdateUser(0), standardPrivateChat(0), makeUpdateChatListMain(chatIds[0])},
++        make_object<users>(1, std::vector<int64_t>(1, userIds[0])),
++        make_object<chats>(1, std::vector<int64_t>(1, chatIds[0])),
++        {
++            std::make_unique<AddBuddyEvent>(purpleUserName(0), userFirstNames[0] + " " + userLastNames[0],
++                                            account, nullptr, nullptr, nullptr),
++        }, {},
++        {
++            std::make_unique<UserStatusEvent>(account, purpleUserName(0), isWebosUi() ? PURPLE_STATUS_OFFLINE : PURPLE_STATUS_AWAY),
++            std::make_unique<AccountSetAliasEvent>(account, selfFirstName + " " + selfLastName),
++            std::make_unique<ShowAccountEvent>(account)
++        }
++    );
++}
++
++void WebosCommandTest::addBasicGroup()
++{
++    tgl.update(make_object<updateBasicGroup>(make_object<basicGroup>(
++        groupId, 2, make_object<chatMemberStatusMember>(), true, 0
++    )));
++    tgl.update(make_object<updateNewChat>(makeChat(
++        groupChatId, make_object<chatTypeBasicGroup>(groupId), "Physics", nullptr, 0, 0, 0
++    )));
++    tgl.update(makeUpdateChatListMain(groupChatId));
++    tgl.verifyRequest(getBasicGroupFullInfo(groupId));
++    prpl.discardEvents();
++}
++
++void WebosCommandTest::addSupergroup()
++{
++    tgl.update(make_object<updateSupergroup>(makeSupergroup(groupId, make_object<chatMemberStatusMember>(), 2)));
++    tgl.update(make_object<updateNewChat>(makeChat(
++        groupChatId, make_object<chatTypeSupergroup>(groupId, false), "Physics", nullptr, 0, 0, 0
++    )));
++    tgl.update(makeUpdateChatListMain(groupChatId));
++    tgl.verifyRequests({
++        make_object<getSupergroupFullInfo>(groupId),
++        make_object<getSupergroupMembers>(groupId, make_object<supergroupMembersFilterRecent>(), 0, 200),
++    });
++    prpl.discardEvents();
++}
++
++static object_ptr<inputMessageText> makeText(const std::string &text)
++{
++    return make_object<inputMessageText>(make_object<formattedText>(text, std::vector<object_ptr<textEntity>>()),
++                                         nullptr, false);
++}
++
++TEST(WebosSendTest, ServiceMessageId)
++{
++    int64_t chatId = 1, messageId = 2;
++    ASSERT_TRUE(webos::parseServiceMessageId("1000:42", chatId, messageId));
++    ASSERT_EQ(1000, chatId);
++    ASSERT_EQ(42, messageId);
++    ASSERT_TRUE(webos::parseServiceMessageId("-1001234567890:1048576", chatId, messageId));
++    ASSERT_EQ(-1001234567890, chatId);
++    ASSERT_EQ(1048576, messageId);
++
++    chatId = 7; messageId = 8;
++    for (const char *bad: {"", ":", "1000", "1000:", ":42", "1000:42x", "1000:4 2", " 1000:42",
++                           "1000: 42", "+1000:42", "0:42", "1000:0", "a:b",
++                           "99999999999999999999:1"})
++    {
++        ASSERT_FALSE(webos::parseServiceMessageId(bad, chatId, messageId)) << bad;
++        ASSERT_EQ(7, chatId);
++        ASSERT_EQ(8, messageId);
++    }
++    ASSERT_FALSE(webos::parseServiceMessageId(nullptr, chatId, messageId));
++}
++
++TEST_F(WebosCommandTest, Edit)
++{
++    login();
++    auto edit = reinterpret_cast<EditCallback>(getConnectedSignal("webos-im-send-edit"));
++    ASSERT_NE(nullptr, edit);
++
++    // In the form send_im has a message in
++    std::string id = serviceMessageId(chatIds[0], 42);
++    ASSERT_TRUE(edit(account, purpleUserName(0).c_str(), id.c_str(), "1&lt;2 <b>chips</b>", nullptr));
++    tgl.verifyRequest(editMessageText(chatIds[0], 42, nullptr, makeText("1<2 chips")));
++    // What it was edited to comes as updateMessageContent, and is tested as an edit from elsewhere
++    tgl.reply(makeMessage(42, selfId, chatIds[0], true, 10001, makeTextMessage("1<2 chips")));
++    prpl.verifyNoEvents();
++}
++
++TEST_F(WebosCommandTest, EditFailed)
++{
++    login();
++    auto edit = reinterpret_cast<EditCallback>(getConnectedSignal("webos-im-send-edit"));
++    ASSERT_NE(nullptr, edit);
++
++    std::string id = serviceMessageId(chatIds[0], 42);
++    ASSERT_TRUE(edit(account, purpleUserName(0).c_str(), id.c_str(), "Fish", nullptr));
++    tgl.verifyRequest(editMessageText(chatIds[0], 42, nullptr, makeText("Fish")));
++    tgl.reply(make_object<error>(400, "Message can't be edited"));
++    prpl.verifyEvents(
++        NewConversationEvent(PURPLE_CONV_TYPE_IM, account, purpleUserName(0)),
++        ConversationWriteEvent(purpleUserName(0), purpleUserName(0),
++                               "Failed to edit message: code 400 (Message can't be edited)",
++                               PURPLE_MESSAGE_SYSTEM, 0)
++    );
++}
++
++TEST_F(WebosCommandTest, EditNotTaken)
++{
++    login();
++    auto edit = reinterpret_cast<EditCallback>(getConnectedSignal("webos-im-send-edit"));
++    ASSERT_NE(nullptr, edit);
++    std::string id = serviceMessageId(chatIds[0], 42);
++
++    // Another plug-in's account
++    ASSERT_FALSE(edit(otherAccount(), "buddy", id.c_str(), "Fish", nullptr));
++    setProtocol("prpl-jabber");
++    ASSERT_FALSE(edit(account, purpleUserName(0).c_str(), id.c_str(), "Fish", nullptr));
++    setProtocol(config::pluginId);
++    ASSERT_FALSE(edit(nullptr, "buddy", id.c_str(), "Fish", nullptr));
++
++    // Not a message id, or a chat not known
++    ASSERT_FALSE(edit(account, purpleUserName(0).c_str(), "42", "Fish", nullptr));
++    ASSERT_FALSE(edit(account, purpleUserName(0).c_str(), nullptr, "Fish", nullptr));
++    std::string unknownChat = serviceMessageId(chatIds[1], 42);
++    ASSERT_FALSE(edit(account, purpleUserName(0).c_str(), unknownChat.c_str(), "Fish", nullptr));
++
++    // Nothing, or not text alone
++    ASSERT_FALSE(edit(account, purpleUserName(0).c_str(), id.c_str(), "", nullptr));
++    ASSERT_FALSE(edit(account, purpleUserName(0).c_str(), id.c_str(), nullptr, nullptr));
++    ASSERT_FALSE(edit(account, purpleUserName(0).c_str(), id.c_str(), "<img id=\"1\">", nullptr));
++    tgl.verifyNoRequests();
++}
++
++TEST_F(WebosCommandTest, EditNotConnected)
++{
++    auto edit = reinterpret_cast<EditCallback>(getConnectedSignal("webos-im-send-edit"));
++    // Connected by an earlier test's login, if this runs alone it is not
++    if (!edit)
++        GTEST_SKIP() << "no login yet in this run";
++    std::string id = serviceMessageId(chatIds[0], 42);
++    ASSERT_FALSE(edit(account, purpleUserName(0).c_str(), id.c_str(), "Fish", nullptr));
++}
++
++using DeleteCallback = gboolean (*)(PurpleAccount *, const char *, const char *, void *);
++
++TEST_F(WebosCommandTest, Delete)
++{
++    login();
++    auto deleteMessage = reinterpret_cast<DeleteCallback>(getConnectedSignal("webos-im-send-delete"));
++    ASSERT_NE(nullptr, deleteMessage);
++
++    std::string id = serviceMessageId(chatIds[0], 42);
++    ASSERT_TRUE(deleteMessage(account, purpleUserName(0).c_str(), id.c_str(), nullptr));
++    // For everyone
++    tgl.verifyRequest(deleteMessages(chatIds[0], {42}, true));
++    tgl.reply(make_object<ok>());
++    prpl.verifyNoEvents();
++
++    ASSERT_TRUE(deleteMessage(account, purpleUserName(0).c_str(), id.c_str(), nullptr));
++    tgl.verifyRequest(deleteMessages(chatIds[0], {42}, true));
++    tgl.reply(make_object<error>(400, "Message can't be deleted"));
++    prpl.verifyEvents(
++        NewConversationEvent(PURPLE_CONV_TYPE_IM, account, purpleUserName(0)),
++        ConversationWriteEvent(purpleUserName(0), purpleUserName(0),
++                               "Failed to delete message: code 400 (Message can't be deleted)",
++                               PURPLE_MESSAGE_SYSTEM, 0)
++    );
++}
++
++TEST_F(WebosCommandTest, DeleteNotTaken)
++{
++    login();
++    auto deleteMessage = reinterpret_cast<DeleteCallback>(getConnectedSignal("webos-im-send-delete"));
++    ASSERT_NE(nullptr, deleteMessage);
++    std::string id = serviceMessageId(chatIds[0], 42);
++
++    ASSERT_FALSE(deleteMessage(otherAccount(), "buddy", id.c_str(), nullptr));
++    setProtocol("prpl-jabber");
++    ASSERT_FALSE(deleteMessage(account, purpleUserName(0).c_str(), id.c_str(), nullptr));
++    setProtocol(config::pluginId);
++    ASSERT_FALSE(deleteMessage(nullptr, "buddy", id.c_str(), nullptr));
++    ASSERT_FALSE(deleteMessage(account, purpleUserName(0).c_str(), "1000:", nullptr));
++    ASSERT_FALSE(deleteMessage(account, purpleUserName(0).c_str(), nullptr, nullptr));
++    std::string unknownChat = serviceMessageId(chatIds[1], 42);
++    ASSERT_FALSE(deleteMessage(account, purpleUserName(0).c_str(), unknownChat.c_str(), nullptr));
++    tgl.verifyNoRequests();
++}
++
++TEST(WebosSendTest, SplitMembers)
++{
++    using Members = std::vector<std::string>;
++    ASSERT_EQ(Members(), webos::splitMembers(nullptr));
++    ASSERT_EQ(Members(), webos::splitMembers(""));
++    ASSERT_EQ(Members(), webos::splitMembers("\x1f\x1f"));
++    ASSERT_EQ(Members({"id100"}), webos::splitMembers("id100"));
++    ASSERT_EQ(Members({"id100", "Galileo Galilei"}), webos::splitMembers("id100\x1fGalileo Galilei"));
++    ASSERT_EQ(Members({"id100", "+00002"}), webos::splitMembers("\x1fid100\x1f\x1f+00002\x1f"));
++}
++
++using GroupCreateCallback = gboolean (*)(PurpleAccount *, const char *, const char *, void *);
++
++TEST_F(WebosCommandTest, CreateGroup)
++{
++    login();
++    // Known, though not a contact
++    tgl.update(standardUpdateUser(1));
++    auto createGroup = reinterpret_cast<GroupCreateCallback>(getConnectedSignal("webos-im-group-create"));
++    ASSERT_NE(nullptr, createGroup);
++
++    // A buddy by its buddy name, a user by display name, and the first one again
++    std::string members = purpleUserName(0) + "\x1f" + userFirstNames[1] + " " + userLastNames[1] +
++                          "\x1f" + purpleUserName(0);
++    ASSERT_TRUE(createGroup(account, "Physics", members.c_str(), nullptr));
++    uint64_t createRequest = tgl.verifyRequest(createNewBasicGroupChat({userIds[0], userIds[1]}, "Physics", 0));
++
++    // TDLib tells of the new chat before it answers
++    tgl.update(make_object<updateBasicGroup>(make_object<basicGroup>(
++        groupId, 3, makeChatMemberStatusCreator("", false, true), true, 0
++    )));
++    tgl.update(make_object<updateNewChat>(makeChat(
++        groupChatId, make_object<chatTypeBasicGroup>(groupId), "Physics", nullptr, 0, 0, 0
++    )));
++    tgl.update(makeUpdateChatListMain(groupChatId));
++    tgl.verifyRequest(getBasicGroupFullInfo(groupId));
++    prpl.discardEvents();
++
++    std::vector<object_ptr<failedToAddMember>> failed;
++    failed.push_back(make_object<failedToAddMember>(userIds[1], false, false));
++    tgl.reply(createRequest, make_object<createdBasicGroupChat>(
++        groupChatId, make_object<failedToAddMembers>(std::move(failed))
++    ));
++    prpl.verifyEvents(
++        ServGotJoinedChatEvent(connection, 2, groupChatPurpleName, "Physics"),
++        ConversationWriteEvent(groupChatPurpleName, NotificationWho,
++                               "Could not add to the group: " + userFirstNames[1] + " " + userLastNames[1],
++                               PURPLE_MESSAGE_SYSTEM, 0)
++    );
++}
++
++TEST_F(WebosCommandTest, CreateGroupNotTaken)
++{
++    login();
++    auto createGroup = reinterpret_cast<GroupCreateCallback>(getConnectedSignal("webos-im-group-create"));
++    ASSERT_NE(nullptr, createGroup);
++    std::string members = purpleUserName(0);
++
++    ASSERT_FALSE(createGroup(otherAccount(), "Physics", members.c_str(), nullptr));
++    setProtocol("prpl-jabber");
++    ASSERT_FALSE(createGroup(account, "Physics", members.c_str(), nullptr));
++    setProtocol(config::pluginId);
++    ASSERT_FALSE(createGroup(nullptr, "Physics", members.c_str(), nullptr));
++    ASSERT_FALSE(createGroup(account, "", members.c_str(), nullptr));
++    ASSERT_FALSE(createGroup(account, nullptr, members.c_str(), nullptr));
++    ASSERT_FALSE(createGroup(account, "Physics", "", nullptr));
++    ASSERT_FALSE(createGroup(account, "Physics", nullptr, nullptr));
++    // All or none: a member not known
++    std::string withUnknown = members + "\x1f" + "id999";
++    ASSERT_FALSE(createGroup(account, "Physics", withUnknown.c_str(), nullptr));
++    tgl.verifyNoRequests();
++}
++
++using GroupInviteCallback = gboolean (*)(PurpleAccount *, const char *, const char *, void *);
++
++TEST_F(WebosCommandTest, InviteToBasicGroup)
++{
++    login();
++    tgl.update(standardUpdateUser(1));
++    addBasicGroup();
++    auto invite = reinterpret_cast<GroupInviteCallback>(getConnectedSignal("webos-im-group-invite"));
++    ASSERT_NE(nullptr, invite);
++
++    std::string members = purpleUserName(0) + "\x1f" + purpleUserName(1);
++    ASSERT_TRUE(invite(account, groupChatPurpleName.c_str(), members.c_str(), nullptr));
++    // One at a time, as TDLib has it for a basic group
++    std::vector<uint64_t> requests = tgl.verifyRequests({
++        make_object<addChatMember>(groupChatId, userIds[0], 0),
++        make_object<addChatMember>(groupChatId, userIds[1], 0),
++    });
++    ASSERT_EQ(2u, requests.size());
++    tgl.reply(requests[0], make_object<failedToAddMembers>());
++    prpl.verifyNoEvents();
++    std::vector<object_ptr<failedToAddMember>> failed;
++    failed.push_back(make_object<failedToAddMember>(userIds[1], true, false));
++    tgl.reply(requests[1], make_object<failedToAddMembers>(std::move(failed)));
++    prpl.verifyEvents(
++        ServGotJoinedChatEvent(connection, 2, groupChatPurpleName, "Physics"),
++        ConversationWriteEvent(groupChatPurpleName, NotificationWho,
++                               "Could not add to the group: " + userFirstNames[1] + " " + userLastNames[1],
++                               PURPLE_MESSAGE_SYSTEM, 0)
++    );
++
++    ASSERT_TRUE(invite(account, groupChatPurpleName.c_str(), purpleUserName(0).c_str(), nullptr));
++    tgl.verifyRequest(addChatMember(groupChatId, userIds[0], 0));
++    tgl.reply(make_object<error>(400, "USER_ALREADY_PARTICIPANT"));
++    prpl.verifyEvents(
++        ConversationWriteEvent(groupChatPurpleName, NotificationWho,
++                               "Cannot add user to group: code 400 (USER_ALREADY_PARTICIPANT)",
++                               PURPLE_MESSAGE_SYSTEM, 0)
++    );
++}
++
++TEST_F(WebosCommandTest, InviteToSupergroup)
++{
++    login();
++    tgl.update(standardUpdateUser(1));
++    addSupergroup();
++    auto invite = reinterpret_cast<GroupInviteCallback>(getConnectedSignal("webos-im-group-invite"));
++    ASSERT_NE(nullptr, invite);
++
++    std::string members = purpleUserName(0) + "\x1f" + purpleUserName(1);
++    ASSERT_TRUE(invite(account, groupChatPurpleName.c_str(), members.c_str(), nullptr));
++    // All at once
++    tgl.verifyRequest(addChatMembers(groupChatId, {userIds[0], userIds[1]}));
++    tgl.reply(make_object<failedToAddMembers>());
++    prpl.verifyNoEvents();
++}
++
++// libpurple's own invite, which takes addChatMember's answer since TDLib gives failedToAddMembers
++TEST_F(WebosCommandTest, LibpurpleInviteAnswered)
++{
++    login();
++    addBasicGroup();
++    pluginInfo().chat_invite(connection, 2, "", purpleUserName(0).c_str());
++    tgl.verifyRequest(addChatMember(groupChatId, userIds[0], 0));
++    tgl.reply(make_object<failedToAddMembers>());
++    prpl.verifyNoEvents();
++}
++
++TEST_F(WebosCommandTest, InviteNotTaken)
++{
++    login();
++    addBasicGroup();
++    auto invite = reinterpret_cast<GroupInviteCallback>(getConnectedSignal("webos-im-group-invite"));
++    ASSERT_NE(nullptr, invite);
++    std::string members = purpleUserName(0);
++
++    ASSERT_FALSE(invite(otherAccount(), groupChatPurpleName.c_str(), members.c_str(), nullptr));
++    setProtocol("prpl-jabber");
++    ASSERT_FALSE(invite(account, groupChatPurpleName.c_str(), members.c_str(), nullptr));
++    setProtocol(config::pluginId);
++    ASSERT_FALSE(invite(nullptr, groupChatPurpleName.c_str(), members.c_str(), nullptr));
++    // Not a group, or not one known
++    ASSERT_FALSE(invite(account, purpleUserName(0).c_str(), members.c_str(), nullptr));
++    ASSERT_FALSE(invite(account, "chat7001", members.c_str(), nullptr));
++    ASSERT_FALSE(invite(account, nullptr, members.c_str(), nullptr));
++    // No one, or someone not known
++    ASSERT_FALSE(invite(account, groupChatPurpleName.c_str(), "", nullptr));
++    ASSERT_FALSE(invite(account, groupChatPurpleName.c_str(), nullptr, nullptr));
++    std::string withUnknown = members + "\x1f" + "id999";
++    ASSERT_FALSE(invite(account, groupChatPurpleName.c_str(), withUnknown.c_str(), nullptr));
++    tgl.verifyNoRequests();
++}
++
++using GroupRemoveCallback = gboolean (*)(PurpleAccount *, const char *, const char *, void *);
++
++TEST_F(WebosCommandTest, RemoveFromBasicGroup)
++{
++    login();
++    // Known, though not a contact
++    tgl.update(standardUpdateUser(1));
++    addBasicGroup();
++    auto remove = reinterpret_cast<GroupRemoveCallback>(getConnectedSignal("webos-im-group-remove"));
++    ASSERT_NE(nullptr, remove);
++
++    // A buddy by its buddy name and a user by display name, as the chat's member list has them,
++    // and the first one again
++    std::string members = purpleUserName(0) + "\x1f" + userFirstNames[1] + " " + userLastNames[1] +
++                          "\x1f" + purpleUserName(0);
++    ASSERT_TRUE(remove(account, groupChatPurpleName.c_str(), members.c_str(), nullptr));
++    // One at a time, each set to "left"
++    std::vector<uint64_t> requests = tgl.verifyRequests({
++        make_object<setChatMemberStatus>(groupChatId, make_object<messageSenderUser>(userIds[0]),
++                                         make_object<chatMemberStatusLeft>()),
++        make_object<setChatMemberStatus>(groupChatId, make_object<messageSenderUser>(userIds[1]),
++                                         make_object<chatMemberStatusLeft>()),
++    });
++    ASSERT_EQ(2u, requests.size());
++    tgl.reply(requests[0], make_object<ok>());
++    prpl.verifyNoEvents();
++    tgl.reply(requests[1], make_object<error>(400, "CHAT_ADMIN_REQUIRED"));
++    prpl.verifyEvents(
++        ServGotJoinedChatEvent(connection, 2, groupChatPurpleName, "Physics"),
++        ConversationWriteEvent(groupChatPurpleName, NotificationWho,
++                               "Cannot remove user from group: code 400 (CHAT_ADMIN_REQUIRED)",
++                               PURPLE_MESSAGE_SYSTEM, 0)
++    );
++}
++
++TEST_F(WebosCommandTest, RemoveFromSupergroup)
++{
++    login();
++    tgl.update(standardUpdateUser(1));
++    addSupergroup();
++    auto remove = reinterpret_cast<GroupRemoveCallback>(getConnectedSignal("webos-im-group-remove"));
++    ASSERT_NE(nullptr, remove);
++
++    // Set to "left" as in a basic group, not banned: they may be added again
++    std::string members = purpleUserName(0) + "\x1f" + purpleUserName(1);
++    ASSERT_TRUE(remove(account, groupChatPurpleName.c_str(), members.c_str(), nullptr));
++    std::vector<uint64_t> requests = tgl.verifyRequests({
++        make_object<setChatMemberStatus>(groupChatId, make_object<messageSenderUser>(userIds[0]),
++                                         make_object<chatMemberStatusLeft>()),
++        make_object<setChatMemberStatus>(groupChatId, make_object<messageSenderUser>(userIds[1]),
++                                         make_object<chatMemberStatusLeft>()),
++    });
++    ASSERT_EQ(2u, requests.size());
++    tgl.reply(requests[0], make_object<ok>());
++    tgl.reply(requests[1], make_object<ok>());
++    prpl.verifyNoEvents();
++}
++
++TEST_F(WebosCommandTest, RemoveSkipsUnknownAndSelf)
++{
++    login();
++    // Two users whose names differ in case only, which webOS's handle of a name ("galileogalilei")
++    // finds both of
++    tgl.update(standardUpdateUser(1));
++    tgl.update(make_object<updateUser>(makeUser(
++        userIds[1] + 1, "galileo", "galilei", "00003", make_object<userStatusOffline>()
++    )));
++    addBasicGroup();
++    auto remove = reinterpret_cast<GroupRemoveCallback>(getConnectedSignal("webos-im-group-remove"));
++    ASSERT_NE(nullptr, remove);
++
++    // Someone not known, a name no one has, a name two have, and we ourselves, by buddy name and
++    // by phone number: left out, the one known taken out still
++    std::string members = std::string("id999") + "\x1f" + "Nobody Known" + "\x1f" + "galileogalilei" + "\x1f" +
++                          "id" + std::to_string(selfId) + "\x1f" + "+" + selfPhoneNumber + "\x1f" +
++                          purpleUserName(0);
++    ASSERT_TRUE(remove(account, groupChatPurpleName.c_str(), members.c_str(), nullptr));
++    tgl.verifyRequest(setChatMemberStatus(groupChatId, make_object<messageSenderUser>(userIds[0]),
++                                          make_object<chatMemberStatusLeft>()));
++    tgl.reply(make_object<ok>());
++    prpl.verifyNoEvents();
++
++    // No one left to take out
++    std::string onlyUs = "id" + std::to_string(selfId);
++    ASSERT_FALSE(remove(account, groupChatPurpleName.c_str(), onlyUs.c_str(), nullptr));
++    ASSERT_FALSE(remove(account, groupChatPurpleName.c_str(), "id999\x1fNobody Known", nullptr));
++    tgl.verifyNoRequests();
++}
++
++TEST_F(WebosCommandTest, RemoveNotTaken)
++{
++    login();
++    addBasicGroup();
++    auto remove = reinterpret_cast<GroupRemoveCallback>(getConnectedSignal("webos-im-group-remove"));
++    ASSERT_NE(nullptr, remove);
++    std::string members = purpleUserName(0);
++
++    ASSERT_FALSE(remove(otherAccount(), groupChatPurpleName.c_str(), members.c_str(), nullptr));
++    setProtocol("prpl-jabber");
++    ASSERT_FALSE(remove(account, groupChatPurpleName.c_str(), members.c_str(), nullptr));
++    setProtocol(config::pluginId);
++    ASSERT_FALSE(remove(nullptr, groupChatPurpleName.c_str(), members.c_str(), nullptr));
++    // Not a group, or not one known
++    ASSERT_FALSE(remove(account, purpleUserName(0).c_str(), members.c_str(), nullptr));
++    ASSERT_FALSE(remove(account, "chat7001", members.c_str(), nullptr));
++    ASSERT_FALSE(remove(account, nullptr, members.c_str(), nullptr));
++    // No one
++    ASSERT_FALSE(remove(account, groupChatPurpleName.c_str(), "", nullptr));
++    ASSERT_FALSE(remove(account, groupChatPurpleName.c_str(), "\x1f", nullptr));
++    ASSERT_FALSE(remove(account, groupChatPurpleName.c_str(), nullptr, nullptr));
++    tgl.verifyNoRequests();
++}
++
++// A group we have left: nothing to take anyone out of
++TEST_F(WebosCommandTest, RemoveFromLeftGroup)
++{
++    login();
++    tgl.update(make_object<updateBasicGroup>(make_object<basicGroup>(
++        groupId, 2, make_object<chatMemberStatusLeft>(), true, 0
++    )));
++    tgl.update(make_object<updateNewChat>(makeChat(
++        groupChatId, make_object<chatTypeBasicGroup>(groupId), "Physics", nullptr, 0, 0, 0
++    )));
++    tgl.update(makeUpdateChatListMain(groupChatId));
++    prpl.discardEvents();
++    tgl.verifyNoRequests();
++    auto remove = reinterpret_cast<GroupRemoveCallback>(getConnectedSignal("webos-im-group-remove"));
++    ASSERT_NE(nullptr, remove);
++    ASSERT_FALSE(remove(account, groupChatPurpleName.c_str(), purpleUserName(0).c_str(), nullptr));
++    tgl.verifyNoRequests();
++}
++
++using GroupLeaveCallback = gboolean (*)(PurpleAccount *, const char *, void *);
++
++TEST_F(WebosCommandTest, LeaveGroup)
++{
++    login();
++    addBasicGroup();
++    auto leave = reinterpret_cast<GroupLeaveCallback>(getConnectedSignal("webos-im-group-leave"));
++    ASSERT_NE(nullptr, leave);
++
++    ASSERT_TRUE(leave(account, groupChatPurpleName.c_str(), nullptr));
++    // Leaving alone: the history stays, and so does the chat in the list
++    tgl.verifyRequest(leaveChat(groupChatId));
++    tgl.reply(make_object<ok>());
++    prpl.verifyNoEvents();
++
++    ASSERT_TRUE(leave(account, groupChatPurpleName.c_str(), nullptr));
++    tgl.verifyRequest(leaveChat(groupChatId));
++    tgl.reply(make_object<error>(400, "USER_NOT_PARTICIPANT"));
++    prpl.verifyEvents(
++        ServGotJoinedChatEvent(connection, 2, groupChatPurpleName, "Physics"),
++        ConversationWriteEvent(groupChatPurpleName, NotificationWho,
++                               "Failed to leave group: code 400 (USER_NOT_PARTICIPANT)",
++                               PURPLE_MESSAGE_SYSTEM, 0)
++    );
++}
++
++TEST_F(WebosCommandTest, LeaveGroupNotTaken)
++{
++    login();
++    addBasicGroup();
++    auto leave = reinterpret_cast<GroupLeaveCallback>(getConnectedSignal("webos-im-group-leave"));
++    ASSERT_NE(nullptr, leave);
++
++    ASSERT_FALSE(leave(otherAccount(), groupChatPurpleName.c_str(), nullptr));
++    setProtocol("prpl-jabber");
++    ASSERT_FALSE(leave(account, groupChatPurpleName.c_str(), nullptr));
++    setProtocol(config::pluginId);
++    ASSERT_FALSE(leave(nullptr, groupChatPurpleName.c_str(), nullptr));
++    ASSERT_FALSE(leave(account, purpleUserName(0).c_str(), nullptr));
++    ASSERT_FALSE(leave(account, "chat7001", nullptr));
++    ASSERT_FALSE(leave(account, nullptr, nullptr));
++    tgl.verifyNoRequests();
++}
++
++TEST(WebosSendTest, Location)
++{
++    webos::SendLocation location;
++    ASSERT_TRUE(webos::parseSendLocation("50.4501000\x1f" "30.5234000\x1f" "Maidan", location));
++    ASSERT_EQ(50.4501, location.latitude);
++    ASSERT_EQ(30.5234, location.longitude);
++    ASSERT_EQ("Maidan", location.name);
++
++    // No name, as an empty field or none; a name may hold anything else
++    ASSERT_TRUE(webos::parseSendLocation("-33.8567844\x1f" "151.2152967\x1f", location));
++    ASSERT_EQ(-33.8567844, location.latitude);
++    ASSERT_EQ(151.2152967, location.longitude);
++    ASSERT_EQ("", location.name);
++    ASSERT_TRUE(webos::parseSendLocation("90\x1f-180", location));
++    ASSERT_EQ(90, location.latitude);
++    ASSERT_EQ(-180, location.longitude);
++    ASSERT_EQ("", location.name);
++    ASSERT_TRUE(webos::parseSendLocation("0\x1f" "0\x1f" "Null Island \x1f 📍", location));
++    ASSERT_EQ("Null Island \x1f 📍", location.name);
++
++    // Unchanged on failure
++    location.latitude = 1; location.longitude = 2; location.name = "kept";
++    for (const char *bad: {"", "\x1f", "50.45", "50.45\x1f", "\x1f" "30.52", "50,45\x1f" "30,52",
++                           "50.45x\x1f" "30.52", " 50.45\x1f" "30.52", "50.45\x1f 30.52", "90.1\x1f" "0",
++                           "-90.1\x1f" "0", "0\x1f" "180.5", "nan\x1f" "0", "0\x1f" "inf", "1e999\x1f" "0"})
++    {
++        ASSERT_FALSE(webos::parseSendLocation(bad, location)) << bad;
++        ASSERT_EQ(1, location.latitude);
++        ASSERT_EQ(2, location.longitude);
++        ASSERT_EQ("kept", location.name);
++    }
++    ASSERT_FALSE(webos::parseSendLocation(nullptr, location));
++}
++
++// The app's plain form of a location, which goes if the plug-in cannot send the place itself
++static const char *LocationText = "📍 Maidan https://maps.google.com/?q=50.4501,30.5234";
++
++TEST_F(WebosCommandTest, SendLocation)
++{
++    login();
++    PurpleConversation *conv = purple_conversation_new(PURPLE_CONV_TYPE_IM, account, purpleUserName(0).c_str());
++    prpl.discardEvents();
++
++    // Named: a venue
++    char venueData[] = "50.4501000\x1f" "30.5234000\x1f" "Maidan";
++    purple_conversation_set_data(conv, "webos-send-location", venueData);
++    ASSERT_EQ(0, pluginInfo().send_im(connection, purpleUserName(0).c_str(), LocationText, PURPLE_MESSAGE_SEND));
++    tgl.verifyRequest(*makeSendMessage(chatIds[0], 0, nullptr, nullptr, nullptr,
++        make_object<inputMessageVenue>(make_object<venue>(
++            make_object<location>(50.4501, 30.5234, 0), "Maidan", "", "", "", ""
++        ))
++    ));
++    // Read, not taken: the transport frees it
++    ASSERT_EQ(static_cast<gpointer>(venueData), purple_conversation_get_data(conv, "webos-send-location"));
++
++    // Not named: a location
++    char locationData[] = "50.4501000\x1f" "30.5234000\x1f";
++    purple_conversation_set_data(conv, "webos-send-location", locationData);
++    ASSERT_EQ(0, pluginInfo().send_im(connection, purpleUserName(0).c_str(), LocationText, PURPLE_MESSAGE_SEND));
++    tgl.verifyRequest(*makeSendMessage(chatIds[0], 0, nullptr, nullptr, nullptr,
++        make_object<inputMessageLocation>(make_object<location>(50.4501, 30.5234, 0))
++    ));
++
++    // Not a location: the text
++    char badData[] = "north\x1fwest\x1f";
++    purple_conversation_set_data(conv, "webos-send-location", badData);
++    ASSERT_EQ(0, pluginInfo().send_im(connection, purpleUserName(0).c_str(), LocationText, PURPLE_MESSAGE_SEND));
++    tgl.verifyRequest(*makeSendMessage(chatIds[0], 0, nullptr, nullptr, nullptr, makeText(LocationText)));
++    ASSERT_EQ(static_cast<gpointer>(badData), purple_conversation_get_data(conv, "webos-send-location"));
++
++    // Gone again: the text
++    purple_conversation_set_data(conv, "webos-send-location", nullptr);
++    ASSERT_EQ(0, pluginInfo().send_im(connection, purpleUserName(0).c_str(), LocationText, PURPLE_MESSAGE_SEND));
++    tgl.verifyRequest(*makeSendMessage(chatIds[0], 0, nullptr, nullptr, nullptr, makeText(LocationText)));
++}
++
++TEST_F(WebosCommandTest, SendLocationToGroupAsReply)
++{
++    login();
++    addBasicGroup();
++    // The group's conversation
++    tgl.update(make_object<updateNewMessage>(makeMessage(
++        1, userIds[0], groupChatId, false, 10001, makeTextMessage("Where are you?")
++    )));
++    tgl.verifyRequest(viewMessages(groupChatId, {1}, nullptr, true));
++    prpl.discardEvents();
++    PurpleConversation *conv = purple_find_chat(connection, 2);
++    ASSERT_NE(nullptr, conv);
++    // The id of the message shown, left for the transport, which takes and frees it
++    g_free(purple_conversation_get_data(conv, "webos-msg-id"));
++    purple_conversation_set_data(conv, "webos-msg-id", nullptr);
++
++    char locationData[] = "50.4501000\x1f" "30.5234000\x1f" "Maidan";
++    purple_conversation_set_data(conv, "webos-send-location", locationData);
++    // The prpl's own stash, which it frees
++    purple_conversation_set_data(conv, "webos-reply-to", g_strdup((std::to_string(groupChatId) + ":1").c_str()));
++    ASSERT_EQ(0, pluginInfo().chat_send(connection, 2, LocationText, PURPLE_MESSAGE_SEND));
++    tgl.verifyRequest(*makeSendMessage(groupChatId, 0, make_object<inputMessageReplyToMessage>(), nullptr, nullptr,
++        make_object<inputMessageVenue>(make_object<venue>(
++            make_object<location>(50.4501, 30.5234, 0), "Maidan", "", "", "", ""
++        ))
++    ));
++    ASSERT_EQ(static_cast<gpointer>(locationData), purple_conversation_get_data(conv, "webos-send-location"));
++    purple_conversation_set_data(conv, "webos-send-location", nullptr);
++}
++
++TEST(WebosSendTest, VCard)
++{
++    webos::SendContact contact;
++    // As the app writes one
++    ASSERT_TRUE(webos::parseVCardContact("BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Ada Lovelace\r\n"
++                                         "N:Lovelace;Ada;;;\r\nTEL;TYPE=CELL:+44 20 7946 0000\r\n"
++                                         "TEL;TYPE=HOME:+44 20 7946 0001\r\nEND:VCARD\r\n", contact));
++    ASSERT_EQ("+44 20 7946 0000", contact.phoneNumber);
++    ASSERT_EQ("Ada", contact.firstName);
++    ASSERT_EQ("Lovelace", contact.lastName);
++
++    // FN alone, folded lines, a group, lower case, LF only, escapes
++    ASSERT_TRUE(webos::parseVCardContact("BEGIN:VCARD\nVERSION:3.0\nfn:Smith\\, John\n  Jr.\n"
++                                         "item1.tel;type=\"cell,voice\":555\n 0100\nEND:VCARD", contact));
++    ASSERT_EQ("5550100", contact.phoneNumber);
++    ASSERT_EQ("Smith, John Jr.", contact.firstName);
++    ASSERT_EQ("", contact.lastName);
++
++    // vCard 4.0 URI; a family name only; an escaped semicolon in N
++    ASSERT_TRUE(webos::parseVCardContact("BEGIN:VCARD\r\nVERSION:4.0\r\nN:Ng\\;Wu;;;;\r\n"
++                                         "TEL;VALUE=uri;TYPE=cell:tel:+1-555-0100;ext=12\r\nEND:VCARD", contact));
++    ASSERT_EQ("+1-555-0100", contact.phoneNumber);
++    ASSERT_EQ("Ng;Wu", contact.firstName);
++    ASSERT_EQ("", contact.lastName);
++
++    // A number and no name at all
++    ASSERT_TRUE(webos::parseVCardContact("BEGIN:VCARD\nTEL:112\nEND:VCARD", contact));
++    ASSERT_EQ("112", contact.phoneNumber);
++    ASSERT_EQ("", contact.firstName);
++
++    // No number: unchanged
++    contact.phoneNumber = "kept";
++    for (const char *bad: {"", "BEGIN:VCARD\r\nFN:Ada\r\nEND:VCARD", "BEGIN:VCARD\r\nTEL:\r\nEND:VCARD",
++                           "BEGIN:VCARD\r\nTEL;TYPE=CELL\r\nEND:VCARD", "TELEPHONE:555", "not a card"})
++    {
++        ASSERT_FALSE(webos::parseVCardContact(bad, contact)) << bad;
++        ASSERT_EQ("kept", contact.phoneNumber);
++    }
++}
++
++TEST(WebosSendTest, PhoneDigits)
++{
++    ASSERT_EQ("442079460000", webos::phoneDigits("+44 (20) 7946-0000"));
++    ASSERT_EQ("", webos::phoneDigits("+ -"));
++    ASSERT_EQ("", webos::phoneDigits(""));
++}
++
++TEST_F(WebosCommandTest, SendContact)
++{
++    login();
++    PurpleConversation *conv = purple_conversation_new(PURPLE_CONV_TYPE_IM, account, purpleUserName(0).c_str());
++    prpl.discardEvents();
++
++    // Someone not on Telegram, as far as we know
++    char card[] = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Ada Lovelace\r\nN:Lovelace;Ada;;;\r\n"
++                  "TEL;TYPE=CELL:+44 20 7946 0000\r\nEND:VCARD\r\n";
++    const char *cardText = "Ada Lovelace +44 20 7946 0000";
++    purple_conversation_set_data(conv, "webos-send-contact", card);
++    ASSERT_EQ(0, pluginInfo().send_im(connection, purpleUserName(0).c_str(), cardText, PURPLE_MESSAGE_SEND));
++    tgl.verifyRequest(*makeSendMessage(chatIds[0], 0, nullptr, nullptr, nullptr,
++        make_object<inputMessageContact>(make_object<contact>("+44 20 7946 0000", "Ada", "Lovelace", card, 0))
++    ));
++    ASSERT_EQ(static_cast<gpointer>(card), purple_conversation_get_data(conv, "webos-send-contact"));
++
++    // Someone who is, by a number written another way
++    char knownCard[] = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Gottfried\r\nTEL:+0000-1\r\nEND:VCARD\r\n";
++    purple_conversation_set_data(conv, "webos-send-contact", knownCard);
++    ASSERT_EQ(0, pluginInfo().send_im(connection, purpleUserName(0).c_str(), "Gottfried", PURPLE_MESSAGE_SEND));
++    tgl.verifyRequest(*makeSendMessage(chatIds[0], 0, nullptr, nullptr, nullptr,
++        make_object<inputMessageContact>(make_object<contact>("+0000-1", "Gottfried", "", knownCard, userIds[0]))
++    ));
++
++    // No number: the text
++    char noNumber[] = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Ada Lovelace\r\nEND:VCARD\r\n";
++    purple_conversation_set_data(conv, "webos-send-contact", noNumber);
++    ASSERT_EQ(0, pluginInfo().send_im(connection, purpleUserName(0).c_str(), "Ada Lovelace", PURPLE_MESSAGE_SEND));
++    tgl.verifyRequest(*makeSendMessage(chatIds[0], 0, nullptr, nullptr, nullptr, makeText("Ada Lovelace")));
++    purple_conversation_set_data(conv, "webos-send-contact", nullptr);
++}
++
++TEST(WebosSendTest, ParseMentions)
++{
++    auto mentions = webos::parseMentions("id100\x1fGottfried\x1e" "\x1fNobody\x1e" "id101\x1f\x1e" "\x1e"
++                                         "id102\x1fGalileo Galilei");
++    ASSERT_EQ(2u, mentions.size());
++    ASSERT_EQ("id100", mentions[0].id);
++    ASSERT_EQ("Gottfried", mentions[0].name);
++    ASSERT_EQ("id102", mentions[1].id);
++    ASSERT_EQ("Galileo Galilei", mentions[1].name);
++    ASSERT_TRUE(webos::parseMentions(nullptr).empty());
++    ASSERT_TRUE(webos::parseMentions("").empty());
++    ASSERT_TRUE(webos::parseMentions("id100").empty());
++}
++
++TEST(WebosSendTest, Utf16Length)
++{
++    ASSERT_EQ(0u, webos::utf16Length("", 0));
++    ASSERT_EQ(3u, webos::utf16Length("abc", 3));
++    // Two bytes, three bytes: one unit each; four bytes: a surrogate pair
++    ASSERT_EQ(2u, webos::utf16Length("Ж€", strlen("Ж€")));
++    ASSERT_EQ(2u, webos::utf16Length("😀", strlen("😀")));
++    ASSERT_EQ(5u, webos::utf16Length("a😀Ж€", strlen("a😀Ж€")));
++}
++
++static std::vector<std::string> spansOf(const std::string &text, const std::vector<webos::MentionRecord> &mentions)
++{
++    std::vector<std::string> result;
++    for (const webos::MentionSpan &span: webos::findMentionSpans(text, mentions))
++        result.push_back(std::to_string(span.record) + "@" + std::to_string(span.offset) + "+" +
++                         std::to_string(span.length));
++    return result;
++}
++
++TEST(WebosSendTest, MentionSpans)
++{
++    using Spans = std::vector<std::string>;
++    std::vector<webos::MentionRecord> one = {{"id100", "Gottfried"}};
++    ASSERT_EQ(Spans({"0@0+10"}), spansOf("@Gottfried, look", one));
++    ASSERT_EQ(Spans({"0@4+10"}), spansOf("Hi, @Gottfried", one));
++    // Counted in UTF-16: an emoji is two, Cyrillic one, before the mention and in it
++    ASSERT_EQ(Spans({"0@3+10"}), spansOf("😀 @Gottfried", one));
++    ASSERT_EQ(Spans({"0@7+10"}), spansOf("Привет @Gottfried", one));
++    std::vector<webos::MentionRecord> wide = {{"id100", "Готфрид 😀"}};
++    ASSERT_EQ(Spans({"0@2+11"}), spansOf("😀@Готфрид 😀!", wide));
++    // Not there
++    ASSERT_EQ(Spans(), spansOf("Gottfried", one));
++    ASSERT_EQ(Spans(), spansOf("", one));
++
++    // Two, given in the order of the text or not: in the order of the text, each found once
++    std::vector<webos::MentionRecord> two = {{"id100", "Gottfried"}, {"id101", "Galileo"}};
++    ASSERT_EQ(Spans({"0@0+10", "1@15+8"}), spansOf("@Gottfried and @Galileo", two));
++    ASSERT_EQ(Spans({"1@0+8", "0@13+10"}), spansOf("@Galileo and @Gottfried", two));
++
++    // The same name twice, each its own occurrence
++    std::vector<webos::MentionRecord> twice = {{"id100", "Ann"}, {"id101", "Ann"}};
++    ASSERT_EQ(Spans({"0@0+4", "1@9+4"}), spansOf("@Ann and @Ann", twice));
++    // One occurrence for two of them: the first, and none for the other
++    ASSERT_EQ(Spans({"0@0+4"}), spansOf("@Ann", twice));
++
++    // "@Ann" in "@Anna" only where nothing better is there
++    std::vector<webos::MentionRecord> prefix = {{"id100", "Ann"}, {"id101", "Anna"}};
++    ASSERT_EQ(Spans({"1@0+5", "0@10+4"}), spansOf("@Anna and @Ann", prefix));
++    ASSERT_EQ(Spans({"0@0+4"}), spansOf("@Anna", {{"id100", "Ann"}}));
++    ASSERT_EQ(Spans({"0@7+4"}), spansOf("@Ann_x @Ann", {{"id100", "Ann"}}));
++    ASSERT_EQ(Spans({"0@0+4"}), spansOf("@Ann, @Anna", {{"id100", "Ann"}}));
++}
++
++static object_ptr<textEntity> mentionOf(int32_t offset, int32_t length, int64_t userId)
++{
++    return make_object<textEntity>(offset, length, make_object<textEntityTypeMentionName>(userId));
++}
++
++TEST_F(WebosCommandTest, SendMentions)
++{
++    login();
++    tgl.update(standardUpdateUser(1));
++    addBasicGroup();
++    tgl.update(make_object<updateNewMessage>(makeMessage(
++        1, userIds[0], groupChatId, false, 10001, makeTextMessage("Who is in?")
++    )));
++    tgl.verifyRequest(viewMessages(groupChatId, {1}, nullptr, true));
++    prpl.discardEvents();
++    PurpleConversation *conv = purple_find_chat(connection, 2);
++    ASSERT_NE(nullptr, conv);
++    // The id of the message shown, left for the transport, which takes and frees it
++    g_free(purple_conversation_get_data(conv, "webos-msg-id"));
++    purple_conversation_set_data(conv, "webos-msg-id", nullptr);
++
++    // One by buddy name, one by display name, one no one known; HTML as send_im has it
++    std::string mentions = purpleUserName(0) + "\x1f" "Gottfried\x1e" +
++                           userFirstNames[1] + " " + userLastNames[1] + "\x1f" "Galileo\x1e"
++                           "id999\x1f" "Nobody";
++    purple_conversation_set_data(conv, "webos-send-mentions", const_cast<char *>(mentions.c_str()));
++    ASSERT_EQ(0, pluginInfo().chat_send(connection, 2, "😀 @Gottfried &lt;3 @Galileo, @Nobody", PURPLE_MESSAGE_SEND));
++    std::vector<object_ptr<textEntity>> entities;
++    entities.push_back(mentionOf(3, 10, userIds[0]));
++    entities.push_back(mentionOf(17, 8, userIds[1]));
++    tgl.verifyRequest(*makeSendMessage(groupChatId, 0, nullptr, nullptr, nullptr,
++        make_object<inputMessageText>(
++            make_object<formattedText>("😀 @Gottfried <3 @Galileo, @Nobody", std::move(entities)), nullptr, false
++        )
++    ));
++    ASSERT_EQ(static_cast<gpointer>(const_cast<char *>(mentions.c_str())),
++              purple_conversation_get_data(conv, "webos-send-mentions"));
++    purple_conversation_set_data(conv, "webos-send-mentions", nullptr);
++
++    // None: as before
++    ASSERT_EQ(0, pluginInfo().chat_send(connection, 2, "@Gottfried", PURPLE_MESSAGE_SEND));
++    tgl.verifyRequest(*makeSendMessage(groupChatId, 0, nullptr, nullptr, nullptr, makeText("@Gottfried")));
++}
++
++TEST_F(WebosCommandTest, SendMentionInPrivateChat)
++{
++    login();
++    PurpleConversation *conv = purple_conversation_new(PURPLE_CONV_TYPE_IM, account, purpleUserName(0).c_str());
++    prpl.discardEvents();
++    std::string mentions = purpleUserName(0) + "\x1f" "Gottfried";
++    purple_conversation_set_data(conv, "webos-send-mentions", const_cast<char *>(mentions.c_str()));
++    ASSERT_EQ(0, pluginInfo().send_im(connection, purpleUserName(0).c_str(), "Привет @Gottfried", PURPLE_MESSAGE_SEND));
++    std::vector<object_ptr<textEntity>> entities;
++    entities.push_back(mentionOf(7, 10, userIds[0]));
++    tgl.verifyRequest(*makeSendMessage(chatIds[0], 0, nullptr, nullptr, nullptr,
++        make_object<inputMessageText>(
++            make_object<formattedText>("Привет @Gottfried", std::move(entities)), nullptr, false
++        )
++    ));
++    purple_conversation_set_data(conv, "webos-send-mentions", nullptr);
++}
+diff --git a/webos-send.cpp b/webos-send.cpp
+new file mode 100644
+index 0000000..fe5234f
+--- /dev/null
++++ b/webos-send.cpp
+@@ -0,0 +1,328 @@
++#include "webos-send.h"
++#include <glib.h>
++#include <algorithm>
++#include <cerrno>
++#include <cmath>
++#include <cstring>
++
++namespace webos {
++
++// A whole decimal number, as TDLib's ids are written, and nothing else
++static bool parseId(const char *start, const char *end, int64_t &value)
++{
++    // g_ascii_strtoll would also take leading blanks and a '+'
++    if ((start == end) || !(g_ascii_isdigit(*start) || (*start == '-')))
++        return false;
++    std::string digits(start, end);
++    char       *past = nullptr;
++    errno = 0;
++    gint64 parsed = g_ascii_strtoll(digits.c_str(), &past, 10);
++    if ((errno != 0) || (past == digits.c_str()) || (*past != '\0') || (parsed == 0))
++        return false;
++    value = parsed;
++    return true;
++}
++
++bool parseServiceMessageId(const char *serviceMessageId, int64_t &chatId, int64_t &messageId)
++{
++    if (!serviceMessageId)
++        return false;
++    const char *colon = strchr(serviceMessageId, ':');
++    if (!colon)
++        return false;
++    int64_t chat, message;
++    if (!parseId(serviceMessageId, colon, chat) || !parseId(colon + 1, colon + strlen(colon), message))
++        return false;
++    chatId    = chat;
++    messageId = message;
++    return true;
++}
++
++std::vector<std::string> splitMembers(const char *membersJoined)
++{
++    std::vector<std::string> members;
++    if (!membersJoined)
++        return members;
++    const char *start = membersJoined;
++    while (true) {
++        const char *end = strchr(start, FieldSeparator);
++        size_t      len = end ? size_t(end - start) : strlen(start);
++        if (len != 0)
++            members.emplace_back(start, len);
++        if (!end)
++            break;
++        start = end + 1;
++    }
++    return members;
++}
++
++// A whole number in C's form, whatever the locale's decimal point
++static bool parseDegrees(const std::string &text, double limit, double &value)
++{
++    if (text.empty() || g_ascii_isspace(text[0]))
++        return false;
++    char *past = nullptr;
++    errno = 0;
++    double parsed = g_ascii_strtod(text.c_str(), &past);
++    if ((errno != 0) || (past == text.c_str()) || (*past != '\0') || !std::isfinite(parsed) ||
++        (parsed < -limit) || (parsed > limit))
++        return false;
++    value = parsed;
++    return true;
++}
++
++bool parseSendLocation(const char *location, SendLocation &result)
++{
++    if (!location)
++        return false;
++    const char *firstSep = strchr(location, FieldSeparator);
++    if (!firstSep)
++        return false;
++    const char *secondSep = strchr(firstSep + 1, FieldSeparator);
++    std::string latitude(location, firstSep);
++    std::string longitude = secondSep ? std::string(firstSep + 1, secondSep) : std::string(firstSep + 1);
++
++    SendLocation parsed;
++    if (!parseDegrees(latitude, 90, parsed.latitude) || !parseDegrees(longitude, 180, parsed.longitude))
++        return false;
++    if (secondSep)
++        parsed.name = secondSep + 1;
++    result = std::move(parsed);
++    return true;
++}
++
++// Lines of a vCard as they were before folding: a line that starts with a blank continues the one
++// before it, without the line break and that blank
++static std::vector<std::string> unfoldLines(const std::string &vcard)
++{
++    std::vector<std::string> lines;
++    size_t start = 0;
++    while (start < vcard.size()) {
++        size_t end = vcard.find('\n', start);
++        if (end == std::string::npos)
++            end = vcard.size();
++        std::string line = vcard.substr(start, end - start);
++        if (!line.empty() && (line.back() == '\r'))
++            line.pop_back();
++        if (!line.empty() && ((line[0] == ' ') || (line[0] == '\t')) && !lines.empty())
++            lines.back() += line.substr(1);
++        else
++            lines.push_back(std::move(line));
++        start = end + 1;
++    }
++    return lines;
++}
++
++static std::string trim(const std::string &s)
++{
++    size_t first = s.find_first_not_of(" \t");
++    if (first == std::string::npos)
++        return std::string();
++    size_t last = s.find_last_not_of(" \t");
++    return s.substr(first, last - first + 1);
++}
++
++// A text value without its backslash escapes; an escaped line break becomes a space, as a name or a
++// number has no use for one
++static std::string unescapeValue(const std::string &value)
++{
++    std::string result;
++    for (size_t i = 0; i < value.size(); i++) {
++        if ((value[i] == '\\') && (i + 1 < value.size())) {
++            char next = value[++i];
++            result += ((next == 'n') || (next == 'N')) ? ' ' : next;
++        } else
++            result += value[i];
++    }
++    return trim(result);
++}
++
++// A structured value split at the semicolons that are not escaped, each part unescaped
++static std::vector<std::string> splitStructured(const std::string &value)
++{
++    std::vector<std::string> parts(1);
++    for (size_t i = 0; i < value.size(); i++) {
++        if ((value[i] == '\\') && (i + 1 < value.size())) {
++            parts.back() += value[i];
++            parts.back() += value[++i];
++        } else if (value[i] == ';')
++            parts.emplace_back();
++        else
++            parts.back() += value[i];
++    }
++    for (std::string &part: parts)
++        part = unescapeValue(part);
++    return parts;
++}
++
++bool parseVCardContact(const std::string &vcard, SendContact &result)
++{
++    std::string phone, formattedName, givenName, familyName;
++    bool        haveN = false;
++
++    for (const std::string &line: unfoldLines(vcard)) {
++        // The name and parameters end at the first colon outside a quoted parameter value
++        size_t colon  = std::string::npos;
++        bool   quoted = false;
++        for (size_t i = 0; i < line.size(); i++) {
++            if (line[i] == '"')
++                quoted = !quoted;
++            else if ((line[i] == ':') && !quoted) {
++                colon = i;
++                break;
++            }
++        }
++        if (colon == std::string::npos)
++            continue;
++        std::string name  = line.substr(0, line.find(';') < colon ? line.find(';') : colon);
++        std::string value = line.substr(colon + 1);
++        size_t      dot   = name.rfind('.');
++        if (dot != std::string::npos)
++            name = name.substr(dot + 1);
++        for (char &c: name)
++            c = g_ascii_toupper(c);
++
++        if ((name == "TEL") && phone.empty()) {
++            // vCard 4.0 may give it as a URI, with parameters of its own after a semicolon
++            std::string number = value;
++            if (g_ascii_strncasecmp(number.c_str(), "tel:", 4) == 0)
++                number = number.substr(4, number.find(';') == std::string::npos ? std::string::npos
++                                                                                 : number.find(';') - 4);
++            phone = unescapeValue(number);
++        } else if ((name == "FN") && formattedName.empty())
++            formattedName = unescapeValue(value);
++        else if ((name == "N") && !haveN) {
++            // Family name; given name; additional names; prefixes; suffixes
++            std::vector<std::string> parts = splitStructured(value);
++            familyName = parts[0];
++            givenName  = (parts.size() > 1) ? parts[1] : std::string();
++            haveN      = true;
++        }
++    }
++
++    if (phone.empty())
++        return false;
++    SendContact contact;
++    contact.phoneNumber = phone;
++    if (!givenName.empty()) {
++        contact.firstName = givenName;
++        contact.lastName  = familyName;
++    } else if (!formattedName.empty())
++        // FN is the whole name as shown, given and family name together
++        contact.firstName = formattedName;
++    else
++        contact.firstName = familyName;
++    result = std::move(contact);
++    return true;
++}
++
++std::string phoneDigits(const std::string &phoneNumber)
++{
++    std::string digits;
++    for (char c: phoneNumber)
++        if (g_ascii_isdigit(c))
++            digits += c;
++    return digits;
++}
++
++std::vector<MentionRecord> parseMentions(const char *mentionsJoined)
++{
++    std::vector<MentionRecord> mentions;
++    if (!mentionsJoined)
++        return mentions;
++    const char *start = mentionsJoined;
++    while (true) {
++        const char *end = strchr(start, RecordSeparator);
++        std::string record = end ? std::string(start, end) : std::string(start);
++        size_t      sep    = record.find(FieldSeparator);
++        if ((sep != std::string::npos) && (sep != 0) && (sep + 1 < record.size())) {
++            MentionRecord mention;
++            mention.id   = record.substr(0, sep);
++            mention.name = record.substr(sep + 1);
++            mentions.push_back(std::move(mention));
++        }
++        if (!end)
++            break;
++        start = end + 1;
++    }
++    return mentions;
++}
++
++size_t utf16Length(const char *utf8, size_t bytes)
++{
++    size_t length = 0;
++    for (size_t i = 0; i < bytes; i++) {
++        unsigned char c = static_cast<unsigned char>(utf8[i]);
++        // A character starts at any byte but a continuation byte, and one of four bytes, outside
++        // the Basic Multilingual Plane, is a surrogate pair
++        if ((c & 0xC0) != 0x80)
++            length += (c >= 0xF0) ? 2 : 1;
++    }
++    return length;
++}
++
++namespace {
++struct ByteSpan {
++    size_t record;
++    size_t start;
++    size_t end;
++};
++}
++
++static bool endsAtWordEnd(const std::string &text, size_t end)
++{
++    if (end >= text.size())
++        return true;
++    char c = text[end];
++    return !(g_ascii_isalnum(c) || (c == '_'));
++}
++
++static bool overlaps(const std::vector<ByteSpan> &spans, size_t start, size_t end)
++{
++    return std::any_of(spans.begin(), spans.end(),
++                       [start, end](const ByteSpan &span) { return (start < span.end) && (span.start < end); });
++}
++
++// The first place from `from` on where the needle is, not overlapping a span found already, and,
++// if asked, ending where a word does
++static size_t findFree(const std::string &text, const std::string &needle, size_t from,
++                       const std::vector<ByteSpan> &spans, bool wordEnd)
++{
++    for (size_t pos = text.find(needle, from); pos != std::string::npos; pos = text.find(needle, pos + 1))
++        if (!overlaps(spans, pos, pos + needle.size()) && (!wordEnd || endsAtWordEnd(text, pos + needle.size())))
++            return pos;
++    return std::string::npos;
++}
++
++std::vector<MentionSpan> findMentionSpans(const std::string &text, const std::vector<MentionRecord> &mentions)
++{
++    std::vector<ByteSpan> spans;
++    size_t                cursor = 0;
++    for (size_t i = 0; i < mentions.size(); i++) {
++        if (mentions[i].name.empty())
++            continue;
++        std::string needle = "@" + mentions[i].name;
++        size_t pos = findFree(text, needle, cursor, spans, true);
++        if (pos == std::string::npos)
++            pos = findFree(text, needle, 0, spans, true);
++        if (pos == std::string::npos)
++            pos = findFree(text, needle, 0, spans, false);
++        if (pos == std::string::npos)
++            continue;
++        spans.push_back(ByteSpan{i, pos, pos + needle.size()});
++        cursor = pos + needle.size();
++    }
++
++    std::sort(spans.begin(), spans.end(), [](const ByteSpan &a, const ByteSpan &b) { return a.start < b.start; });
++    std::vector<MentionSpan> result;
++    for (const ByteSpan &span: spans) {
++        MentionSpan mention;
++        mention.record = span.record;
++        mention.offset = static_cast<int32_t>(utf16Length(text.data(), span.start));
++        mention.length = static_cast<int32_t>(utf16Length(text.data() + span.start, span.end - span.start));
++        result.push_back(mention);
++    }
++    return result;
++}
++
++} // namespace webos
+diff --git a/webos-send.h b/webos-send.h
+new file mode 100644
+index 0000000..032d995
+--- /dev/null
++++ b/webos-send.h
+@@ -0,0 +1,83 @@
++#ifndef _WEBOS_SEND_H
++#define _WEBOS_SEND_H
++
++// What imlibpurpleservice, the webOS Messaging transport, hands the plug-in around an outgoing
++// message or a message command, taken apart. Nothing in here knows about TDLib or libpurple, so
++// that the unit tests can call it as it is.
++
++#include <cstdint>
++#include <string>
++#include <vector>
++
++namespace webos {
++
++// Between the fields of a record, and between records
++constexpr char FieldSeparator  = '\x1f';
++constexpr char RecordSeparator = '\x1e';
++
++// A serviceMessageId, as the plug-in gives one to each message it shows: "<chatId>:<messageId>".
++// False unless both are there and neither is 0.
++bool parseServiceMessageId(const char *serviceMessageId, int64_t &chatId, int64_t &messageId);
++
++// The members of a group command, as the transport joins them with FieldSeparator: each one's
++// buddy name, in order, without empty ones
++std::vector<std::string> splitMembers(const char *membersJoined);
++
++// What imlibpurpleservice puts with an outgoing message as conversation data, copied in send_im or
++// chat_send: the transport frees it as soon as they return. Empty where not given.
++struct OutgoingExtras {
++    std::string location;  // "webos-send-location"
++    std::string contact;   // "webos-send-contact"
++    std::string mentions;  // "webos-send-mentions"
++};
++
++// "webos-send-location": "<latitude>\x1f<longitude>\x1f<name>", in degrees, the name optional (the
++// field and its separator may both be missing). False unless both numbers are whole, finite and
++// within range.
++struct SendLocation {
++    double      latitude  = 0;
++    double      longitude = 0;
++    std::string name;
++};
++bool parseSendLocation(const char *location, SendLocation &result);
++
++// "webos-send-contact": a vCard (3.0, as the app writes it; 2.1 and 4.0 read alike as far as this
++// goes), of which the first TEL is the number, and N, else FN, the name. Lines may be folded, and
++// properties grouped ("item1.TEL"). False unless there is a number. The first name is never empty
++// where there is any name: TDLib's contact has the first name to show.
++struct SendContact {
++    std::string phoneNumber;
++    std::string firstName;
++    std::string lastName;
++};
++bool parseVCardContact(const std::string &vcard, SendContact &result);
++
++// A phone number as TDLib writes a user's: its digits alone, without the spaces, dashes, brackets
++// or leading "+" a card may have. Empty if there are no digits.
++std::string phoneDigits(const std::string &phoneNumber);
++
++// "webos-send-mentions": records "<id>\x1f<name>" joined by "\x1e", the id being the buddy name of
++// whom the text names as "@<name>". Records without both are left out.
++struct MentionRecord {
++    std::string id;
++    std::string name;
++};
++std::vector<MentionRecord> parseMentions(const char *mentionsJoined);
++
++// Where in a text each mention's "@<name>" is, in UTF-16 code units as TDLib's text entities count:
++// one span for each record found, in the order of the text, none overlapping another. A mention is
++// looked for after the one before it first, then anywhere; one followed by a letter, digit or '_'
++// ("@Ann" in "@Anna") only where there is no other.
++struct MentionSpan {
++    size_t  record; // index into the records
++    int32_t offset;
++    int32_t length;
++};
++std::vector<MentionSpan> findMentionSpans(const std::string &text, const std::vector<MentionRecord> &mentions);
++
++// The length in UTF-16 code units of so many bytes of UTF-8
++size_t utf16Length(const char *utf8, size_t bytes);
++
++} // namespace webos
++
++#endif
