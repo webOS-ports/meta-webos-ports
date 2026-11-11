@@ -43,7 +43,35 @@ if ! omx_up && getprop 2>/dev/null | grep -qiE '^\[init\.svc\.[^]]*(omx|mediacod
     done
 fi
 
+# The unbounded wait only happens for a service some VINTF manifest declares:
+# hwservicemanager answers at once for one that nobody declares. A vendor that
+# ships Codec2 and no OMX at all (the BraX3's Android 16 MediaTek vendor:
+# android.hardware.media.c2 only, IOmxStore in no manifest, only in the
+# system's compatibility matrices) therefore loads gst-droid without hanging -
+# measured there, gst-inspect-1.0 droidcamsrc returned in 2 s - and needs it
+# for droidcamsrc. Compatibility matrices list what a framework may use, not
+# what a device provides, so only manifests count.
+omx_declared() {
+    for d in /vendor/etc/vintf /odm/etc/vintf \
+             /android/vendor/etc/vintf /android/odm/etc/vintf \
+             /android/system/etc/vintf /android/system_ext/etc/vintf \
+             /android/product/etc/vintf; do
+        [ -d "$d" ] || continue
+        for f in "$d"/manifest.xml "$d"/manifest_*.xml "$d"/manifest/*.xml; do
+            [ -f "$f" ] && grep -q 'android.hardware.media.omx' "$f" && return 0
+        done
+    done
+    return 1
+}
+
+REASON=""
 if omx_up; then
+    REASON="${SERVICE} is registered"
+elif ! omx_declared; then
+    REASON="no VINTF manifest declares android.hardware.media.omx, so nothing can wait for it"
+fi
+
+if [ -n "${REASON}" ]; then
     # Preserve an existing GST_PLUGIN_PATH rather than clobbering it, and do
     # not append twice if this unit is restarted: the value set below is
     # inherited by everything systemd starts afterwards, this script included.
@@ -87,7 +115,7 @@ if omx_up; then
     # one of them rescanned every plugin in memory each time it started. A valid registry only has
     # to be readable to be used; nothing in it is private.
     chmod 0644 "${CACHE}"/gstreamer-1.0/registry*.bin 2>/dev/null
-    echo "gst-droid-gate: ${SERVICE} is registered, added ${PLUGINDIR} to GST_PLUGIN_PATH"
+    echo "gst-droid-gate: ${REASON}, added ${PLUGINDIR} to GST_PLUGIN_PATH"
 else
     echo "gst-droid-gate: ${SERVICE} is not registered; leaving gst-droid out of the"
     echo "gst-droid-gate: plugin path. Hardware codecs and droidcamsrc are unavailable,"

@@ -1,0 +1,99 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 4 Nov 2026 17:01:15 +0100
+Subject: [PATCH 09/20] droidcodec: check the size of codec_data and ADTS
+ frames before reading them
+
+Three parsers read past the data they were given:
+
+- create_h265dec_codec_data_from_codec_data() takes lengthSizeMinusOne
+  from byte 21 of the hvcC record, but only checked for 7 bytes, so a
+  short codec_data was read 15 bytes past its end. A record is at least
+  23 bytes long.
+
+- create_aacdec_codec_data_from_frame_data() takes the sample rate,
+  object type and channels from bytes 2 and 3 of the first frame without
+  checking its size at all. Check that the frame holds an ADTS header.
+
+- process_aacdec_data() strips a 7 or 9 byte ADTS header from every
+  frame. For a frame shorter than that, info.size - header_size wrapped
+  round to a huge size, which was allocated and copied from. Return an
+  error for such a frame instead. It read data[1] of an empty frame too.
+
+Copy the data with g_memdup2(), which handles a size of 0: memcpy() into
+the NULL that g_malloc(0) returns is undefined.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/sailfishos/gst-droid/pull/91]
+---
+ gst-libs/gst/droid/gstdroidcodec.c | 35 ++++++++++++++++++++++++------
+ 1 file changed, 28 insertions(+), 7 deletions(-)
+
+diff --git a/gst-libs/gst/droid/gstdroidcodec.c b/gst-libs/gst/droid/gstdroidcodec.c
+index 09e41a9..dbf41be 100644
+--- a/gst-libs/gst/droid/gstdroidcodec.c
++++ b/gst-libs/gst/droid/gstdroidcodec.c
+@@ -771,7 +771,9 @@ create_h265dec_codec_data_from_codec_data (GstDroidCodec * codec,
+     return FALSE;
+   }
+ 
+-  if (info.size < 7 || info.data[0] != 1) {
++  /* HEVCDecoderConfigurationRecord: lengthSizeMinusOne is in byte 21, and
++   * the record is at least 23 bytes long (up to numOfArrays) */
++  if (info.size < 23 || info.data[0] != 1) {
+     GST_ERROR ("malformed codec_data");
+     goto out;
+   }
+@@ -914,12 +916,18 @@ create_aacdec_codec_data_from_frame_data (GstDroidCodec * codec,
+ 
+   GST_INFO ("constructing ADTS codec_data");
+ 
+-  // TODO: size, TODO: error
+   if (!gst_buffer_map (frame_data, &info, GST_MAP_READ)) {
+     GST_ERROR ("failed to map buffer");
+     return FALSE;
+   }
+ 
++  /* the fields used below are in the first 4 bytes of the 7 byte header */
++  if (info.size < 7 || info.data[0] != 0xff || (info.data[1] & 0xf0) != 0xf0) {
++    GST_ERROR ("not an ADTS frame");
++    gst_buffer_unmap (frame_data, &info);
++    return FALSE;
++  }
++
+   sr_idx = (info.data[2] & 0x3c) >> 2;
+   object = ((info.data[2] & 0xc0) >> 6) + 1;
+   channels = ((info.data[2] & 0x01) << 2) | ((info.data[3] & 0xc0) >> 6);
+@@ -1070,14 +1078,27 @@ process_aacdec_data (GstDroidCodec * codec, GstBuffer * buffer,
+ 
+   if (!codec->data->aac_adts) {
+     out->size = info.size;
+-    out->data = g_malloc (info.size);
+-    memcpy (out->data, info.data, info.size);
++    out->data = g_memdup2 (info.data, info.size);
+   } else {
+     /* stolen from gstaacparse.c */
+-    guint header_size = (info.data[1] & 1) ? 7 : 9;     /* optional CRC */
++    guint header_size;
++
++    if (info.size < 2) {
++      GST_ERROR ("ADTS frame of %" G_GSIZE_FORMAT " bytes", info.size);
++      gst_buffer_unmap (buffer, &info);
++      return FALSE;
++    }
++
++    header_size = (info.data[1] & 1) ? 7 : 9;   /* optional CRC */
++    if (info.size < header_size) {
++      GST_ERROR ("ADTS frame of %" G_GSIZE_FORMAT " bytes, shorter than its "
++          "%u byte header", info.size, header_size);
++      gst_buffer_unmap (buffer, &info);
++      return FALSE;
++    }
++
+     out->size = info.size - header_size;
+-    out->data = g_malloc (out->size);
+-    memcpy (out->data, info.data + header_size, out->size);
++    out->data = g_memdup2 (info.data + header_size, out->size);
+     GST_LOG ("stripping %d bytes", header_size);
+   }
+ 

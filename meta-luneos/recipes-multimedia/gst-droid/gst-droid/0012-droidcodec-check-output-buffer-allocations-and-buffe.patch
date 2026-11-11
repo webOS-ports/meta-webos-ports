@@ -1,0 +1,119 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 4 Nov 2026 17:02:59 +0100
+Subject: [PATCH 12/20] droidcodec: check output buffer allocations and buffer
+ maps
+
+- droidvdec: gst_video_decoder_allocate_output_buffer() returns NULL
+  while the pool is inactive, when the decoder is flushing or shutting
+  down. The NULL then failed in gst_buffer_add_video_meta() and the
+  conversion, and the frame turned into a GST_FLOW_ERROR, which stays in
+  downstream_flow_ret. Return GST_FLOW_FLUSHING for it instead.
+
+- droidadec: the output buffer was neither checked after allocation
+  nor after mapping, and the decoded data was copied into whatever
+  map.data held. Map it for writing only, as nothing is read from it.
+
+- droidaenc: the output buffer was filled without checking that it was
+  allocated, and the input buffer was copied from without checking that
+  it was mapped.
+
+- droidvenc: the input frame was handed to the codec without checking
+  that it was mapped.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/sailfishos/gst-droid/pull/91]
+---
+ gst/droidcodec/gstdroidadec.c | 13 ++++++++++++-
+ gst/droidcodec/gstdroidaenc.c | 11 ++++++++++-
+ gst/droidcodec/gstdroidvdec.c |  6 ++++++
+ gst/droidcodec/gstdroidvenc.c |  5 ++++-
+ 4 files changed, 32 insertions(+), 3 deletions(-)
+
+diff --git a/gst/droidcodec/gstdroidadec.c b/gst/droidcodec/gstdroidadec.c
+index ee89808..c7dbe92 100644
+--- a/gst/droidcodec/gstdroidadec.c
++++ b/gst/droidcodec/gstdroidadec.c
+@@ -171,8 +171,19 @@ gst_droidadec_data_available (void *data, DroidMediaCodecData * encoded)
+   }
+ 
+   out = gst_audio_decoder_allocate_output_buffer (decoder, encoded->data.size);
++  if (G_UNLIKELY (!out)) {
++    GST_ERROR_OBJECT (dec, "failed to allocate %" G_GSSIZE_FORMAT " bytes",
++        encoded->data.size);
++    flow_ret = GST_FLOW_ERROR;
++    goto out;
++  }
+ 
+-  gst_buffer_map (out, &map, GST_MAP_READWRITE);
++  if (!gst_buffer_map (out, &map, GST_MAP_WRITE)) {
++    GST_ERROR_OBJECT (dec, "failed to map the output buffer");
++    gst_buffer_unref (out);
++    flow_ret = GST_FLOW_ERROR;
++    goto out;
++  }
+   orc_memcpy (map.data, encoded->data.data, encoded->data.size);
+   gst_buffer_unmap (out, &map);
+ 
+diff --git a/gst/droidcodec/gstdroidaenc.c b/gst/droidcodec/gstdroidaenc.c
+index 25f5da8..250d1e0 100644
+--- a/gst/droidcodec/gstdroidaenc.c
++++ b/gst/droidcodec/gstdroidaenc.c
+@@ -265,6 +265,12 @@ gst_droidaenc_data_available (void *data, DroidMediaCodecData * encoded)
+   buffer =
+       gst_audio_encoder_allocate_output_buffer (GST_AUDIO_ENCODER (enc),
+       encoded->data.size);
++  if (G_UNLIKELY (!buffer)) {
++    GST_ERROR_OBJECT (enc, "failed to allocate %" G_GSSIZE_FORMAT " bytes",
++        encoded->data.size);
++    flow_ret = GST_FLOW_ERROR;
++    goto out;
++  }
+   gst_buffer_fill (buffer, 0, encoded->data.data, encoded->data.size);
+ 
+   GST_BUFFER_PTS (buffer) = encoded->ts;
+@@ -511,7 +517,10 @@ gst_droidaenc_handle_frame (GstAudioEncoder * encoder, GstBuffer * buffer)
+ 
+   enc->finished = FALSE;
+ 
+-  gst_buffer_map (buffer, &info, GST_MAP_READ);
++  if (!gst_buffer_map (buffer, &info, GST_MAP_READ)) {
++    GST_ERROR_OBJECT (enc, "failed to map the input buffer");
++    goto error;
++  }
+   data.data.size = info.size;
+   data.data.data = g_malloc (info.size);
+   data.sync = false;
+diff --git a/gst/droidcodec/gstdroidvdec.c b/gst/droidcodec/gstdroidvdec.c
+index b7f8ed5..304239a 100644
+--- a/gst/droidcodec/gstdroidvdec.c
++++ b/gst/droidcodec/gstdroidvdec.c
+@@ -643,6 +643,12 @@ gst_droidvdec_data_available (void *data, DroidMediaCodecData * encoded)
+   }
+ 
+   buff = gst_video_decoder_allocate_output_buffer (decoder);
++  if (G_UNLIKELY (!buff)) {
++    /* the pool is not active: we are flushing or shutting down */
++    GST_DEBUG_OBJECT (dec, "no output buffer, dropping the decoded frame");
++    flow_ret = GST_FLOW_FLUSHING;
++    goto out;
++  }
+ 
+   gst_buffer_add_video_meta (buff, GST_VIDEO_FRAME_FLAG_NONE,
+       GST_VIDEO_FORMAT_I420, dec->out_state->info.width,
+diff --git a/gst/droidcodec/gstdroidvenc.c b/gst/droidcodec/gstdroidvenc.c
+index 8fb4ff3..9f2fdd7 100644
+--- a/gst/droidcodec/gstdroidvenc.c
++++ b/gst/droidcodec/gstdroidvenc.c
+@@ -586,7 +586,10 @@ gst_droidvenc_handle_frame (GstVideoEncoder * encoder,
+     enc->dirty = FALSE;
+   }
+ 
+-  gst_buffer_map (frame->input_buffer, &info, GST_MAP_READ);
++  if (!gst_buffer_map (frame->input_buffer, &info, GST_MAP_READ)) {
++    GST_ERROR_OBJECT (enc, "failed to map the input frame");
++    goto error;
++  }
+   data.data.size = info.size;
+   data.data.data = info.data;
+   data.sync = false;
