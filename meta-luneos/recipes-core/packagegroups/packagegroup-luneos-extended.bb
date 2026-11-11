@@ -299,6 +299,14 @@ IR_BLASTER_RDEPENDS = " \
 # Printing. luneos-print-adapter serves the webOS print API (com.palm.printmgr,
 # what the enyo print dialog in Atlas and Email call) and the flatter
 # org.webosports.service.print the Settings Print Manager page calls, both on
+# FM radio: fmradiod turns the receiver on and tunes it (MediaTek /dev/fm,
+# Qualcomm radio-iris /dev/radio0), and the Music app plays it. Only for
+# machines that declare the "fm-radio" feature: the receiver needs the wired
+# headphones as antenna and an audio HAL that module-droid-fm can drive.
+FM_RADIO_RDEPENDS = " \
+    org.webosports.service.fmradio \
+"
+
 # top of CUPS. Not gated on a machine: anything with a network can print, and
 # discovery is mDNS, so there is no hardware to be present or absent.
 #
@@ -444,7 +452,7 @@ RDEPENDS:${PN}:append:tissot-halium = " wcnss-filter-fixup"
 # in the wrong place and got it wrong - radon shipped nfcd and biomd for hardware
 # the FLX1s has no HAL for. The machine declares what it has; this only maps that
 # to packages. nfc is the standard OE feature; fingerprint, esim, faceunlock,
-# ir-blaster, keyboard-touch and trackpad are LuneOS-specific.
+# ir-blaster, fm-radio, keyboard-touch and trackpad are LuneOS-specific.
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'fingerprint', ' ${FINGERPRINT_RDEPENDS}', '', d)}"
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'nfc',         ' ${NFC_RDEPENDS}',         '', d)}"
 RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'esim',        ' ${ESIM_RDEPENDS}',        '', d)}"
@@ -459,6 +467,7 @@ RDEPENDS:${PN}:append = "${@bb.utils.contains_any('MACHINE_FEATURES', 'keyboard-
 # neither builds a rootfs of its own - they build a boot image and run
 # halium-arm64's - so the line above evaluates against halium-arm64's
 # MACHINE_FEATURES, which has neither, and kbdscroll never reached either
+RDEPENDS:${PN}:append = "${@bb.utils.contains('MACHINE_FEATURES', 'fm-radio',    ' ${FM_RADIO_RDEPENDS}',    '', d)}"
 # device. Same shape as 70-q25.rules and the luneos-device-config adaptations:
 # ship it on the generic image and let the runtime decide.
 #
