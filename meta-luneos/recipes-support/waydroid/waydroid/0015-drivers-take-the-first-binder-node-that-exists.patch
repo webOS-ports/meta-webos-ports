@@ -1,0 +1,69 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 12 Nov 2026 06:14:06 +0100
+Subject: [PATCH] drivers: take the first binder node that exists
+
+The MAINLINE branch of setupBinderNodes() walks BINDER_DRIVERS,
+VNDBINDER_DRIVERS and HWBINDER_DRIVERS without stopping at a match, so
+the last node found wins. The lists put Waydroid's own anbox-* nodes
+first, so wherever both exist the container gets the plain /dev/binder.
+
+On a Halium host that node belongs to the host's Android. A vendor that
+sets no ro.vndk.version - the BraX3's SDK 36 vendor has none - makes
+get_vendor_type() answer MAINLINE, so the container shared the host
+binder. Its vold then could not register with a service manager that
+already has a vold ("Unable to start VoldNativeService"), and init
+rebooted the container two seconds into every start
+("reboot,vold-failed").
+
+Stop at the first match, as the HALIUM branch is meant to. Hosts with
+only the plain nodes get the same result as before.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ tools/helpers/drivers.py | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/tools/helpers/drivers.py b/tools/helpers/drivers.py
+index 3045ee5..b7279df 100644
+--- a/tools/helpers/drivers.py
++++ b/tools/helpers/drivers.py
+@@ -124,10 +124,18 @@ def setupBinderNodes(args):
+     has_hwbinder = False
+     if args.vendor_type == "MAINLINE":
+         probeBinderDriver(args)
++        # Take the first node that exists. The lists put Waydroid's own
++        # anbox-* nodes ahead of the plain ones, and without the break the
++        # last match won instead - the host's /dev/binder wherever both exist.
++        # On a Halium host whose vendor sets no ro.vndk.version (the BraX3's
++        # SDK 36 vendor has none) the vendor type comes out MAINLINE, and sharing
++        # the host Android's binder makes the container's vold fail to register
++        # with a service manager that already has one, so init reboots it.
+         for node in BINDER_DRIVERS:
+             if os.path.exists("/dev/" + node):
+                 has_binder = True
+                 args.BINDER_DRIVER = node
++                break
+         if not has_binder:
+             raise OSError('Binder node "binder" for waydroid not found')
+ 
+@@ -135,6 +143,7 @@ def setupBinderNodes(args):
+             if os.path.exists("/dev/" + node):
+                 has_vndbinder = True
+                 args.VNDBINDER_DRIVER = node
++                break
+         if not has_vndbinder:
+             raise OSError('Binder node "vndbinder" for waydroid not found')
+ 
+@@ -142,6 +151,7 @@ def setupBinderNodes(args):
+             if os.path.exists("/dev/" + node):
+                 has_hwbinder = True
+                 args.HWBINDER_DRIVER = node
++                break
+         if not has_hwbinder:
+             raise OSError('Binder node "hwbinder" for waydroid not found')
+     else:
+-- 
+2.53.0
+
