@@ -13,7 +13,9 @@ inherit webos_ports_repo
 inherit qt6-qmake
 inherit pkgconfig
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+           file://0001-Make-the-LuneOS-plugin-the-default-position-source.patch \
+"
 
 FILES:${PN} += " \
     ${OE_QMAKE_PATH_PLUGINS} \
