@@ -348,14 +348,58 @@ log "codename=$codename api=$api_level density=$density panel=${panel_w}x${panel
 #   nfcd: [gbinder] WARNING! registerForNotifications(
 #         android.hardware.nfc.INfc/default) tx error -2147483647
 #
+# That holds for /dev/vndbinder (vndservicemanager and the vendor's services)
+# and /dev/hwbinder, but not for /dev/binder: its servicemanager belongs to the
+# Android system image in the container, and the halium system image can be
+# much newer than the vendor. ApiLevel alone then picks the vendor's protocol
+# for /dev/binder too, and the system servicemanager doesn't understand it.
+# Measured with the libgbinder 1.1.52 in the image, system SDK 36 everywhere:
+#
+#   mako    vendor 28: checkService("sensorservice") -> BAD_TYPE, list empty
+#   titan   vendor 29: checkService("sensorservice") -> BAD_TYPE, list empty
+#   Mindset vendor 30: IVibrator/default "not found" while the HAL was running
+#                      (status 0, no object), list empty
+#
+# All three found the service and listed 36-39 entries once /dev/binder was
+# configured for SDK 36. So when the system SDK differs from the vendor's,
+# /dev/binder gets explicit entries for the system SDK, and ApiLevel keeps
+# covering everything else. Explicit entries win over the ApiLevel presets.
+# Only names libgbinder 1.1.52 already knows are written here.
+#
+# gbinder_binder_presets mirrors the /dev/binder presets in libgbinder's
+# gbinder_config.c: "protocol servicemanager" of the highest preset <= sdk.
+gbinder_binder_presets() {
+    if [ "$1" -ge 36 ]; then echo "aidl3 aidl6"
+    elif [ "$1" -ge 35 ]; then echo "aidl3 aidl5"
+    elif [ "$1" -ge 33 ]; then echo "aidl3 aidl3"
+    elif [ "$1" -ge 31 ]; then echo "aidl4 aidl3"
+    elif [ "$1" -ge 30 ]; then echo "aidl3 aidl3"
+    elif [ "$1" -ge 29 ]; then echo "aidl2 aidl2"
+    else echo "aidl aidl2"
+    fi
+}
+
+# gbinder_conf <vendor api level> <system sdk, may be empty>
+gbinder_conf() {
+    printf '[General]\nApiLevel = %s\n' "$1"
+    case "$1:${2:-}" in
+        *[!0-9:]*|:*|*:) return 0 ;;
+    esac
+    [ "$2" -ge 28 ] && [ "$2" -ne "$1" ] || return 0
+    set -- $(gbinder_binder_presets "$2")
+    printf '[Protocol]\n/dev/binder = %s\n[ServiceManager]\n/dev/binder = %s\n' \
+        "$1" "$2"
+}
+
 # Files in /etc/gbinder.d overwrite /etc/gbinder.conf (gbinder_config.c says so
 # in as many words), so this wins over the packaged default without replacing it.
 if [ -n "$api_level" ]; then
     gbconf=/etc/gbinder.d/10-luneos-device.conf
+    system_sdk=$(prop ro.build.version.sdk)
     if mkdir -p /etc/gbinder.d 2>/dev/null; then
-        printf '[General]\nApiLevel = %s\n' "$api_level" > "$gbconf".tmp 2>/dev/null &&
+        gbinder_conf "$api_level" "$system_sdk" > "$gbconf".tmp 2>/dev/null &&
             mv -f "$gbconf".tmp "$gbconf" 2>/dev/null &&
-            log "gbinder ApiLevel -> $api_level ($gbconf)" ||
+            log "gbinder ApiLevel -> $api_level, system SDK ${system_sdk:-unknown} ($gbconf)" ||
             log "WARNING: could not write $gbconf"
     fi
 else
