@@ -1,0 +1,331 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 12 Nov 2026 07:21:25 +0100
+Subject: [PATCH] [ofono] Make providers for modems that exist when voicecall
+ starts.
+
+The provider factory made a provider for each modem libqofono reported
+with modemAdded(), and for the modems QOfonoManager already listed when
+the plugin was configured. QOfonoManager learns the modems that exist
+from an asynchronous GetModems, at start and each time oFono comes back,
+and reports those with modemsChanged() alone. When the plugin is
+configured that reply is not in yet, so its list is empty.
+
+So a voicecall-manager started while oFono already runs had no
+providers at all. That is every restart: Restart=always after a crash,
+or a manual restart. No call could be made or received until a modem
+came or went, typically until oFono was restarted too. The same could
+happen to modems already present when oFono reappears after a restart.
+Seen on brax3 and sargo: "Unable to find voice call provider" for every
+modem after systemctl restart voicecall-manager.
+
+Follow modemsChanged() as well: add a provider for each listed modem
+that has none, and drop the providers of modems no longer listed.
+modemAdded() and modemRemoved() still work as before, and each modem
+gets one provider however it is announced.
+
+The tests drive the factory against a fake QOfonoManager that emits what
+libqofono emits in each case.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ .../src/ofonovoicecallproviderfactory.cpp     | 26 ++++++-
+ .../ofono/src/ofonovoicecallproviderfactory.h |  3 +
+ tests/fakes/ofono/fake_qofono.h               | 64 +++++++++++++++++
+ tests/fakes/ofono/qofonomanager.h             |  2 +
+ tests/ofono.pro                               |  8 ++-
+ tests/tst_ofonoprovider.cpp                   | 70 +++++++++++++++++++
+ 6 files changed, 168 insertions(+), 5 deletions(-)
+ create mode 100644 tests/fakes/ofono/qofonomanager.h
+
+diff --git a/plugins/providers/ofono/src/ofonovoicecallproviderfactory.cpp b/plugins/providers/ofono/src/ofonovoicecallproviderfactory.cpp
+index 7f5d79e..daf8d8a 100644
+--- a/plugins/providers/ofono/src/ofonovoicecallproviderfactory.cpp
++++ b/plugins/providers/ofono/src/ofonovoicecallproviderfactory.cpp
+@@ -87,12 +87,16 @@ bool OfonoVoiceCallProviderFactory::configure(VoiceCallManagerInterface *manager
+ 
+     QObject::connect(d->ofonoModemManager, SIGNAL(modemAdded(QString)), SLOT(onModemAdded(QString)));
+     QObject::connect(d->ofonoModemManager, SIGNAL(modemRemoved(QString)), SLOT(onModemRemoved(QString)));
++    // QOfonoManager learns the modems that already exist from an asynchronous
++    // GetModems, at start and each time oFono reappears, and reports those
++    // with modemsChanged() only, never modemAdded(). Started while oFono was
++    // already running (a restart after a crash), voicecall would otherwise
++    // have no providers at all until a modem came or went.
++    QObject::connect(d->ofonoModemManager, SIGNAL(modemsChanged(QStringList)), SLOT(onModemsChanged(QStringList)));
+ 
+     d->isConfigured = true;
+ 
+-    foreach (QString modemPath, d->ofonoModemManager->modems()) {
+-        this->onModemAdded(modemPath);
+-    }
++    onModemsChanged(d->ofonoModemManager->modems());
+ 
+     return true;
+ }
+@@ -139,6 +143,22 @@ void OfonoVoiceCallProviderFactory::onModemAdded(const QString &modemPath)
+     }
+ }
+ 
++void OfonoVoiceCallProviderFactory::onModemsChanged(const QStringList &modemPaths)
++{
++    TRACE
++    Q_D(OfonoVoiceCallProviderFactory);
++
++    const QStringList known = d->providers.keys();
++    for (const QString &modemPath : known) {
++        if (!modemPaths.contains(modemPath))
++            onModemRemoved(modemPath);
++    }
++    for (const QString &modemPath : modemPaths) {
++        if (!d->providers.contains(modemPath))
++            onModemAdded(modemPath);
++    }
++}
++
+ void OfonoVoiceCallProviderFactory::onModemRemoved(const QString &modemPath)
+ {
+     TRACE
+diff --git a/plugins/providers/ofono/src/ofonovoicecallproviderfactory.h b/plugins/providers/ofono/src/ofonovoicecallproviderfactory.h
+index 3200b41..461b7fb 100644
+--- a/plugins/providers/ofono/src/ofonovoicecallproviderfactory.h
++++ b/plugins/providers/ofono/src/ofonovoicecallproviderfactory.h
+@@ -23,6 +23,8 @@
+ 
+ #include <abstractvoicecallmanagerplugin.h>
+ 
++#include <QStringList>
++
+ class OfonoVoiceCallProviderFactory : public AbstractVoiceCallManagerPlugin
+ {
+     Q_OBJECT
+@@ -45,6 +47,7 @@ public Q_SLOTS:
+ protected Q_SLOTS:
+     void onModemAdded(const QString &modemPath);
+     void onModemRemoved(const QString &modemPath);
++    void onModemsChanged(const QStringList &modemPaths);
+ 
+ private:
+     class OfonoVoiceCallProviderFactoryPrivate *d_ptr;
+diff --git a/tests/fakes/ofono/fake_qofono.h b/tests/fakes/ofono/fake_qofono.h
+index 749ed52..c5e8ce9 100644
+--- a/tests/fakes/ofono/fake_qofono.h
++++ b/tests/fakes/ofono/fake_qofono.h
+@@ -185,4 +185,68 @@ private:
+     QStringList m_interfaces = initialInterfaces();
+ };
+ 
++class QOfonoManager : public QObject
++{
++    Q_OBJECT
++
++public:
++    explicit QOfonoManager(QObject *parent = 0) : QObject(parent), m_modems(initialModems()) { last() = this; }
++    ~QOfonoManager() { if (last() == this) last() = 0; }
++
++    static QOfonoManager *&last()
++    {
++        static QOfonoManager *manager = 0;
++        return manager;
++    }
++    // Modems the next manager already knows when it is created
++    static QStringList &initialModems()
++    {
++        static QStringList modems;
++        return modems;
++    }
++
++    QStringList modems() const { return m_modems; }
++
++    // Test controls, emitting what libqofono emits in each case:
++    // the GetModems reply (at start and when oFono reappears) only
++    // changes the list; ModemAdded and ModemRemoved also name the modem;
++    // oFono going away removes each modem.
++    void getModemsReply(const QStringList &modems)
++    {
++        m_modems = modems;
++        m_modems.sort();
++        emit modemsChanged(m_modems);
++    }
++    void addModem(const QString &path)
++    {
++        m_modems.append(path);
++        m_modems.sort();
++        emit modemAdded(path);
++        emit modemsChanged(m_modems);
++    }
++    void removeModem(const QString &path)
++    {
++        if (m_modems.removeOne(path)) {
++            emit modemRemoved(path);
++            emit modemsChanged(m_modems);
++        }
++    }
++    void ofonoGone()
++    {
++        const QStringList modems = m_modems;
++        for (const QString &path : modems)
++            emit modemRemoved(path);
++        m_modems.clear();
++        emit modemsChanged(m_modems);
++    }
++
++Q_SIGNALS:
++    void modemAdded(const QString &path);
++    void modemRemoved(const QString &path);
++    void modemsChanged(const QStringList &modems);
++
++private:
++    QStringList m_modems;
++};
++
+ #endif // FAKE_QOFONO_H
+diff --git a/tests/fakes/ofono/qofonomanager.h b/tests/fakes/ofono/qofonomanager.h
+new file mode 100644
+index 0000000..8873f73
+--- /dev/null
++++ b/tests/fakes/ofono/qofonomanager.h
+@@ -0,0 +1,2 @@
++// Test stand-in, see fake_qofono.h
++#include "fake_qofono.h"
+diff --git a/tests/ofono.pro b/tests/ofono.pro
+index 92711f2..6bcd8b8 100644
+--- a/tests/ofono.pro
++++ b/tests/ofono.pro
+@@ -7,6 +7,7 @@ OBJECTS_DIR = $$OUT_PWD/.obj/ofono
+ MOC_DIR = $$OUT_PWD/.moc/ofono
+ 
+ PROVIDER = ../plugins/providers/ofono/src
++DEFINES += PLUGIN_NAME=\\\"voicecall-ofono-plugin\\\"
+ 
+ # fakes/ofono stands in for libqofono
+ INCLUDEPATH += fakes/ofono fakes ../src ../lib/src $$PROVIDER
+@@ -15,10 +16,12 @@ HEADERS += \
+     fakes/ofono/fake_qofono.h \
+     ../lib/src/abstractvoicecallhandler.h \
+     ../lib/src/abstractvoicecallprovider.h \
++    ../lib/src/abstractvoicecallmanagerplugin.h \
+     ../lib/src/voicecallmanagerinterface.h \
+     ../src/voicecallmanager.h \
+     $$PROVIDER/ofonovoicecallhandler.h \
+-    $$PROVIDER/ofonovoicecallprovider.h
++    $$PROVIDER/ofonovoicecallprovider.h \
++    $$PROVIDER/ofonovoicecallproviderfactory.h
+ 
+ SOURCES += \
+     tst_ofonoprovider.cpp \
+@@ -26,7 +29,8 @@ SOURCES += \
+     ../lib/src/common.cpp \
+     ../src/voicecallmanager.cpp \
+     $$PROVIDER/ofonovoicecallhandler.cpp \
+-    $$PROVIDER/ofonovoicecallprovider.cpp
++    $$PROVIDER/ofonovoicecallprovider.cpp \
++    $$PROVIDER/ofonovoicecallproviderfactory.cpp
+ 
+ target.path = /opt/tests/voicecall/ofono
+ 
+diff --git a/tests/tst_ofonoprovider.cpp b/tests/tst_ofonoprovider.cpp
+index b0ee82b..4a6fdf3 100644
+--- a/tests/tst_ofonoprovider.cpp
++++ b/tests/tst_ofonoprovider.cpp
+@@ -23,6 +23,7 @@
+ 
+ #include "ofonovoicecallhandler.h"
+ #include "ofonovoicecallprovider.h"
++#include "ofonovoicecallproviderfactory.h"
+ #include "voicecallmanager.h"
+ 
+ #include "fake_qofono.h"
+@@ -63,6 +64,9 @@ private Q_SLOTS:
+     void callControlAfterInterfaceLoss();
+     void mergeAcrossModemsRefused();
+     void modemLossLeavesOtherModem();
++    void factoryTakesModemsListedLater();
++    void factoryTakesModemsKnownAtStart();
++    void factoryFollowsModemChanges();
+ 
+ private:
+     OfonoVoiceCallProvider *createProvider(const char *modemPath = ModemPath);
+@@ -79,6 +83,7 @@ void tst_OfonoProvider::init()
+ {
+     QOfonoModem::initialInterfaces() = QStringList() << QStringLiteral("org.ofono.VoiceCallManager");
+     QOfonoVoiceCall::presetStates().clear();
++    QOfonoManager::initialModems().clear();
+     m_manager = new VoiceCallManager;
+     m_provider = createProvider();
+ }
+@@ -459,6 +464,71 @@ void tst_OfonoProvider::modemLossLeavesOtherModem()
+     delete provider1;
+ }
+ 
++static QStringList providerIds(VoiceCallManagerInterface *manager)
++{
++    QStringList ids;
++    foreach (AbstractVoiceCallProvider *provider, manager->providers())
++        ids << provider->providerId();
++    ids.sort();
++    return ids;
++}
++
++// voicecall-manager restarted while oFono runs (Restart=always after a
++// crash): libqofono reports the modems it finds with modemsChanged() only,
++// once its GetModems reply is in. Every one of them needs a provider, or no
++// call can be made until a modem comes or goes.
++void tst_OfonoProvider::factoryTakesModemsListedLater()
++{
++    OfonoVoiceCallProviderFactory factory;
++    QVERIFY(factory.initialize());
++    QVERIFY(factory.configure(m_manager));
++    QCOMPARE(providerIds(m_manager), QStringList() << QStringLiteral("ofono-/ril_0"));
++
++    QOfonoManager::last()->getModemsReply(QStringList() << QStringLiteral("/ril_6") << QStringLiteral("/ril_5"));
++    QCOMPARE(providerIds(m_manager), QStringList() << QStringLiteral("ofono-/ril_0")
++             << QStringLiteral("ofono-/ril_5") << QStringLiteral("ofono-/ril_6"));
++}
++
++void tst_OfonoProvider::factoryTakesModemsKnownAtStart()
++{
++    QOfonoManager::initialModems() = QStringList() << QStringLiteral("/ril_5");
++    OfonoVoiceCallProviderFactory factory;
++    QVERIFY(factory.initialize());
++    QVERIFY(factory.configure(m_manager));
++    QCOMPARE(providerIds(m_manager), QStringList() << QStringLiteral("ofono-/ril_0")
++             << QStringLiteral("ofono-/ril_5"));
++}
++
++// Each modem gets one provider however it is announced, and loses it however
++// it goes: removed, missing from a new list, or oFono going away.
++void tst_OfonoProvider::factoryFollowsModemChanges()
++{
++    OfonoVoiceCallProviderFactory factory;
++    QVERIFY(factory.initialize());
++    QVERIFY(factory.configure(m_manager));
++    QOfonoManager *ofono = QOfonoManager::last();
++    QSignalSpy changed(m_manager, SIGNAL(providersChanged()));
++
++    ofono->getModemsReply(QStringList() << QStringLiteral("/ril_5"));
++    ofono->addModem(QStringLiteral("/ril_6"));
++    ofono->getModemsReply(QStringList() << QStringLiteral("/ril_5") << QStringLiteral("/ril_6"));
++    QCOMPARE(providerIds(m_manager), QStringList() << QStringLiteral("ofono-/ril_0")
++             << QStringLiteral("ofono-/ril_5") << QStringLiteral("ofono-/ril_6"));
++    QCOMPARE(changed.count(), 2);
++
++    ofono->removeModem(QStringLiteral("/ril_5"));
++    QCOMPARE(providerIds(m_manager), QStringList() << QStringLiteral("ofono-/ril_0")
++             << QStringLiteral("ofono-/ril_6"));
++
++    ofono->getModemsReply(QStringList() << QStringLiteral("/ril_7"));
++    QCOMPARE(providerIds(m_manager), QStringList() << QStringLiteral("ofono-/ril_0")
++             << QStringLiteral("ofono-/ril_7"));
++
++    ofono->ofonoGone();
++    QCOMPARE(providerIds(m_manager), QStringList() << QStringLiteral("ofono-/ril_0"));
++    QCoreApplication::sendPostedEvents(Q_NULLPTR, QEvent::DeferredDelete);
++}
++
+ QTEST_GUILESS_MAIN(tst_OfonoProvider)
+ 
+ #include "tst_ofonoprovider.moc"
+-- 
+2.53.0
+

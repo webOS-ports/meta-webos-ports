@@ -1,0 +1,155 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 12 Nov 2026 07:41:30 +0100
+Subject: [PATCH] [cellbroadcast] Keep the alerts oFono sends without update or
+ category.
+
+The oFono LuneOS runs sends IncomingBroadcast(s,q), a topic and nothing
+else, and EmergencyBroadcast(s,a{sv}) for ETWS, with no topic. Every one
+of them failed to store, so no alert ever reached the shell:
+
+- Without an update number the candidate's -1 matched the -1 of a new
+  alert, which made a first message count as a better language of
+  itself, and its null geo state was written to the NOT NULL column.
+- A topic outside the catalog, and ETWS, have no classification, so
+  their display policy went in as NULL too. Show them, as the catalog
+  does for a category that names no display.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/cellbroadcaststore.cpp       | 18 ++++++++--
+ tests/tst_cellbroadcaststore.cpp | 60 ++++++++++++++++++++++++++++++++
+ 2 files changed, 75 insertions(+), 3 deletions(-)
+
+diff --git a/src/cellbroadcaststore.cpp b/src/cellbroadcaststore.cpp
+index f0498f5..87b61a7 100644
+--- a/src/cellbroadcaststore.cpp
++++ b/src/cellbroadcaststore.cpp
+@@ -121,6 +121,15 @@ QString valueString(const QVariantMap &properties, const char *key)
+     return properties.value(QString::fromLatin1(key)).toString();
+ }
+ 
++// Presentation of an alert the catalog did not classify (a topic outside
++// it, or ETWS, which oFono sends without one): shown, as the catalog's
++// own default for a category is.
++QString displayPolicy(const QVariantMap &properties)
++{
++    const QString display = valueString(properties, "CellBroadcastDisplay");
++    return display.isEmpty() ? QStringLiteral("alert") : display;
++}
++
+ int valueInt(const QVariantMap &properties, const char *key, int fallback = -1)
+ {
+     const QVariant value = properties.value(QString::fromLatin1(key));
+@@ -757,7 +766,7 @@ CellBroadcastStore::StoreResult CellBroadcastStore::store(
+         insertAlert.addBindValue(valueString(properties, "CellBroadcastTitle"));
+         insertAlert.addBindValue(valueString(properties, "CellBroadcastAlertLevel"));
+         insertAlert.addBindValue(valueString(properties, "CellBroadcastAttentionPolicy"));
+-        insertAlert.addBindValue(valueString(properties, "CellBroadcastDisplay"));
++        insertAlert.addBindValue(displayPolicy(properties));
+         insertAlert.addBindValue(state);
+         insertAlert.addBindValue(timestamp);
+         insertAlert.addBindValue(timestamp);
+@@ -775,7 +784,10 @@ CellBroadcastStore::StoreResult CellBroadcastStore::store(
+     const bool firstMessage = currentMessageId == 0;
+     const bool newer = orderingResetForCandidate
+             || updateIsNewer(candidateUpdate, currentUpdate);
+-    const bool preferredLanguage = candidateUpdate == currentUpdate
++    // Another language of the update already held. Without an update number
++    // (oFono's IncomingBroadcast has none) the candidate's -1 matches a new
++    // alert's -1, and the null geo state of that alert would be kept.
++    const bool preferredLanguage = !firstMessage && candidateUpdate == currentUpdate
+             && candidateLanguageScore > currentLanguageScore;
+     QVariantMap jsonProperties(properties);
+     const QString currentRawGeometry = valueString(currentProperties, "Geometries");
+@@ -915,7 +927,7 @@ CellBroadcastStore::StoreResult CellBroadcastStore::store(
+         updateAlert.addBindValue(valueString(properties, "CellBroadcastTitle"));
+         updateAlert.addBindValue(valueString(properties, "CellBroadcastAlertLevel"));
+         updateAlert.addBindValue(valueString(properties, "CellBroadcastAttentionPolicy"));
+-        updateAlert.addBindValue(valueString(properties, "CellBroadcastDisplay"));
++        updateAlert.addBindValue(displayPolicy(properties));
+         updateAlert.addBindValue(state);
+         updateAlert.addBindValue(state == AwaitingLocation
+                                  ? QStringLiteral("checking")
+diff --git a/tests/tst_cellbroadcaststore.cpp b/tests/tst_cellbroadcaststore.cpp
+index 92eeab6..10da631 100644
+--- a/tests/tst_cellbroadcaststore.cpp
++++ b/tests/tst_cellbroadcaststore.cpp
+@@ -243,6 +243,8 @@ private Q_SLOTS:
+     void loadsCategoryPolicy();
+     void loadsAttentionProfiles();
+     void storesBeforePresentation();
++    void storesWhatOfonoSends_data();
++    void storesWhatOfonoSends();
+     void queuesIndependentAlerts();
+     void suppressesDuplicates();
+     void expiresDuplicateIdentities();
+@@ -616,6 +618,64 @@ void TestCellBroadcastStore::storesBeforePresentation()
+     QCOMPARE(store.alertHistory(0, 20).count(), 1);
+ }
+ 
++// What CellBroadcastDaemon hands over for the signals the oFono LuneOS
++// ships has sent: IncomingBroadcast(s,q) gives only a topic, with the
++// catalog's classification added when the topic is in it, and
++// EmergencyBroadcast(s,a{sv}) gives ETWS the emergency type and no topic.
++// No update number, serial or PLMN: each of these must still be kept and
++// shown.
++void TestCellBroadcastStore::storesWhatOfonoSends_data()
++{
++    QTest::addColumn<QVariantMap>("properties");
++
++    QVariantMap base;
++    base.insert(QStringLiteral("ModemPath"), QStringLiteral("/ril_0"));
++    base.insert(QStringLiteral("ReceivedAt"), qint64(1794465000000LL));
++
++    QVariantMap classified(base);
++    classified.insert(QStringLiteral("Topic"), 4370);
++    classified.insert(QStringLiteral("CellBroadcastCategory"), QStringLiteral("presidential"));
++    classified.insert(QStringLiteral("CellBroadcastTitle"), QStringLiteral("Government Alert"));
++    classified.insert(QStringLiteral("CellBroadcastAlertLevel"), QStringLiteral("critical"));
++    classified.insert(QStringLiteral("CellBroadcastAttentionPolicy"),
++                      QStringLiteral("silent-dnd-override"));
++    classified.insert(QStringLiteral("CellBroadcastDisplay"), QStringLiteral("alert"));
++    classified.insert(QStringLiteral("CellBroadcastEnabled"), true);
++    QTest::newRow("catalogued topic") << classified;
++
++    QVariantMap unclassified(base);
++    unclassified.insert(QStringLiteral("Topic"), 50);
++    QTest::newRow("topic not in the catalog") << unclassified;
++
++    QVariantMap etws(base);
++    etws.insert(QStringLiteral("EmergencyType"), QStringLiteral("Earthquake"));
++    etws.insert(QStringLiteral("EmergencyAlert"), true);
++    etws.insert(QStringLiteral("Popup"), true);
++    etws.insert(QStringLiteral("CellBroadcastAlertLevel"), QStringLiteral("critical"));
++    etws.insert(QStringLiteral("CellBroadcastAttentionPolicy"),
++                QStringLiteral("silent-dnd-override"));
++    QTest::newRow("ETWS") << etws;
++}
++
++void TestCellBroadcastStore::storesWhatOfonoSends()
++{
++    QFETCH(QVariantMap, properties);
++    QTemporaryDir directory;
++    CellBroadcastStore store(directory.path() + QStringLiteral("/alerts.sqlite"));
++    QVERIFY(store.isDurable());
++
++    const CellBroadcastStore::StoreResult result = store.store(
++                QStringLiteral("Take shelter"), properties);
++    QVERIFY2(result.stored, qPrintable(store.errorString()));
++    QVERIFY(result.activeChanged);
++    QVERIFY(result.presentationChanged);
++    QCOMPARE(result.activeAlert.value(QStringLiteral("Text")).toString(),
++             QStringLiteral("Take shelter"));
++    QCOMPARE(result.activeAlert.value(QStringLiteral("CellBroadcastDisplay")).toString(),
++             QStringLiteral("alert"));
++    QCOMPARE(store.alertHistory(0, 20).count(), 1);
++}
++
+ void TestCellBroadcastStore::queuesIndependentAlerts()
+ {
+     QTemporaryDir directory;
+-- 
+2.53.0
+

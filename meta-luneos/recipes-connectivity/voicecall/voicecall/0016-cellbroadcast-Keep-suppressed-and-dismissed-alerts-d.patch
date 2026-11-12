@@ -1,0 +1,615 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 07:38:38 +0100
+Subject: [PATCH] [cellbroadcast] Keep suppressed and dismissed alerts down,
+ check inputs.
+
+- A geofencing trigger moved every suppressed alert it referenced to
+  AwaitingLocation, including alerts suppressed because their channel is
+  off, their display policy is "none" or they are another language's
+  copy, so a location inside the area showed them. Only re-check those
+  that are presentable.
+- An acknowledged alert went back to a location check, and on screen,
+  when the same update arrived in the preferred language with a
+  different area. Only a newer update brings it back.
+- CellBroadcastGeoFence::check() emitted resolved() before returning
+  when the deadline had passed or no position source exists. That
+  re-entered the daemon while it was storing an alert, after which it
+  announced the active alert it had read before, so clients ended on a
+  stale one. Deliver such answers from the event loop; a later check()
+  or cancel() of the alert replaces them, and they replace an earlier
+  pending request.
+- A deadline more than 24.8 days ahead wrapped the timer interval to
+  1 ms, which then fired and restarted location updates continuously.
+- toDouble() accepts "nan" and "inf", for which the range checks all
+  pass and the area test comes out Outside, suppressing the alert,
+  instead of Invalid, which shows it. Require finite values.
+- The attention sound was accepted on a prefix match alone, which
+  "attention-tones/../.." passes. Compare the resolved path.
+
+The store test ran without an application object, so its timers, and
+QTest::qWait() in the geofence tests, never fired; it now uses
+QTEST_GUILESS_MAIN.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/cellbroadcastcatalog.cpp     |  12 ++
+ src/cellbroadcastcatalog.h       |   4 +
+ src/cellbroadcastdaemon.cpp      |  12 +-
+ src/cellbroadcastgeofence.cpp    |  40 ++++-
+ src/cellbroadcastgeofence.h      |   7 +
+ src/cellbroadcastgeometry.cpp    |  12 +-
+ src/cellbroadcaststore.cpp       |  11 ++
+ tests/tst_cellbroadcaststore.cpp | 248 +++++++++++++++++++++++++++++++
+ 8 files changed, 326 insertions(+), 20 deletions(-)
+
+diff --git a/src/cellbroadcastcatalog.cpp b/src/cellbroadcastcatalog.cpp
+index 0f52330..52139ff 100644
+--- a/src/cellbroadcastcatalog.cpp
++++ b/src/cellbroadcastcatalog.cpp
+@@ -239,6 +239,18 @@ bool CellBroadcastAttentionProfile::isValid() const
+     return !id.isEmpty() && !soundFile.isEmpty();
+ }
+ 
++bool CellBroadcastAttentionProfile::soundFileWithin(const QString &directory) const
++{
++    const QString canonicalDirectory = QFileInfo(directory).canonicalFilePath();
++    const QFileInfo file(soundFile);
++    const QString canonicalFile = file.canonicalFilePath();
++    // canonicalFilePath() is empty for what does not exist
++    return !canonicalDirectory.isEmpty() && !canonicalFile.isEmpty()
++            && file.isAbsolute()
++            && canonicalFile.startsWith(canonicalDirectory + QLatin1Char('/'))
++            && QFileInfo(canonicalFile).isFile();
++}
++
+ QString CellBroadcastAttentionProfile::hapticSequence() const
+ {
+     QStringList steps;
+diff --git a/src/cellbroadcastcatalog.h b/src/cellbroadcastcatalog.h
+index c78c8f9..4a5c950 100644
+--- a/src/cellbroadcastcatalog.h
++++ b/src/cellbroadcastcatalog.h
+@@ -85,6 +85,10 @@ struct CellBroadcastAttentionProfile
+ 
+     bool isValid() const;
+     QString hapticSequence() const;
++
++    // Whether soundFile is a regular file inside directory once ".." and
++    // symbolic links are resolved.
++    bool soundFileWithin(const QString &directory) const;
+ };
+ 
+ struct CellBroadcastCatalogEntry
+diff --git a/src/cellbroadcastdaemon.cpp b/src/cellbroadcastdaemon.cpp
+index ea8eded..9ead476 100644
+--- a/src/cellbroadcastdaemon.cpp
++++ b/src/cellbroadcastdaemon.cpp
+@@ -30,7 +30,6 @@
+ #include <QDBusConnection>
+ #include <QDateTime>
+ #include <QDebug>
+-#include <QFileInfo>
+ #include <QSet>
+ 
+ namespace {
+@@ -43,18 +42,12 @@ const char AttentionEventProperty[] = "CellBroadcastAttentionEvent";
+ const char AttentionHapticSequenceProperty[] = "CellBroadcastAttentionHapticSequence";
+ const char AttentionReservedUse[] = "official-cell-broadcast-public-warning";
+ const char AttentionSoundFileProperty[] = "CellBroadcastAttentionSoundFile";
+-const char AttentionTonePrefix[] = "/usr/share/cell-broadcast-provider-info/attention-tones/";
++const char AttentionToneDirectory[] = "/usr/share/cell-broadcast-provider-info/attention-tones";
+ const char GeoFenceDeadlineProperty[] = "CellBroadcastGeoFenceDeadline";
+ const char GeoFenceGeometriesProperty[] = "CellBroadcastGeoFenceGeometries";
+ const char TopicProperty[] = "Topic";
+ const int DefaultMaximumWaitSeconds = 30;
+ 
+-bool attentionSoundFileAllowed(const QString &path)
+-{
+-    return path.startsWith(QLatin1String(AttentionTonePrefix))
+-            && QFileInfo(path).isFile();
+-}
+-
+ bool addAttentionProperties(QVariantMap *properties,
+                             const CellBroadcastAttentionProfile &profile)
+ {
+@@ -81,7 +74,8 @@ bool addAttentionProperties(QVariantMap *properties,
+                    << profile.id;
+         return false;
+     }
+-    if (!attentionSoundFileAllowed(profile.soundFile)) {
++    // A prefix check alone let "attention-tones/../../.." through
++    if (!profile.soundFileWithin(QString::fromLatin1(AttentionToneDirectory))) {
+         qWarning() << "Rejected Cell Broadcast attention sound outside private asset path"
+                    << profile.soundFile;
+         return false;
+diff --git a/src/cellbroadcastgeofence.cpp b/src/cellbroadcastgeofence.cpp
+index 35a92f0..9fb72f8 100644
+--- a/src/cellbroadcastgeofence.cpp
++++ b/src/cellbroadcastgeofence.cpp
+@@ -18,6 +18,7 @@
+ #include <QtGlobal>
+ 
+ #include <algorithm>
++#include <limits>
+ 
+ CellBroadcastGeoFence::CellBroadcastGeoFence(QObject *parent,
+                                              QGeoPositionInfoSource *source)
+@@ -52,13 +53,17 @@ void CellBroadcastGeoFence::check(quint64 alertId, const QString &geometries,
+     if (!alertId || geometries.isEmpty()) {
+         return;
+     }
++    m_deferred.remove(alertId);
+     const qint64 now = QDateTime::currentMSecsSinceEpoch();
+-    if (deadline <= now) {
+-        Q_EMIT resolved(alertId, true, QStringLiteral("timeout"));
+-        return;
+-    }
+-    if (!m_source) {
+-        Q_EMIT resolved(alertId, true, QStringLiteral("location-unavailable"));
++    if (deadline <= now || !m_source) {
++        // Emitting here re-entered the daemon in the middle of storing an
++        // alert, which then announced the active alert it had read before.
++        // An earlier request for this alert is answered by this one.
++        if (m_requests.remove(alertId)) {
++            updateSource();
++        }
++        resolveLater(alertId, true, deadline <= now ? QStringLiteral("timeout")
++                                                    : QStringLiteral("location-unavailable"));
+         return;
+     }
+ 
+@@ -76,6 +81,7 @@ void CellBroadcastGeoFence::check(quint64 alertId, const QString &geometries,
+ 
+ void CellBroadcastGeoFence::cancel(quint64 alertId)
+ {
++    m_deferred.remove(alertId);
+     if (m_requests.remove(alertId)) {
+         updateSource();
+     }
+@@ -156,6 +162,20 @@ void CellBroadcastGeoFence::finish(quint64 alertId, bool display, const QString
+     }
+ }
+ 
++void CellBroadcastGeoFence::resolveLater(quint64 alertId, bool display,
++                                         const QString &state)
++{
++    const quint64 serial = ++m_deferredSerial;
++    m_deferred.insert(alertId, serial);
++    QTimer::singleShot(0, this, [this, alertId, display, state, serial]() {
++        if (m_deferred.value(alertId) != serial) {
++            return;
++        }
++        m_deferred.remove(alertId);
++        Q_EMIT resolved(alertId, display, state);
++    });
++}
++
+ void CellBroadcastGeoFence::updateSource()
+ {
+     if (!m_source) {
+@@ -173,8 +193,12 @@ void CellBroadcastGeoFence::updateSource()
+             earliestDeadline = request.deadline;
+         }
+     }
+-    const int remaining = qMax(1, int(earliestDeadline
+-                                     - QDateTime::currentMSecsSinceEpoch()));
++    // A deadline more than 24.8 days away does not fit the timer's int and
++    // used to wrap to 1 ms, waking up continuously until it passed. Waking
++    // up early is harmless: checkDeadlines() only finishes what is due.
++    const qint64 wait = earliestDeadline - QDateTime::currentMSecsSinceEpoch();
++    const int remaining = int(qBound(qint64(1), wait,
++                                     qint64(std::numeric_limits<int>::max())));
+     m_deadlineTimer.start(remaining);
+     m_source->startUpdates();
+ }
+diff --git a/src/cellbroadcastgeofence.h b/src/cellbroadcastgeofence.h
+index d7ea324..389b551 100644
+--- a/src/cellbroadcastgeofence.h
++++ b/src/cellbroadcastgeofence.h
+@@ -27,6 +27,8 @@ public:
+     explicit CellBroadcastGeoFence(QObject *parent = 0,
+                                    QGeoPositionInfoSource *source = 0);
+ 
++    // resolved() is never emitted from within check() or cancel(), only
++    // from the event loop, so a caller may act on its own state first.
+     void check(quint64 alertId, const QString &geometries, qint64 deadline,
+                qint64 createdAt);
+     void cancel(quint64 alertId);
+@@ -49,11 +51,16 @@ private:
+ 
+     QList<quint64> orderedAlertIds() const;
+     void finish(quint64 alertId, bool display, const QString &state);
++    void resolveLater(quint64 alertId, bool display, const QString &state);
+     void updateSource();
+ 
+ private:
+     QGeoPositionInfoSource *m_source;
+     QHash<quint64, Request> m_requests;
++    // Answers known at check() time, delivered from the event loop; a later
++    // check() or cancel() of the same alert replaces them.
++    QHash<quint64, quint64> m_deferred;
++    quint64 m_deferredSerial = 0;
+     QTimer m_deadlineTimer;
+ };
+ 
+diff --git a/src/cellbroadcastgeometry.cpp b/src/cellbroadcastgeometry.cpp
+index 517bb86..01d739f 100644
+--- a/src/cellbroadcastgeometry.cpp
++++ b/src/cellbroadcastgeometry.cpp
+@@ -44,7 +44,11 @@ bool parsePoint(const QString &text, Point *point)
+     bool longitudeOk = false;
+     const double latitude = values.at(0).toDouble(&latitudeOk);
+     const double longitude = values.at(1).toDouble(&longitudeOk);
+-    if (!latitudeOk || !longitudeOk || latitude < -90.0 || latitude > 90.0
++    // toDouble() accepts "nan" and "inf", for which every comparison below
++    // is false: a broadcast's shape would then come out as Outside, and the
++    // alert suppressed, instead of Invalid.
++    if (!latitudeOk || !longitudeOk || !qIsFinite(latitude) || !qIsFinite(longitude)
++            || latitude < -90.0 || latitude > 90.0
+             || longitude < -180.0 || longitude > 180.0) {
+         return false;
+     }
+@@ -106,7 +110,8 @@ CellBroadcastGeometry::Evaluation evaluateCircle(const QStringList &parts,
+     Point center;
+     bool radiusOk = false;
+     const double radius = parts.at(1).toDouble(&radiusOk);
+-    if (!parsePoint(parts.at(0), &center) || !radiusOk || radius < 0.0) {
++    if (!parsePoint(parts.at(0), &center) || !radiusOk || !qIsFinite(radius)
++            || radius < 0.0) {
+         return CellBroadcastGeometry::Invalid;
+     }
+     const double centerDistance = distance(center, location);
+@@ -163,7 +168,8 @@ CellBroadcastGeometry::Evaluation CellBroadcastGeometry::evaluate(
+         double accuracyMeters)
+ {
+     Point location = { latitude, longitude };
+-    if (latitude < -90.0 || latitude > 90.0 || longitude < -180.0
++    if (!qIsFinite(latitude) || !qIsFinite(longitude) || !qIsFinite(accuracyMeters)
++            || latitude < -90.0 || latitude > 90.0 || longitude < -180.0
+             || longitude > 180.0 || accuracyMeters < 0.0) {
+         return Invalid;
+     }
+diff --git a/src/cellbroadcaststore.cpp b/src/cellbroadcaststore.cpp
+index 9bb8f47..f0498f5 100644
+--- a/src/cellbroadcaststore.cpp
++++ b/src/cellbroadcaststore.cpp
+@@ -810,7 +810,11 @@ CellBroadcastStore::StoreResult CellBroadcastStore::store(
+                 && (eligible || (state != Active && state != Pending
+                                  && state != AwaitingLocation)));
+     const bool firstPresentable = state == Suppressed && currentGeoState.isEmpty();
++    // Another language's copy of a warning the user already dismissed is the
++    // same warning: only a newer update may bring it back.
++    const bool acknowledgedVariant = state == Acknowledged && !firstMessage && !newer;
+     const bool candidateNeedsGeoCheck = candidateSelected && eligible
++            && !acknowledgedVariant
+             && needsGeoCheck(jsonProperties)
+             && (firstMessage || newer || state == AwaitingLocation
+                 || (preferredLanguage && (firstPresentable || geometryChanged)));
+@@ -1348,6 +1352,13 @@ QVariantList CellBroadcastStore::geoFenceAlerts(
+ 
+     for (quint64 alertId : alertIds) {
+         const QVariantMap alert = readAlert(alertId);
++        // Suppressed covers both "outside the area", which a trigger may
++        // re-check, and "not to be shown at all" (display none, channel off,
++        // another language's copy), which no location makes presentable.
++        if (alert.value(QStringLiteral("State")).toInt() == Suppressed
++                && !presentationEligible(alert)) {
++            continue;
++        }
+         if (!valueString(alert, "Geometries").isEmpty()) {
+             result.append(alert);
+         }
+diff --git a/tests/tst_cellbroadcaststore.cpp b/tests/tst_cellbroadcaststore.cpp
+index b9ccd7e..92eeab6 100644
+--- a/tests/tst_cellbroadcaststore.cpp
++++ b/tests/tst_cellbroadcaststore.cpp
+@@ -23,6 +23,7 @@
+ #include <QSet>
+ #include <QSqlDatabase>
+ #include <QSqlQuery>
++#include <QTimeZone>
+ #include <QTemporaryDir>
+ #include <QtTest>
+ 
+@@ -206,8 +207,11 @@ public:
+ 
+     void startUpdates() override
+     {
++        ++starts;
+     }
+ 
++    int starts = 0;
++
+     void stopUpdates() override
+     {
+     }
+@@ -251,6 +255,7 @@ private Q_SLOTS:
+     void presentsUnfilteredLanguages();
+     void keepsValidatedGeometryForLanguageVariant();
+     void preservesPendingGeoFenceAttentionForLanguageVariant();
++    void acknowledgedAlertStaysAcknowledgedForLanguageVariant();
+     void preservesValidatedPendingGeoFenceAttentionForLanguageVariant();
+     void inheritsMissingGeometryForLanguageVariant();
+     void rechecksChangedGeometryForLanguageVariant();
+@@ -265,6 +270,8 @@ private Q_SLOTS:
+     void resolvesGeoFenceOutside();
+     void queuesGeoFenceResultWithoutAttention();
+     void findsGeoFenceTriggerReferences();
++    void triggerKeepsIneligibleAlertSuppressed_data();
++    void triggerKeepsIneligibleAlertSuppressed();
+     void ignoresStaleGeoFenceTriggerReferences();
+     void usesLastReceiptForGeoFenceTriggerReferences();
+     void isolatesGeoFenceTriggerContext();
+@@ -279,7 +286,13 @@ private Q_SLOTS:
+     void hidesGeofencingTriggers();
+     void evaluatesCircleGeometry();
+     void evaluatesPolygonGeometry();
++    void rejectsNonFiniteGeometry_data();
++    void rejectsNonFiniteGeometry();
++    void attentionSoundStaysInDirectory();
+ #ifdef HAVE_CELLBROADCAST_GEOFENCE_TESTS
++    void waitsQuietlyForFarDeadline();
++    void resolvesPastDeadlineFromEventLoop();
++    void laterCheckReplacesDeferredResolution();
+     void waitsForAccurateLocation();
+     void ignoresStaleLocation();
+     void preservesFreshnessForRepeatedGeoFenceRequest();
+@@ -912,6 +925,41 @@ void TestCellBroadcastStore::preservesPendingGeoFenceAttentionForLanguageVariant
+              QStringLiteral("Preferred language"));
+ }
+ 
++// The user dismissed the alert. The same warning in the preferred language,
++// with its area drawn differently, used to send it back to a location check
++// and, once inside, back on screen.
++void TestCellBroadcastStore::acknowledgedAlertStaysAcknowledgedForLanguageVariant()
++{
++    QTemporaryDir directory;
++    CellBroadcastStore store(directory.path() + QStringLiteral("/alerts.sqlite"));
++    QVariantMap local = alertProperties(4370, 0x1230, 0);
++    local.insert(QStringLiteral("Geometries"),
++                 QStringLiteral("circle|-35.3,149.1|1000"));
++    const CellBroadcastStore::StoreResult first = store.store(
++                QStringLiteral("Local language"), local);
++    QVERIFY(first.needsGeoCheck);
++    QVERIFY(store.resolveGeoFence(first.alertId, true, QStringLiteral("inside")).stored);
++    QVERIFY(store.acknowledge(first.alertId));
++    QCOMPARE(store.alert(first.alertId).value(QStringLiteral("State")).toInt(), 2);
++    QVERIFY(store.activeAlert().isEmpty());
++
++    QVariantMap additional = alertProperties(
++                4383, 0x1230, 0, QStringLiteral("additional"),
++                QLocale::system().name().left(2).toLower());
++    additional.insert(QStringLiteral("Geometries"),
++                      QStringLiteral("circle|-35.3,149.1|1500"));
++    const CellBroadcastStore::StoreResult variant = store.store(
++                QStringLiteral("Preferred language"), additional);
++    QCOMPARE(variant.alertId, first.alertId);
++    QVERIFY(!variant.needsGeoCheck);
++    QVERIFY(!variant.requestAttention);
++    QCOMPARE(store.alert(first.alertId).value(QStringLiteral("State")).toInt(), 2);
++
++    // Nothing pending that a location fix could bring back
++    QVERIFY(store.pendingGeoFenceAlerts().isEmpty());
++    QVERIFY(store.activeAlert().isEmpty());
++}
++
+ void TestCellBroadcastStore::preservesValidatedPendingGeoFenceAttentionForLanguageVariant()
+ {
+     QTemporaryDir directory;
+@@ -1330,6 +1378,44 @@ void TestCellBroadcastStore::findsGeoFenceTriggerReferences()
+              stored.alertId);
+ }
+ 
++void TestCellBroadcastStore::triggerKeepsIneligibleAlertSuppressed_data()
++{
++    QTest::addColumn<QString>("key");
++    QTest::addColumn<QVariant>("value");
++
++    QTest::newRow("display none") << "CellBroadcastDisplay" << QVariant(QStringLiteral("none"));
++    QTest::newRow("disabled") << "CellBroadcastEnabled" << QVariant(false);
++}
++
++// A trigger used to move any suppressed alert it referenced to
++// AwaitingLocation, so a location inside the area showed an alert the user
++// had switched off.
++void TestCellBroadcastStore::triggerKeepsIneligibleAlertSuppressed()
++{
++    QFETCH(QString, key);
++    QFETCH(QVariant, value);
++
++    QTemporaryDir directory;
++    CellBroadcastStore store(directory.path() + QStringLiteral("/alerts.sqlite"));
++    QVariantMap properties = alertProperties(4370, 0x1230, 0);
++    properties.insert(QStringLiteral("Geometries"),
++                      QStringLiteral("circle|-35.3,149.1|1000"));
++    properties.insert(key, value);
++    const CellBroadcastStore::StoreResult stored = store.store(
++                QStringLiteral("Switched off warning"), properties);
++    QVERIFY(stored.stored);
++    QCOMPARE(store.alert(stored.alertId).value(QStringLiteral("State")).toInt(),
++             3); // Suppressed
++
++    QVERIFY(store.geoFenceAlerts(QStringLiteral("4370,4656")).isEmpty());
++    QVERIFY(store.prepareGeoFenceTrigger(QStringLiteral("4370,4656"), 1,
++                                         QDateTime::currentMSecsSinceEpoch(),
++                                         QVariantMap()).isEmpty());
++    QCOMPARE(store.alert(stored.alertId).value(QStringLiteral("State")).toInt(),
++             3); // Suppressed
++    QVERIFY(store.activeAlert().isEmpty());
++}
++
+ void TestCellBroadcastStore::ignoresStaleGeoFenceTriggerReferences()
+ {
+     QTemporaryDir directory;
+@@ -1817,7 +1903,169 @@ void TestCellBroadcastStore::evaluatesPolygonGeometry()
+              CellBroadcastGeometry::Invalid);
+ }
+ 
++void TestCellBroadcastStore::rejectsNonFiniteGeometry_data()
++{
++    QTest::addColumn<QString>("geometry");
++    QTest::addColumn<double>("latitude");
++    QTest::addColumn<double>("longitude");
++    QTest::addColumn<double>("accuracy");
++
++    const double nan = qQNaN();
++    const double inf = qInf();
++    const QString circle = QStringLiteral("circle|-35.3,149.1|1000");
++    // Far away from every shape: a finite but wrong answer would be Outside,
++    // which suppresses the alert.
++    QTest::newRow("nan center") << "circle|nan,nan|1000" << -30.0 << 140.0 << 10.0;
++    QTest::newRow("inf center") << "circle|inf,149.1|1000" << -30.0 << 140.0 << 10.0;
++    QTest::newRow("nan radius") << "circle|-35.3,149.1|nan" << -30.0 << 140.0 << 10.0;
++    QTest::newRow("inf radius") << "circle|-35.3,149.1|inf" << -30.0 << 140.0 << 10.0;
++    QTest::newRow("nan vertex")
++            << "polygon|-35.30,149.10|nan,149.20|-35.20,149.20" << -30.0 << 140.0 << 10.0;
++    QTest::newRow("inf vertex")
++            << "polygon|-35.30,149.10|-35.30,-inf|-35.20,149.20" << -30.0 << 140.0 << 10.0;
++    QTest::newRow("nan latitude") << circle << nan << 140.0 << 10.0;
++    QTest::newRow("nan longitude") << circle << -30.0 << nan << 10.0;
++    QTest::newRow("nan accuracy") << circle << -30.0 << 140.0 << nan;
++    QTest::newRow("inf accuracy") << circle << -30.0 << 140.0 << inf;
++}
++
++void TestCellBroadcastStore::rejectsNonFiniteGeometry()
++{
++    QFETCH(QString, geometry);
++    QFETCH(double, latitude);
++    QFETCH(double, longitude);
++    QFETCH(double, accuracy);
++    QCOMPARE(CellBroadcastGeometry::evaluate(geometry, latitude, longitude, accuracy),
++             CellBroadcastGeometry::Invalid);
++}
++
++void TestCellBroadcastStore::attentionSoundStaysInDirectory()
++{
++    QTemporaryDir root;
++    QVERIFY(root.isValid());
++    const QString tones = root.path() + QStringLiteral("/tones");
++    QVERIFY(QDir().mkpath(tones));
++    QVERIFY(QDir().mkpath(root.path() + QStringLiteral("/tones-other")));
++    for (const QString &name : { QStringLiteral("/tones/a.wav"),
++                                 QStringLiteral("/outside.wav"),
++                                 QStringLiteral("/tones-other/b.wav") }) {
++        QFile file(root.path() + name);
++        QVERIFY(file.open(QIODevice::WriteOnly));
++    }
++    QVERIFY(QFile::link(root.path() + QStringLiteral("/outside.wav"),
++                        tones + QStringLiteral("/link.wav")));
++    QVERIFY(QFile::link(tones + QStringLiteral("/a.wav"),
++                        root.path() + QStringLiteral("/in-link.wav")));
++
++    CellBroadcastAttentionProfile profile;
++    const auto allowed = [&](const QString &soundFile) {
++        profile.soundFile = soundFile;
++        return profile.soundFileWithin(tones);
++    };
++    QVERIFY(allowed(tones + QStringLiteral("/a.wav")));
++    QVERIFY(allowed(tones + QStringLiteral("/./a.wav")));
++
++    QVERIFY(!allowed(tones + QStringLiteral("/../outside.wav")));
++    QVERIFY(!allowed(tones + QStringLiteral("/link.wav")));
++    QVERIFY(!allowed(root.path() + QStringLiteral("/tones-other/b.wav")));
++    QVERIFY(!allowed(tones + QStringLiteral("/../tones-other/b.wav")));
++    QVERIFY(!allowed(tones + QStringLiteral("/missing.wav")));
++    QVERIFY(!allowed(tones));
++    QVERIFY(!allowed(tones + QLatin1Char('/')));
++    QVERIFY(!allowed(QString()));
++    QVERIFY(!allowed(QStringLiteral("tones/a.wav")));
++    profile.soundFile = tones + QStringLiteral("/a.wav");
++    QVERIFY(!profile.soundFileWithin(root.path() + QStringLiteral("/missing")));
++
++    // A link from outside that resolves to a file inside names that asset
++    QVERIFY(allowed(root.path() + QStringLiteral("/in-link.wav")));
++}
++
+ #ifdef HAVE_CELLBROADCAST_GEOFENCE_TESTS
++// A deadline beyond the timer's int range wrapped to a 1 ms timer that kept
++// firing, and restarting location updates, until the deadline.
++void TestCellBroadcastStore::waitsQuietlyForFarDeadline()
++{
++    TestPositionSource source;
++    CellBroadcastGeoFence geoFence(0, &source);
++    QSignalSpy resolved(&geoFence, &CellBroadcastGeoFence::resolved);
++    const qint64 now = QDateTime::currentMSecsSinceEpoch();
++    geoFence.check(1, QStringLiteral("circle|-35.3,149.1|1000"),
++                   now + Q_INT64_C(30) * 24 * 3600 * 1000, now);
++    QCOMPARE(source.starts, 1);
++
++    QTest::qWait(100);
++    QCOMPARE(source.starts, 1);
++    QCOMPARE(resolved.count(), 0);
++}
++
++// check() used to emit resolved() before returning when the deadline had
++// passed, re-entering the daemon while it was still storing the alert.
++void TestCellBroadcastStore::resolvesPastDeadlineFromEventLoop()
++{
++    TestPositionSource source;
++    CellBroadcastGeoFence geoFence(0, &source);
++    QSignalSpy resolved(&geoFence, &CellBroadcastGeoFence::resolved);
++    const qint64 now = QDateTime::currentMSecsSinceEpoch();
++    geoFence.check(1, QStringLiteral("circle|-35.3,149.1|1000"), now - 1, now - 1000);
++    QCOMPARE(resolved.count(), 0);
++
++    QTRY_COMPARE(resolved.count(), 1);
++    QCOMPARE(resolved.at(0).at(0).toULongLong(), quint64(1));
++    QCOMPARE(resolved.at(0).at(1).toBool(), true);
++    QCOMPARE(resolved.at(0).at(2).toString(), QStringLiteral("timeout"));
++
++    // Without a position source the answer is deferred the same way
++    CellBroadcastGeoFence noSource(0, 0);
++    QSignalSpy unavailable(&noSource, &CellBroadcastGeoFence::resolved);
++    // createDefaultSource() may find a plugin on the host: only check the
++    // timing when it did not.
++    noSource.check(2, QStringLiteral("circle|-35.3,149.1|1000"), now + 10000, now);
++    QCOMPARE(unavailable.count(), 0);
++}
++
++void TestCellBroadcastStore::laterCheckReplacesDeferredResolution()
++{
++    TestPositionSource source;
++    CellBroadcastGeoFence geoFence(0, &source);
++    QSignalSpy resolved(&geoFence, &CellBroadcastGeoFence::resolved);
++    const qint64 now = QDateTime::currentMSecsSinceEpoch();
++    const QString geometry = QStringLiteral("circle|-35.3,149.1|1000");
++
++    // A pending request answered by a check whose deadline has passed:
++    // resolved once, not again by a later position
++    geoFence.check(1, geometry, now + 10000, now);
++    geoFence.check(1, geometry, now - 1, now);
++    QTRY_COMPARE(resolved.count(), 1);
++    // A fix taken after the check; a slow run (valgrind) must not make it stale
++    const auto freshInside = []() {
++        QGeoPositionInfo position(QGeoCoordinate(-35.3, 149.1),
++                                  QDateTime::fromMSecsSinceEpoch(
++                                      QDateTime::currentMSecsSinceEpoch() + 1, QTimeZone::utc()));
++        position.setAttribute(QGeoPositionInfo::HorizontalAccuracy, 10.0);
++        return position;
++    };
++    source.sendPosition(freshInside());
++    QCOMPARE(resolved.count(), 1);
++    resolved.clear();
++
++    // A deferred timeout replaced by a new check with time left
++    geoFence.check(2, geometry, now - 1, now);
++    geoFence.check(2, geometry, now + 10000, now);
++    QTest::qWait(20);
++    QCOMPARE(resolved.count(), 0);
++    source.sendPosition(freshInside());
++    QCOMPARE(resolved.count(), 1);
++    QCOMPARE(resolved.at(0).at(2).toString(), QStringLiteral("inside"));
++    resolved.clear();
++
++    // ... or cancelled
++    geoFence.check(3, geometry, now - 1, now);
++    geoFence.cancel(3);
++    QTest::qWait(20);
++    QCOMPARE(resolved.count(), 0);
++}
++
+ void TestCellBroadcastStore::waitsForAccurateLocation()
+ {
+     TestPositionSource source;
