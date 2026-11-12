@@ -1,0 +1,190 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 07:49:18 +0100
+Subject: [PATCH] [gbinder-radio] Start over after running callbacks while
+ pushing the queue
+
+radio_base_submit_queued_requests() remembers the next request in the
+queue before submitting the current one, and keeps using it after
+calls that can run arbitrary code:
+
+- when a request can't be sent, radio_base_request_failed() invokes
+  its completion callback and then pushes the queue itself, from
+  radio_base_drop_req(). That inner pass may submit the next request,
+  after which the outer one unlinks it from the queue again (with a
+  stale predecessor, losing the requests behind it) and sends it a
+  second time. If the next request fails too, the inner pass frees it
+  and the outer one reads freed memory;
+
+- radio_base_move_owner_queue() emits the owner change signal, and
+  its handlers may submit or drop requests too.
+
+Start from the head of the queue after either of those. Submitted and
+failed requests are no longer in the queue, so this terminates.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/mer-hybris/libgbinder-radio/pull/40]
+---
+ src/radio_base.c               | 24 ++++++++++-
+ unit/unit_client/unit_client.c | 78 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 100 insertions(+), 2 deletions(-)
+
+diff --git a/src/radio_base.c b/src/radio_base.c
+index b551559..090eee8 100644
+--- a/src/radio_base.c
++++ b/src/radio_base.c
+@@ -343,7 +343,7 @@ radio_base_can_set_owner(
+ }
+ 
+ static
+-void
++gboolean
+ radio_base_move_owner_queue(
+     RadioBase* self)
+ {
+@@ -359,8 +359,10 @@ radio_base_move_owner_queue(
+             priv->owner_queue = l->next;
+             g_slist_free_1(l);
+             g_signal_emit(self, radio_base_signals[SIGNAL_OWNER], 0);
++            return TRUE;
+         }
+     }
++    return FALSE;
+ }
+ 
+ static
+@@ -451,7 +453,9 @@ radio_base_submit_queued_requests(
+ 
+                 /* Initiate the transaction and update the request state */
+                 if (radio_base_submit_transaction(self, req)) {
+-                    radio_base_move_owner_queue(self);
++                    const gboolean owner_changed =
++                        radio_base_move_owner_queue(self);
++
+                     submitted++;
+                     if (req->blocking) {
+                         if (!priv->block_req) {
+@@ -460,8 +464,24 @@ radio_base_submit_queued_requests(
+                         }
+                         break;
+                     }
++                    if (owner_changed) {
++                        /*
++                         * The owner change handlers may have submitted,
++                         * dropped or released any request, including
++                         * the next one. Start over.
++                         */
++                        prev = NULL;
++                        next = priv->queue_first;
++                    }
+                 } else {
++                    /*
++                     * The completion callback may do anything to the
++                     * queue, and failing the request pushes the queue
++                     * itself. Start over.
++                     */
+                     radio_base_request_failed(self, req);
++                    prev = NULL;
++                    next = priv->queue_first;
+                 }
+             } else {
+                 /* What hasn't been removed from the queue, becomes prev */
+diff --git a/unit/unit_client/unit_client.c b/unit/unit_client/unit_client.c
+index 3666656..a5888dc 100644
+--- a/unit/unit_client/unit_client.c
++++ b/unit/unit_client/unit_client.c
+@@ -1798,6 +1798,80 @@ test_block_retry_resp2(
+     test_simple_cleanup(&test);
+ }
+ 
++/*==========================================================================*
++ * block_fail_queue
++ *
++ * The first of the requests released from the queue can't be sent.
++ * Failing it pushes the queue from inside the loop that is pushing it.
++ *==========================================================================*/
++
++static
++void
++test_block_fail_queue_complete_cb(
++    RadioRequest* req,
++    RADIO_TX_STATUS status,
++    RADIO_RESP resp,
++    RADIO_ERROR error,
++    const GBinderReader* reader,
++    gpointer user_data)
++{
++    int* count = user_data;
++
++    (*count)++;
++}
++
++static
++void
++test_block_fail_queue(
++    gconstpointer data)
++{
++    const int fail = GPOINTER_TO_INT(data);
++    TestSimple test;
++    RadioClient* client = test_simple_init(&test);
++    RadioRequestGroup* group = radio_request_group_new(client);
++    RadioRequest* req[3];
++    int completed = 0;
++    int i;
++
++    test_common_connected(&test.common);
++    g_assert_cmpint(radio_request_group_block(group), ==,
++        RADIO_BLOCK_ACQUIRED);
++
++    /* Three requests outside of the group, waiting in the queue */
++    for (i = 0; i < 3; i++) {
++        req[i] = radio_request_new(client, IGNORE_REQ, NULL,
++            test_block_fail_queue_complete_cb, NULL, &completed);
++        g_assert(radio_request_submit(req[i]));
++        g_assert_cmpint(req[i]->state, == ,RADIO_REQUEST_STATE_QUEUED);
++    }
++
++    /* Keep a reference only to the last one */
++    radio_request_unref(req[0]);
++    radio_request_unref(req[1]);
++
++    /* Release the queue, the first (or the first two) can't be sent */
++    test_gbinder_client_tx_fail_count = fail;
++    radio_request_group_unblock(group);
++    test_gbinder_client_tx_fail_count = 0;
++
++    /* Let the transactions reach the service */
++    test_quit_later(test.loop);
++    test_run(&test_opt, test.loop);
++
++    /* Each request has been sent at most once */
++    g_assert_cmpint(test_service_req_count(&test.common.service,
++        IGNORE_REQ), == ,3 - fail);
++    g_assert_cmpint(completed, == ,fail);
++
++    /* The last one has been sent (once) */
++    g_assert_cmpint(req[2]->state, == ,RADIO_REQUEST_STATE_PENDING);
++    radio_request_drop(req[2]);
++
++    /* Cleanup */
++    radio_request_group_unref(group);
++    test_simple_cleanup(&test);
++}
++
+ /*==========================================================================*
+  * block_retry
+  *==========================================================================*/
+@@ -2533,6 +2607,10 @@ int main(int argc, char* argv[])
+     g_test_add_func(TEST_("block/2"), test_block2);
+     g_test_add_func(TEST_("block/timeout"), test_block_timeout);
+     g_test_add_func(TEST_("block/retry"), test_block_retry);
++    g_test_add_data_func(TEST_("block/fail_queue/1"),
++        GINT_TO_POINTER(1), test_block_fail_queue);
++    g_test_add_data_func(TEST_("block/fail_queue/2"),
++        GINT_TO_POINTER(2), test_block_fail_queue);
+     g_test_add_func(TEST_("block/retry_resp"), test_block_retry_resp);
+     g_test_add_func(TEST_("block/retry_resp2"), test_block_retry_resp2);
+     g_test_add_func(TEST_("block/queued_timeout"),
+-- 
+2.53.0
+
