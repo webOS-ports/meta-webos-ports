@@ -20,6 +20,10 @@ SRC_URI = "git://github.com/mer-hybris/ofono-binder-plugin.git;branch=master;pro
            file://0008-ofono-binder-Don-t-make-supplementary-service-reques.patch \
            file://0009-unit-test-the-call-settings-requests.patch \
            file://0010-unit-free-failed-voicecall-requests-the-way-libgbind.patch \
+           file://0011-ofono-binder-Don-t-let-a-failed-submit-stall-the-rad.patch \
+           file://0012-unit-Add-radio-caps-transaction-test.patch \
+           file://0013-ofono-binder-Send-radio-caps-data-requests-in-the-tr.patch \
+           file://0014-ofono-binder-Switch-the-radios-back-on-after-a-radio.patch \
 "
 
 PV = "1.1.39"
