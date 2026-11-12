@@ -1,0 +1,97 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 07:54:41 +0100
+Subject: [PATCH] [gbinder-radio] Don't call functions through mismatched
+ pointer types
+
+radio_request_default_retry() took RADIO_RESP where
+RadioRequestRetryFunc has guint32 (since 1.4.6), and
+radio_config_call_free() and gbinder_servicemanager_unref() were
+cast to GDestroyNotify. Clang's -fsanitize=function reports each
+of these calls. They are harmless with the supported compilers and
+ABIs, but making the types match keeps them out of sanitizer runs.
+
+What clang still reports is RadioConfigRequestCompleteFunc being
+stored as RadioRequestGenericCompleteFunc, which would take an API
+change to avoid.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/mer-hybris/libgbinder-radio/pull/42]
+---
+ src/radio_config.c   | 10 +++++++++-
+ src/radio_instance.c | 10 +++++++++-
+ src/radio_request.c  |  2 +-
+ 3 files changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/src/radio_config.c b/src/radio_config.c
+index 7c1932f..27d5d8e 100644
+--- a/src/radio_config.c
++++ b/src/radio_config.c
+@@ -367,6 +367,14 @@ radio_config_call_free(
+     gutil_slice_free(call);
+ }
+ 
++static
++void
++radio_config_call_destroy(
++    gpointer call)
++{
++    radio_config_call_free(call);
++}
++
+ static
+ void
+ radio_config_call_complete(
+@@ -1049,7 +1057,7 @@ radio_config_send_request(
+     /* Then actually submit the request */
+     tx_id = gbinder_client_transact(self->client, req->code,
+         GBINDER_TX_FLAG_ONEWAY, req->args, radio_config_call_complete,
+-        (GDestroyNotify) radio_config_call_free, call);
++        radio_config_call_destroy, call);
+     if (tx_id) {
+         return tx_id;
+     } else {
+diff --git a/src/radio_instance.c b/src/radio_instance.c
+index b83931d..6341357 100644
+--- a/src/radio_instance.c
++++ b/src/radio_instance.c
+@@ -273,6 +273,14 @@ typedef struct radio_instance_tx {
+  * Implementation
+  *==========================================================================*/
+ 
++static
++void
++radio_instance_servicemanager_unref(
++    gpointer sm)
++{
++    gbinder_servicemanager_unref(sm);
++}
++
+ static
+ GQuark
+ radio_instance_req_quark(
+@@ -655,7 +663,7 @@ radio_instance_create_desc(
+      * have another slot to initialize.
+      */
+     gutil_idle_pool_add(priv->idle, gbinder_servicemanager_ref(sm),
+-        (GDestroyNotify) gbinder_servicemanager_unref);
++        radio_instance_servicemanager_unref);
+     return self;
+ }
+ 
+diff --git a/src/radio_request.c b/src/radio_request.c
+index 008ba38..11300ca 100644
+--- a/src/radio_request.c
++++ b/src/radio_request.c
+@@ -131,7 +131,7 @@ gboolean
+ radio_request_default_retry(
+     RadioRequest* req,
+     RADIO_TX_STATUS status,
+-    RADIO_RESP resp,
++    guint32 resp,
+     RADIO_ERROR error,
+     const GBinderReader* reader,
+     void* user_data)
+-- 
+2.53.0
+

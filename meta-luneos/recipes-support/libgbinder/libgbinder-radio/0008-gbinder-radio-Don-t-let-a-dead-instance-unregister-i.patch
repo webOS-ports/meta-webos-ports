@@ -1,0 +1,144 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 08:02:50 +0100
+Subject: [PATCH] [gbinder-radio] Don't let a dead instance unregister its
+ replacement
+
+When the radio service dies, its RadioInstance is removed from the
+instance table, so that the next radio_instance_new*() call creates a
+new instance for the restarted service. The weak reference which
+removes the table entry when the instance is freed stays in place
+though, and it removed whatever entry had the same key. If the dead
+instance was still referenced by the time the replacement had been
+created, freeing it removed the replacement from the table (and
+reported it as removed by RadioRegistry). The next lookup then found
+nothing and created yet another instance for the same service.
+
+Only remove the entry if it belongs to the instance being removed.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/mer-hybris/libgbinder-radio/pull/41]
+---
+ src/radio_instance.c               | 14 +++++---
+ unit/unit_instance/unit_instance.c | 57 ++++++++++++++++++++++++++++++
+ 2 files changed, 67 insertions(+), 4 deletions(-)
+
+diff --git a/src/radio_instance.c b/src/radio_instance.c
+index 0a0703d..b83931d 100644
+--- a/src/radio_instance.c
++++ b/src/radio_instance.c
+@@ -545,10 +545,16 @@ radio_instance_drop_binder(
+ static
+ void
+ radio_instance_remove(
+-    const char* key)
++    const char* key,
++    gconstpointer instance)
+ {
++    /*
++     * A dead instance is removed from the table right away, and a new
++     * one with the same key may have been created by the time the dead
++     * one is freed. Only remove the entry if it's still this instance.
++     */
+     if (radio_instance_table &&
+-        g_hash_table_contains(radio_instance_table, key)) {
++        g_hash_table_lookup(radio_instance_table, key) == instance) {
+         g_hash_table_remove(radio_instance_table, key);
+         radio_registry_instance_removed(key);
+         if (g_hash_table_size(radio_instance_table) == 0) {
+@@ -572,7 +578,7 @@ radio_instance_died(
+     radio_instance_ref(self);
+     radio_instance_drop_binder(self);
+     g_signal_emit(self, radio_instance_signals[SIGNAL_DEATH], 0);
+-    radio_instance_remove(self->key);
++    radio_instance_remove(self->key, self);
+     radio_instance_unref(self);
+ }
+ 
+@@ -585,7 +591,7 @@ radio_instance_gone(
+     char* key = key_ptr;
+ 
+     GVERBOSE_("%s", key);
+-    radio_instance_remove(key);
++    radio_instance_remove(key, dead);
+     g_free(key);
+ }
+ 
+diff --git a/unit/unit_instance/unit_instance.c b/unit/unit_instance/unit_instance.c
+index 6449334..c04a77f 100644
+--- a/unit/unit_instance/unit_instance.c
++++ b/unit/unit_instance/unit_instance.c
+@@ -1261,6 +1261,62 @@ test_death(
+     gbinder_servicemanager_unref(sm);
+ }
+ 
++/*==========================================================================*
++ * death_restart
++ *
++ * The service dies and comes back, a new instance is created for it
++ * while the dead one is still referenced. Releasing the dead one must
++ * not unregister the new one.
++ *==========================================================================*/
++
++static
++void
++test_death_restart(
++    void)
++{
++    const char* slot = "slot1";
++    const char* fqname = RADIO_1_0 "/slot1";
++    TestRadioService service, service2;
++    GBinderServiceManager* sm = gbinder_servicemanager_new(DEV);
++    GBinderRemoteObject* remote;
++    GBinderRemoteObject* remote2;
++    RadioInstance* dead;
++    RadioInstance* radio;
++
++    test_service_init(&service);
++    remote = test_gbinder_servicemanager_new_service(sm, fqname, service.obj);
++    dead = radio_instance_new_with_version(DEV, slot, RADIO_INTERFACE_1_4);
++    g_assert(dead);
++    test_gbinder_remote_object_kill(remote);
++    g_assert(radio_instance_is_dead(dead));
++    g_assert(!radio_instance_get_with_version(DEV, slot, RADIO_INTERFACE_1_4));
++
++    /* The service is back */
++    test_service_init(&service2);
++    remote2 = test_gbinder_servicemanager_new_service(sm, fqname,
++        service2.obj);
++    radio = radio_instance_new_with_version(DEV, slot, RADIO_INTERFACE_1_4);
++    g_assert(radio);
++    g_assert(radio != dead);
++    g_assert(radio_instance_get_with_version(DEV, slot,
++        RADIO_INTERFACE_1_4) == radio);
++
++    /* The dead one goes away, the new one stays registered */
++    radio_instance_unref(dead);
++    g_assert(radio_instance_get_with_version(DEV, slot,
++        RADIO_INTERFACE_1_4) == radio);
++    g_assert(radio_instance_get_all());
++
++    radio_instance_unref(radio);
++    g_assert(!radio_instance_get_with_version(DEV, slot,
++        RADIO_INTERFACE_1_4));
++    test_service_cleanup(&service2);
++    test_service_cleanup(&service);
++    gbinder_remote_object_unref(remote2);
++    gbinder_remote_object_unref(remote);
++    gbinder_servicemanager_unref(sm);
++}
++
+ /*==========================================================================*
+  * Common
+  *==========================================================================*/
+@@ -1282,6 +1338,7 @@ int main(int argc, char* argv[])
+     g_test_add_func(TEST_("send_req"), test_send_req);
+     g_test_add_func(TEST_("enabled"), test_enabled);
+     g_test_add_func(TEST_("death"), test_death);
++    g_test_add_func(TEST_("death_restart"), test_death_restart);
+     test_init(&test_opt, argc, argv);
+     return g_test_run();
+ }
+-- 
+2.53.0
+
