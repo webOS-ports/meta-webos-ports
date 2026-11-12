@@ -1,0 +1,59 @@
+From 44863f802b89838623cc837d597164c5c56f1596 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 14:11:47 +0100
+Subject: [PATCH] service: check the push PDU lengths
+
+mms_push_notify() read pdu[1] without checking that the PDU has two
+octets, decoded the HeadersLen uintvar with the length of the whole PDU
+although it starts at offset 2, and then used HeadersLen as the limit
+of the Content-Type and the headers without checking that the PDU is
+that long. A short or lying push made it read past the end of the PDU,
+and the offset it returns could point past the end as well; the caller
+stores and decodes the PDU from that offset.
+
+Check each length against what is left of the PDU.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/service.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/src/service.c b/src/service.c
+index eefc22d..7378974 100644
+--- a/src/service.c
++++ b/src/service.c
+@@ -4295,6 +4295,10 @@ mms_push_notify (const unsigned char *pdu,
+ 
+   g_string_free (hex, TRUE);
+ 
++  /* TID and PDU Type */
++  if (len < 2)
++    return FALSE;
++
+   /* PUSH pdu ? */
+   if (pdu[1] != 0x06)
+     return FALSE;
+@@ -4302,13 +4306,17 @@ mms_push_notify (const unsigned char *pdu,
+   /* Consume TID and Type */
+   nread = 2;
+ 
+-  if (wsp_decode_uintvar (pdu + nread, len,
++  if (wsp_decode_uintvar (pdu + nread, len - nread,
+                           &headerslen, &consumed) == FALSE)
+     return FALSE;
+ 
+   /* Consume uintvar bytes */
+   nread += consumed;
+ 
++  /* The Content-Type and the headers must fit in the PDU */
++  if (headerslen > len - nread)
++    return FALSE;
++
+   /* Try to decode content-type */
+   if (wsp_decode_content_type (pdu + nread, headerslen, &ct,
+                                &consumed, &param_len) == FALSE)
+-- 
+2.53.0
+

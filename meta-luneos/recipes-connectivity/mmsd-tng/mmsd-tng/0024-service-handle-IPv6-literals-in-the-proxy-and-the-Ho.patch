@@ -1,0 +1,138 @@
+From df22f4c70f2b42e07c904e5ea921591aacd72b37 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 14:19:09 +0100
+Subject: [PATCH] service: handle IPv6 literals in the proxy and the Host
+ header
+
+mms_service_bearer_notify() split the proxy at the first ':' to see
+whether its host is an IP address. For an IPv6 literal, bracketed or
+bare, that left "2001" or "[2001", which is not an address, so it
+tried to resolve the proxy, failed, and took the bearer down. Parse the
+proxy as a URI instead, bracketing a bare IPv6 literal first, and check
+the host GUri finds.
+
+The Host: header was built as "%s:%d" from the host of the MMSC URI,
+which for an IPv6 literal gives "2001:db8::1:8080" rather than
+"[2001:db8::1]:8080". Bracket it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/service.c | 72 +++++++++++++++++++++++++++++++++++++++------------
+ 1 file changed, 55 insertions(+), 17 deletions(-)
+
+diff --git a/src/service.c b/src/service.c
+index 6900c9b..daea428 100644
+--- a/src/service.c
++++ b/src/service.c
+@@ -3977,6 +3977,53 @@ request_failed_before_sending (struct mms_request  *request,
+     }
+ }
+ 
++/*
++ * The proxy comes as "host", "host:port" or "http://host[:port]", where host
++ * may be an IPv6 literal, bracketed or (without a port) bare. Return it as an
++ * http:// URI, and whether its host is an IP address, or NULL if it does not
++ * parse.
++ */
++static char *
++proxy_to_uri (const char *proxy,
++              gboolean   *is_ip)
++{
++  g_autofree char *uri = NULL;
++  g_autoptr(GUri) parsed = NULL;
++  const char *host;
++
++  if (g_str_has_prefix (proxy, "http://"))
++    uri = g_strdup (proxy);
++  else if (strchr (proxy, ':') != NULL && g_hostname_is_ip_address (proxy))
++    uri = g_strdup_printf ("http://[%s]", proxy);
++  else
++    uri = g_strdup_printf ("http://%s", proxy);
++
++  parsed = g_uri_parse (uri, SOUP_HTTP_URI_FLAGS, NULL);
++  if (parsed == NULL)
++    return NULL;
++
++  host = g_uri_get_host (parsed);
++  if (host == NULL || *host == '\0')
++    return NULL;
++
++  *is_ip = g_hostname_is_ip_address (host);
++
++  return g_steal_pointer (&uri);
++}
++
++/* The Host: header for host and port, with an IPv6 literal in brackets */
++static char *
++host_header_value (const char *host,
++                   int         port)
++{
++  gboolean ipv6 = strchr (host, ':') != NULL;
++
++  if (port == 80 || port == -1)
++    return ipv6 ? g_strdup_printf ("[%s]", host) : g_strdup (host);
++
++  return g_strdup_printf (ipv6 ? "[%s]:%d" : "%s:%d", host, port);
++}
++
+ static void
+ create_new_web_message (struct mms_request *request,
+                         const char         *type,
+@@ -4045,12 +4092,8 @@ create_new_web_message (struct mms_request *request,
+   DBG ("host: %s, port: %d", host, port);
+ 
+   message_headers = soup_message_get_request_headers ((*msg));
+-  if (port == 80 || port == -1)
+-    soup_message_headers_replace (message_headers, "Host", host);
+-  else {
+-      host_header = g_strdup_printf ("%s:%d", host, port);
+-      soup_message_headers_replace (message_headers, "Host", host_header);
+-    }
++  host_header = host_header_value (host, port);
++  soup_message_headers_replace (message_headers, "Host", host_header);
+ 
+   if (request->service->proxy_active == TRUE)
+     soup_message_headers_replace (message_headers, "Proxy-Connection", "Keep-Alive");
+@@ -4546,22 +4589,19 @@ mms_service_bearer_notify (struct mms_service *service,
+       g_autofree char *new_uri = NULL;
+       g_autofree char *uri_to_use_temp = NULL;
+       g_autofree char *uri_to_use = NULL;
+-      gchar **tokens;
+       g_autoptr(GUri) proxy_uri = NULL;
+       GProxyResolver *default_proxy = NULL;
++      gboolean is_ip;
+       int port;
+ 
+-      if (g_str_has_prefix (proxy, "http://"))
++      uri = proxy_to_uri (proxy, &is_ip);
++      if (uri == NULL)
+         {
+-          uri = g_strdup (proxy);
+-          tokens = g_strsplit (proxy + 7, ":", 2);
+-        }
+-      else {
+-          uri = g_strdup_printf ("http://%s", proxy);
+-          tokens = g_strsplit (proxy, ":", 2);
++          g_critical ("Cannot parse the proxy %s", proxy);
++          goto interface_down;
+         }
+ 
+-      if (!g_hostname_is_ip_address (tokens[0]))
++      if (!is_ip)
+         {
+           DBG ("Hostname is not an IP address!");
+           new_uri = resolve_host (service, uri, 0, NULL);
+@@ -4570,8 +4610,6 @@ mms_service_bearer_notify (struct mms_service *service,
+       else
+         new_uri = g_strdup (uri);
+ 
+-      g_strfreev (tokens);
+-
+       if (new_uri == NULL)
+         {
+           g_critical ("Failed to resolve proxy");
+-- 
+2.53.0
+

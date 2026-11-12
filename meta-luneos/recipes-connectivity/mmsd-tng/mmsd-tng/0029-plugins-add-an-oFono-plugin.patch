@@ -1,0 +1,1336 @@
+From 8386d76fa22a9a5e541734495879ebf3b76aaaed Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 14:27:03 +0100
+Subject: [PATCH] plugins: add an oFono plugin
+
+The oFono plugin was removed in 2021, and with it support for every
+phone that runs oFono instead of ModemManager. Add it back, written for
+GDBus and the current service API:
+
+- it talks to oFono on the system bus, whichever bus mmsd-tng is on;
+- it follows every modem oFono has and serves the one MMS service on
+  the first that has a SIM with a known IMSI, a connection manager and
+  push notifications, which on a dual SIM phone need not be the first
+  modem. It sets the country code and own number from that SIM. When
+  the modem stops qualifying or goes away, the next one that qualifies
+  takes over;
+- it registers a push notification agent on that modem only, and
+  accepts pushes only from oFono's unique name, since anyone on the
+  system bus could otherwise hand mmsd-tng a notification pointing at
+  any URL;
+- it takes the MMSC, the proxy and the IPv4 and IPv6 DNS servers from
+  oFono's MMS context, brings the context up when the service asks for
+  the bearer, and takes it down when the service lets go of it, or when
+  the modem is let go of, but only if it brought it up itself;
+- when the MMS context has the same APN as the internet context, which
+  modems generally refuse to activate a second time, it carries MMS
+  over the internet context instead, as FuriLabs' mmsd4ofono does;
+- it only tells the service the bearer is up when the interface or
+  proxy changed, because every such call restarts the transfer.
+
+Build it with -Dofono=true.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ README            |   12 +
+ meson.build       |    5 +
+ meson_options.txt |    2 +
+ plugins/ofono.c   | 1235 +++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 1254 insertions(+)
+ create mode 100644 plugins/ofono.c
+
+diff --git a/README b/README
+index 9220713..7e19fd5 100644
+--- a/README
++++ b/README
+@@ -22,6 +22,18 @@ from Mobile Data APNs).
+ 
+ Please read "Configuring the Modem Manager Plugin" for configuration.
+ 
++oFono specific notes
++===========================
++Build with -Dofono=true (and -Dmodemmanager=disabled if ModemManager is not
++used). The oFono plugin talks to oFono on the system bus, whichever bus
++mmsd-tng runs on. It uses the first modem that has a SIM, a connection manager
++and push notifications, receives WAP push messages through a push
++notification agent (and only accepts them from oFono), and takes the MMSC,
++the MMS proxy and the DNS servers from oFono's MMS context, which it brings up
++when it needs to send or retrieve and takes down again when it is idle. When
++the MMS context has the same APN as the internet context, it uses the
++internet context instead and leaves the MMS context alone.
++
+ Compiling mmsd-tng
+ ============================
+ In order to compile proxy daemon you need following software packages:
+diff --git a/meson.build b/meson.build
+index 0e2d95d..42a128b 100644
+--- a/meson.build
++++ b/meson.build
+@@ -136,6 +136,11 @@ if mm_glib.found()
+   plugins_sources += 'modemmanager.c'
+ endif
+ 
++if get_option('ofono')
++  builtin_plugins += 'ofono'
++  plugins_sources += 'ofono.c'
++endif
++
+ if builtin_plugins.length() == 0
+   error('No modem plugin is enabled')
+ endif
+diff --git a/meson_options.txt b/meson_options.txt
+index 14e5338..2726bb1 100644
+--- a/meson_options.txt
++++ b/meson_options.txt
+@@ -1,3 +1,5 @@
+ option('build-mmsctl', type : 'boolean', value : false)
+ option('modemmanager', type : 'feature', value : 'enabled',
+        description : 'Build the ModemManager plugin')
++option('ofono', type : 'boolean', value : false,
++       description : 'Build the oFono plugin')
+diff --git a/plugins/ofono.c b/plugins/ofono.c
+new file mode 100644
+index 0000000..9ea195a
+--- /dev/null
++++ b/plugins/ofono.c
+@@ -0,0 +1,1235 @@
++/*
++ *
++ *  Multimedia Messaging Service Daemon - The Next Generation
++ *
++ *  Copyright (C) 2010-2011 Intel Corporation
++ *                2021 Chris Talbot <chris@talbothome.com>
++ *                2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU General Public License for more details.
++ *
++ *  You should have received a copy of the GNU General Public License
++ *  along with this program; if not, write to the Free Software
++ *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
++ *
++ */
++
++/*
++ * oFono plugin.
++ *
++ * oFono is always on the system bus, whichever bus mmsd-tng itself is on.
++ * mmsd-tng has one MMS service, so the plugin serves it on one modem at a
++ * time: the first one, in the order oFono lists them, that has a SIM with
++ * an IMSI, a connection manager and push notifications. On a dual SIM
++ * phone that need not be the first modem. When the modem stops qualifying
++ * or goes away, the next one that qualifies takes over. The plugin gets
++ * WAP push PDUs through a push notification agent on that modem only, and
++ * brings up its MMS context when the service asks for the bearer. When the MMS context has the same APN as the internet context,
++ * modems generally refuse to activate it as well, so the plugin uses the
++ * internet context instead.
++ */
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++#include <errno.h>
++#include <string.h>
++#include <gio/gio.h>
++#include "mms.h"
++
++#define IDENTIFIER                "ofono"
++
++#define OFONO_SERVICE             "org.ofono"
++#define OFONO_MANAGER_INTERFACE   OFONO_SERVICE ".Manager"
++#define OFONO_MODEM_INTERFACE     OFONO_SERVICE ".Modem"
++#define OFONO_SIM_INTERFACE       OFONO_SERVICE ".SimManager"
++#define OFONO_GPRS_INTERFACE      OFONO_SERVICE ".ConnectionManager"
++#define OFONO_CONTEXT_INTERFACE   OFONO_SERVICE ".ConnectionContext"
++#define OFONO_PUSH_INTERFACE      OFONO_SERVICE ".PushNotification"
++#define OFONO_AGENT_INTERFACE     OFONO_SERVICE ".PushNotificationAgent"
++
++/* oFono can take a while to bring up a context */
++#define OFONO_CALL_TIMEOUT_MS     (120 * 1000)
++
++struct context {
++  char *path;
++  char *type;
++  char *apn;
++  gboolean active;
++  char *interface;
++  char *interface6;
++  char *proxy;
++  char *message_proxy;
++  char *message_center;
++  char *dns;
++  char *dns6;
++};
++
++struct modem {
++  char *path;
++  gboolean has_sim;
++  gboolean has_gprs;
++  gboolean has_push;
++  gboolean sim_present;
++  char *imsi;
++  char *own_number;
++  gboolean attached;
++  GHashTable *contexts;
++  guint agent_id;
++  gboolean agent_registered;
++  /* the service asked for the bearer and has not let go of it */
++  gboolean bearer_wanted;
++  /* we set the MMS context active and have to take it down again */
++  gboolean activated;
++  /* an activation is on its way */
++  gboolean activating;
++  /* what we last told the service */
++  gboolean bearer_up;
++  char *bearer_interface;
++  char *bearer_proxy;
++  GCancellable *cancellable;
++};
++
++static GDBusConnection *connection;
++static guint ofono_watch;
++static char *ofono_owner;
++/* cancelled when oFono goes away */
++static GCancellable *ofono_cancellable;
++static GSList *subscriptions;
++static struct mms_service *service;
++static gboolean service_registered;
++/* every modem oFono has, in its order */
++static GPtrArray *modem_list;
++/* the modem the service is registered for, if any */
++static struct modem *active_modem;
++
++static void update_bearer (struct modem *m);
++static void unregister_agent (struct modem *m);
++
++/* "as" to "a,b,c", or NULL for none */
++static char *
++strv_variant_to_csv (GVariant *value)
++{
++  g_autofree const char **strv = NULL;
++
++  if (!g_variant_is_of_type (value, G_VARIANT_TYPE_STRING_ARRAY))
++    return NULL;
++
++  strv = g_variant_get_strv (value, NULL);
++  if (strv[0] == NULL)
++    return NULL;
++
++  return g_strjoinv (",", (char **) strv);
++}
++
++static void
++set_string (char       **field,
++            GVariant    *value)
++{
++  g_free (*field);
++  *field = NULL;
++
++  if (g_variant_is_of_type (value, G_VARIANT_TYPE_STRING))
++    {
++      const char *str = g_variant_get_string (value, NULL);
++
++      if (*str != '\0')
++        *field = g_strdup (str);
++    }
++}
++
++static gboolean
++get_boolean (GVariant *value)
++{
++  return g_variant_is_of_type (value, G_VARIANT_TYPE_BOOLEAN) &&
++         g_variant_get_boolean (value);
++}
++
++static void
++context_free (gpointer data)
++{
++  struct context *ctx = data;
++
++  g_free (ctx->path);
++  g_free (ctx->type);
++  g_free (ctx->apn);
++  g_free (ctx->interface);
++  g_free (ctx->interface6);
++  g_free (ctx->proxy);
++  g_free (ctx->message_proxy);
++  g_free (ctx->message_center);
++  g_free (ctx->dns);
++  g_free (ctx->dns6);
++  g_free (ctx);
++}
++
++/* Settings or IPv6.Settings, an a{sv} */
++static void
++context_set_settings (struct context *ctx,
++                      GVariant       *settings,
++                      gboolean        ipv6)
++{
++  g_autoptr(GVariant) interface = NULL;
++  g_autoptr(GVariant) dns = NULL;
++  g_autoptr(GVariant) proxy = NULL;
++
++  if (ipv6)
++    {
++      g_clear_pointer (&ctx->interface6, g_free);
++      g_clear_pointer (&ctx->dns6, g_free);
++    }
++  else {
++      g_clear_pointer (&ctx->interface, g_free);
++      g_clear_pointer (&ctx->dns, g_free);
++      g_clear_pointer (&ctx->proxy, g_free);
++    }
++
++  if (!g_variant_is_of_type (settings, G_VARIANT_TYPE_VARDICT))
++    return;
++
++  interface = g_variant_lookup_value (settings, "Interface", G_VARIANT_TYPE_STRING);
++  dns = g_variant_lookup_value (settings, "DomainNameServers", G_VARIANT_TYPE_STRING_ARRAY);
++
++  if (ipv6)
++    {
++      if (interface)
++        set_string (&ctx->interface6, interface);
++      if (dns)
++        ctx->dns6 = strv_variant_to_csv (dns);
++      return;
++    }
++
++  if (interface)
++    set_string (&ctx->interface, interface);
++  if (dns)
++    ctx->dns = strv_variant_to_csv (dns);
++
++  /* oFono's resolved MessageProxy, as address:port */
++  proxy = g_variant_lookup_value (settings, "Proxy", G_VARIANT_TYPE_STRING);
++  if (proxy)
++    set_string (&ctx->proxy, proxy);
++}
++
++static void
++context_set_property (struct context *ctx,
++                      const char     *name,
++                      GVariant       *value)
++{
++  if (g_str_equal (name, "Type"))
++    set_string (&ctx->type, value);
++  else if (g_str_equal (name, "AccessPointName"))
++    set_string (&ctx->apn, value);
++  else if (g_str_equal (name, "Active"))
++    ctx->active = get_boolean (value);
++  else if (g_str_equal (name, "Settings"))
++    context_set_settings (ctx, value, FALSE);
++  else if (g_str_equal (name, "IPv6.Settings"))
++    context_set_settings (ctx, value, TRUE);
++  else if (g_str_equal (name, "MessageProxy"))
++    set_string (&ctx->message_proxy, value);
++  else if (g_str_equal (name, "MessageCenter"))
++    set_string (&ctx->message_center, value);
++}
++
++static void
++context_add (struct modem *m,
++             const char   *path,
++             GVariant     *properties)
++{
++  struct context *ctx = g_new0 (struct context, 1);
++  GVariantIter iter;
++  const char *name;
++  GVariant *value;
++
++  ctx->path = g_strdup (path);
++
++  g_variant_iter_init (&iter, properties);
++  while (g_variant_iter_next (&iter, "{&sv}", &name, &value))
++    {
++      context_set_property (ctx, name, value);
++      g_variant_unref (value);
++    }
++
++  DBG ("context %s type %s apn %s active %d", ctx->path, ctx->type, ctx->apn, ctx->active);
++
++  g_hash_table_replace (m->contexts, ctx->path, ctx);
++}
++
++static struct context *
++find_context (struct modem *m,
++              const char   *type,
++              const char   *apn)
++{
++  GHashTableIter iter;
++  struct context *ctx;
++
++  g_hash_table_iter_init (&iter, m->contexts);
++  while (g_hash_table_iter_next (&iter, NULL, (gpointer *) &ctx))
++    {
++      if (g_strcmp0 (ctx->type, type) != 0)
++        continue;
++
++      if (apn == NULL || (ctx->apn && g_ascii_strcasecmp (ctx->apn, apn) == 0))
++        return ctx;
++    }
++
++  return NULL;
++}
++
++static struct context *
++mms_context (struct modem *m)
++{
++  return find_context (m, "mms", NULL);
++}
++
++/*
++ * The context to carry MMS: the MMS context, or the internet context when
++ * the MMS context has the same APN.
++ */
++static struct context *
++bearer_context (struct modem *m)
++{
++  struct context *mms = mms_context (m);
++  struct context *internet;
++
++  if (mms == NULL)
++    return NULL;
++
++  if (mms->apn != NULL)
++    {
++      internet = find_context (m, "internet", mms->apn);
++      if (internet != NULL)
++        return internet;
++    }
++
++  return mms;
++}
++
++static void
++notify_bearer (struct modem *m,
++               gboolean      up,
++               const char   *interface,
++               const char   *proxy)
++{
++  if (up && m->bearer_up && g_strcmp0 (interface, m->bearer_interface) == 0 &&
++      g_strcmp0 (proxy, m->bearer_proxy) == 0)
++    return;
++
++  m->bearer_up = up;
++  g_free (m->bearer_interface);
++  m->bearer_interface = up ? g_strdup (interface) : NULL;
++  g_free (m->bearer_proxy);
++  m->bearer_proxy = up ? g_strdup (proxy) : NULL;
++
++  DBG ("bearer %s interface %s proxy %s", up ? "up" : "down", interface, proxy);
++
++  if (m == active_modem)
++    mms_service_bearer_notify (service, up, interface, proxy);
++}
++
++static void
++set_active_reply (GObject      *source,
++                  GAsyncResult *result,
++                  gpointer      user_data)
++{
++  g_autoptr(GVariant) reply = NULL;
++  g_autoptr(GError) error = NULL;
++  struct modem *m = user_data;
++
++  reply = g_dbus_connection_call_finish (G_DBUS_CONNECTION (source), result, &error);
++  if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
++    return;
++
++  m->activating = FALSE;
++
++  if (error != NULL)
++    {
++      /* Either way the service is waiting to hear the bearer is down */
++      g_warning ("Could not change the MMS context: %s", error->message);
++      m->activated = FALSE;
++      notify_bearer (m, FALSE, NULL, NULL);
++      return;
++    }
++
++  update_bearer (m);
++}
++
++static void
++set_context_active (struct modem   *m,
++                    struct context *ctx,
++                    gboolean        active)
++{
++  DBG ("context %s active %d", ctx->path, active);
++
++  m->activating = active;
++  m->activated = active;
++
++  g_dbus_connection_call (connection, OFONO_SERVICE, ctx->path,
++                          OFONO_CONTEXT_INTERFACE, "SetProperty",
++                          g_variant_new ("(sv)", "Active",
++                                         g_variant_new_boolean (active)),
++                          NULL, G_DBUS_CALL_FLAGS_NONE, OFONO_CALL_TIMEOUT_MS,
++                          m->cancellable, set_active_reply, m);
++}
++
++/* Tell the service what it needs to know about the contexts */
++static void
++update_bearer (struct modem *m)
++{
++  struct context *mms = mms_context (m);
++  struct context *ctx = bearer_context (m);
++  const char *interface = NULL;
++  const char *proxy = NULL;
++
++  if (m != active_modem)
++    return;
++
++  mms_service_set_mmsc (service, mms ? mms->message_center : NULL);
++
++  if (ctx != NULL && ctx->active)
++    interface = ctx->interface ? ctx->interface : ctx->interface6;
++
++  if (mms != NULL)
++    proxy = (ctx == mms && mms->proxy) ? mms->proxy : mms->message_proxy;
++
++  if (!m->bearer_wanted)
++    {
++      if (m->bearer_up)
++        notify_bearer (m, FALSE, NULL, NULL);
++      return;
++    }
++
++  if (ctx != NULL && interface != NULL)
++    {
++      mms_service_set_resolvers (service, ctx->dns, ctx->dns6);
++      notify_bearer (m, TRUE, interface, proxy);
++      return;
++    }
++
++  if (m->bearer_up)
++    {
++      notify_bearer (m, FALSE, NULL, NULL);
++      return;
++    }
++
++  /* Only the MMS context is ours to bring up */
++  if (ctx != NULL && ctx == mms && !ctx->active && !m->activating && m->attached)
++    set_context_active (m, ctx, TRUE);
++}
++
++static void
++bearer_handler (mms_bool_t active,
++                void      *user_data)
++{
++  struct modem *m = user_data;
++  struct context *ctx = bearer_context (m);
++
++  DBG ("modem %s active %d", m->path, active);
++
++  m->bearer_wanted = active;
++
++  if (active)
++    {
++      if (ctx == NULL || !m->attached)
++        {
++          DBG ("No MMS context, or not attached");
++          notify_bearer (m, FALSE, NULL, NULL);
++          return;
++        }
++
++      /* A shared internet context is not ours to bring up */
++      if (ctx != mms_context (m) && !ctx->active)
++        {
++          DBG ("The internet context the MMS APN shares is down");
++          notify_bearer (m, FALSE, NULL, NULL);
++          return;
++        }
++
++      /* The service waits for this even if nothing changed since */
++      m->bearer_up = FALSE;
++      update_bearer (m);
++      return;
++    }
++
++  if (ctx != NULL && ctx == mms_context (m) && m->activated && ctx->active)
++    {
++      set_context_active (m, ctx, FALSE);
++      return;
++    }
++
++  m->activated = FALSE;
++  notify_bearer (m, FALSE, NULL, NULL);
++}
++
++static void
++agent_method_call (GDBusConnection       *conn,
++                   const char            *sender,
++                   const char            *object_path,
++                   const char            *interface_name,
++                   const char            *method_name,
++                   GVariant              *parameters,
++                   GDBusMethodInvocation *invocation,
++                   gpointer               user_data)
++{
++  struct modem *m = user_data;
++
++  /* Only oFono may hand us push messages */
++  if (ofono_owner == NULL || g_strcmp0 (sender, ofono_owner) != 0)
++    {
++      g_dbus_method_invocation_return_error_literal (invocation, G_DBUS_ERROR,
++                                                     G_DBUS_ERROR_ACCESS_DENIED,
++                                                     "Not oFono");
++      return;
++    }
++
++  if (g_str_equal (method_name, "ReceiveNotification"))
++    {
++      g_autoptr(GVariant) pdu = NULL;
++      const guint8 *data;
++      gsize len;
++
++      g_variant_get (parameters, "(@aya{sv})", &pdu, NULL);
++      data = g_variant_get_fixed_array (pdu, &len, 1);
++
++      DBG ("push notification of %" G_GSIZE_FORMAT " bytes", len);
++
++      if (m != active_modem || !service_registered)
++        g_warning ("Dropping a push notification: the MMS service is not up");
++      else if (len > 0 && len <= G_MAXINT)
++        mms_service_push_notify (service, data, (int) len);
++
++      g_dbus_method_invocation_return_value (invocation, NULL);
++    }
++  else if (g_str_equal (method_name, "Release"))
++    {
++      DBG ("agent released");
++      m->agent_registered = FALSE;
++      g_dbus_method_invocation_return_value (invocation, NULL);
++    }
++  else
++    g_dbus_method_invocation_return_error (invocation, G_DBUS_ERROR,
++                                           G_DBUS_ERROR_UNKNOWN_METHOD,
++                                           "Unknown method %s", method_name);
++}
++
++static const char agent_xml[] =
++  "<node>"
++  "  <interface name='" OFONO_AGENT_INTERFACE "'>"
++  "    <method name='ReceiveNotification'>"
++  "      <arg name='notification' type='ay' direction='in'/>"
++  "      <arg name='info' type='a{sv}' direction='in'/>"
++  "    </method>"
++  "    <method name='Release'/>"
++  "  </interface>"
++  "</node>";
++
++static const GDBusInterfaceVTable agent_vtable = {
++  agent_method_call, NULL, NULL, { NULL }
++};
++
++static void
++register_agent_reply (GObject      *source,
++                      GAsyncResult *result,
++                      gpointer      user_data)
++{
++  g_autoptr(GVariant) reply = NULL;
++  g_autoptr(GError) error = NULL;
++  struct modem *m = user_data;
++
++  reply = g_dbus_connection_call_finish (G_DBUS_CONNECTION (source), result, &error);
++  if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
++    return;
++
++  if (error != NULL)
++    {
++      g_warning ("Could not register the push notification agent: %s",
++                 error->message);
++      return;
++    }
++
++  DBG ("push notification agent registered");
++  m->agent_registered = TRUE;
++
++  /* The modem was let go of while the call was on its way */
++  if (m != active_modem)
++    unregister_agent (m);
++}
++
++static void
++register_agent (struct modem *m)
++{
++  g_autoptr(GDBusNodeInfo) info = NULL;
++  g_autoptr(GError) error = NULL;
++
++  if (m->agent_id == 0)
++    {
++      info = g_dbus_node_info_new_for_xml (agent_xml, &error);
++      if (info == NULL)
++        {
++          g_critical ("Bad agent introspection data: %s", error->message);
++          return;
++        }
++
++      m->agent_id = g_dbus_connection_register_object (connection, m->path,
++                                                       info->interfaces[0],
++                                                       &agent_vtable, m, NULL,
++                                                       &error);
++      if (m->agent_id == 0)
++        {
++          g_warning ("Could not export the push notification agent: %s",
++                     error->message);
++          return;
++        }
++    }
++
++  g_dbus_connection_call (connection, OFONO_SERVICE, m->path,
++                          OFONO_PUSH_INTERFACE, "RegisterAgent",
++                          g_variant_new ("(o)", m->path), NULL,
++                          G_DBUS_CALL_FLAGS_NONE, -1, m->cancellable,
++                          register_agent_reply, m);
++}
++
++static void
++unregister_agent (struct modem *m)
++{
++  /* Best effort: oFono drops the agent anyway when we go away */
++  if (m->agent_registered && ofono_owner != NULL)
++    g_dbus_connection_call (connection, OFONO_SERVICE, m->path,
++                            OFONO_PUSH_INTERFACE, "UnregisterAgent",
++                            g_variant_new ("(o)", m->path), NULL,
++                            G_DBUS_CALL_FLAGS_NO_AUTO_START, -1, NULL, NULL, NULL);
++  m->agent_registered = FALSE;
++
++  if (m->agent_id != 0)
++    {
++      g_dbus_connection_unregister_object (connection, m->agent_id);
++      m->agent_id = 0;
++    }
++}
++
++static gboolean
++modem_usable (struct modem *m)
++{
++  return m->has_sim && m->has_gprs && m->has_push && m->sim_present &&
++         m->imsi != NULL;
++}
++
++/* Unregister the service from the active modem */
++static void
++release_modem (struct modem *m)
++{
++  struct context *ctx = mms_context (m);
++
++  DBG ("unregistering the service for modem %s", m->path);
++
++  if (m->bearer_up)
++    notify_bearer (m, FALSE, NULL, NULL);
++  mms_service_set_bearer_handler (service, NULL, NULL);
++  mms_service_unregister (service);
++  service_registered = FALSE;
++  active_modem = NULL;
++
++  m->bearer_wanted = FALSE;
++  unregister_agent (m);
++
++  /* Take down the MMS context we brought up, if the modem still has it */
++  if (ctx != NULL && m->has_gprs && m->activated && ctx->active)
++    set_context_active (m, ctx, FALSE);
++  else
++    m->activated = FALSE;
++}
++
++/* Register the service for the first modem that qualifies, if none has it */
++static void
++update_service (void)
++{
++  struct modem *m = NULL;
++
++  if (active_modem != NULL && !modem_usable (active_modem))
++    release_modem (active_modem);
++
++  if (active_modem != NULL || modem_list == NULL)
++    return;
++
++  for (guint i = 0; i < modem_list->len && m == NULL; i++)
++    if (modem_usable (g_ptr_array_index (modem_list, i)))
++      m = g_ptr_array_index (modem_list, i);
++
++  if (m == NULL)
++    return;
++
++  DBG ("registering the service for modem %s", m->path);
++  mms_service_set_country_code (service, m->imsi);
++  if (m->own_number)
++    mms_service_set_own_number (service, m->own_number);
++  mms_service_set_bearer_handler (service, bearer_handler, m);
++  if (mms_service_register (service) < 0)
++    {
++      g_warning ("Could not register the MMS service");
++      mms_service_set_bearer_handler (service, NULL, NULL);
++      return;
++    }
++  service_registered = TRUE;
++  active_modem = m;
++
++  register_agent (m);
++  update_bearer (m);
++}
++
++static void
++sim_set_property (struct modem *m,
++                  const char   *name,
++                  GVariant     *value)
++{
++  if (g_str_equal (name, "Present"))
++    {
++      m->sim_present = get_boolean (value);
++      if (!m->sim_present)
++        g_clear_pointer (&m->imsi, g_free);
++    }
++  else if (g_str_equal (name, "SubscriberIdentity"))
++    set_string (&m->imsi, value);
++  else if (g_str_equal (name, "SubscriberNumbers"))
++    {
++      g_free (m->own_number);
++      m->own_number = NULL;
++
++      if (g_variant_is_of_type (value, G_VARIANT_TYPE_STRING_ARRAY) &&
++          g_variant_n_children (value) > 0)
++        g_variant_get_child (value, 0, "s", &m->own_number);
++
++      if (m == active_modem && m->own_number)
++        mms_service_set_own_number (service, m->own_number);
++    }
++}
++
++static void
++gprs_set_property (struct modem *m,
++                   const char   *name,
++                   GVariant     *value)
++{
++  if (g_str_equal (name, "Attached"))
++    m->attached = get_boolean (value);
++}
++
++typedef void (*property_setter) (struct modem *m,
++                                 const char   *name,
++                                 GVariant     *value);
++
++static void
++get_properties_reply (GObject      *source,
++                      GAsyncResult *result,
++                      gpointer      user_data,
++                      property_setter setter)
++{
++  g_autoptr(GVariant) reply = NULL;
++  g_autoptr(GVariant) properties = NULL;
++  g_autoptr(GError) error = NULL;
++  struct modem *m = user_data;
++  GVariantIter iter;
++  const char *name;
++  GVariant *value;
++
++  reply = g_dbus_connection_call_finish (G_DBUS_CONNECTION (source), result, &error);
++  if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
++    return;
++
++  if (error != NULL)
++    {
++      g_warning ("GetProperties failed: %s", error->message);
++      return;
++    }
++
++  properties = g_variant_get_child_value (reply, 0);
++  g_variant_iter_init (&iter, properties);
++  while (g_variant_iter_next (&iter, "{&sv}", &name, &value))
++    {
++      setter (m, name, value);
++      g_variant_unref (value);
++    }
++
++  update_service ();
++  update_bearer (m);
++}
++
++static void
++sim_properties_reply (GObject      *source,
++                      GAsyncResult *result,
++                      gpointer      user_data)
++{
++  get_properties_reply (source, result, user_data, sim_set_property);
++}
++
++static void
++gprs_properties_reply (GObject      *source,
++                       GAsyncResult *result,
++                       gpointer      user_data)
++{
++  get_properties_reply (source, result, user_data, gprs_set_property);
++}
++
++static void
++get_contexts_reply (GObject      *source,
++                    GAsyncResult *result,
++                    gpointer      user_data)
++{
++  g_autoptr(GVariant) reply = NULL;
++  g_autoptr(GVariant) contexts = NULL;
++  g_autoptr(GError) error = NULL;
++  struct modem *m = user_data;
++  GVariantIter iter;
++  const char *path;
++  GVariant *properties;
++
++  reply = g_dbus_connection_call_finish (G_DBUS_CONNECTION (source), result, &error);
++  if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
++    return;
++
++  if (error != NULL)
++    {
++      g_warning ("GetContexts failed: %s", error->message);
++      return;
++    }
++
++  contexts = g_variant_get_child_value (reply, 0);
++  g_variant_iter_init (&iter, contexts);
++  while (g_variant_iter_next (&iter, "(&o@a{sv})", &path, &properties))
++    {
++      context_add (m, path, properties);
++      g_variant_unref (properties);
++    }
++
++  update_bearer (m);
++}
++
++static void
++get_properties (struct modem       *m,
++                const char         *interface,
++                GAsyncReadyCallback callback)
++{
++  g_dbus_connection_call (connection, OFONO_SERVICE, m->path, interface,
++                          "GetProperties", NULL, G_VARIANT_TYPE ("(a{sv})"),
++                          G_DBUS_CALL_FLAGS_NONE, -1, m->cancellable,
++                          callback, m);
++}
++
++static void
++modem_set_interfaces (struct modem *m,
++                      GVariant     *value)
++{
++  g_autofree const char **interfaces = NULL;
++  gboolean has_sim, has_gprs, has_push;
++
++  if (!g_variant_is_of_type (value, G_VARIANT_TYPE_STRING_ARRAY))
++    return;
++
++  interfaces = g_variant_get_strv (value, NULL);
++  has_sim = g_strv_contains (interfaces, OFONO_SIM_INTERFACE);
++  has_gprs = g_strv_contains (interfaces, OFONO_GPRS_INTERFACE);
++  has_push = g_strv_contains (interfaces, OFONO_PUSH_INTERFACE);
++
++  if (has_sim != m->has_sim)
++    {
++      m->has_sim = has_sim;
++      if (has_sim)
++        get_properties (m, OFONO_SIM_INTERFACE, sim_properties_reply);
++      else {
++          m->sim_present = FALSE;
++          g_clear_pointer (&m->imsi, g_free);
++        }
++    }
++
++  if (has_gprs != m->has_gprs)
++    {
++      m->has_gprs = has_gprs;
++      g_hash_table_remove_all (m->contexts);
++      m->attached = FALSE;
++      if (has_gprs)
++        {
++          get_properties (m, OFONO_GPRS_INTERFACE, gprs_properties_reply);
++          g_dbus_connection_call (connection, OFONO_SERVICE, m->path,
++                                  OFONO_GPRS_INTERFACE, "GetContexts", NULL,
++                                  G_VARIANT_TYPE ("(a(oa{sv}))"),
++                                  G_DBUS_CALL_FLAGS_NONE, -1, m->cancellable,
++                                  get_contexts_reply, m);
++        }
++    }
++
++  /* The agent goes with the service; see update_service () */
++  m->has_push = has_push;
++
++  update_service ();
++  update_bearer (m);
++}
++
++static void
++modem_free (struct modem *m)
++{
++  g_cancellable_cancel (m->cancellable);
++  g_clear_object (&m->cancellable);
++
++  unregister_agent (m);
++
++  g_hash_table_destroy (m->contexts);
++  g_free (m->path);
++  g_free (m->imsi);
++  g_free (m->own_number);
++  g_free (m->bearer_interface);
++  g_free (m->bearer_proxy);
++  g_free (m);
++}
++
++static struct modem *
++find_modem (const char *path)
++{
++  if (modem_list == NULL)
++    return NULL;
++
++  for (guint i = 0; i < modem_list->len; i++)
++    {
++      struct modem *m = g_ptr_array_index (modem_list, i);
++
++      if (g_str_equal (m->path, path))
++        return m;
++    }
++
++  return NULL;
++}
++
++/* The modem that has the context at path */
++static struct modem *
++find_context_modem (const char      *path,
++                    struct context **ctx)
++{
++  if (modem_list == NULL)
++    return NULL;
++
++  for (guint i = 0; i < modem_list->len; i++)
++    {
++      struct modem *m = g_ptr_array_index (modem_list, i);
++
++      *ctx = g_hash_table_lookup (m->contexts, path);
++      if (*ctx != NULL)
++        return m;
++    }
++
++  return NULL;
++}
++
++static void
++modem_remove (struct modem *m)
++{
++  DBG ("modem %s", m->path);
++
++  /* It is gone from oFono: there is nothing to call on it any more */
++  m->has_sim = m->has_gprs = m->has_push = FALSE;
++  if (m == active_modem)
++    release_modem (m);
++
++  g_ptr_array_remove (modem_list, m);
++
++  update_service ();
++}
++
++static void
++modem_remove_all (void)
++{
++  if (modem_list == NULL)
++    return;
++
++  for (guint i = 0; i < modem_list->len; i++)
++    {
++      struct modem *m = g_ptr_array_index (modem_list, i);
++
++      m->has_sim = m->has_gprs = m->has_push = FALSE;
++    }
++
++  if (active_modem != NULL)
++    release_modem (active_modem);
++
++  g_ptr_array_set_size (modem_list, 0);
++}
++
++static void
++modem_add (const char *path,
++           GVariant   *properties)
++{
++  g_autoptr(GVariant) interfaces = NULL;
++  struct modem *m;
++
++  if (find_modem (path) != NULL)
++    return;
++
++  DBG ("modem %s", path);
++
++  m = g_new0 (struct modem, 1);
++  m->path = g_strdup (path);
++  m->contexts = g_hash_table_new_full (g_str_hash, g_str_equal, NULL, context_free);
++  m->cancellable = g_cancellable_new ();
++  g_ptr_array_add (modem_list, m);
++
++  interfaces = g_variant_lookup_value (properties, "Interfaces", G_VARIANT_TYPE_STRING_ARRAY);
++  if (interfaces != NULL)
++    modem_set_interfaces (m, interfaces);
++}
++
++static void
++get_modems_reply (GObject      *source,
++                  GAsyncResult *result,
++                  gpointer      user_data)
++{
++  g_autoptr(GVariant) reply = NULL;
++  g_autoptr(GVariant) modems = NULL;
++  g_autoptr(GError) error = NULL;
++  GVariantIter iter;
++  const char *path;
++  GVariant *properties;
++
++  reply = g_dbus_connection_call_finish (G_DBUS_CONNECTION (source), result, &error);
++  if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
++    return;
++
++  if (error != NULL)
++    {
++      g_warning ("GetModems failed: %s", error->message);
++      return;
++    }
++
++  modems = g_variant_get_child_value (reply, 0);
++  g_variant_iter_init (&iter, modems);
++  while (g_variant_iter_next (&iter, "(&o@a{sv})", &path, &properties))
++    {
++      modem_add (path, properties);
++      g_variant_unref (properties);
++    }
++}
++
++static void
++on_signal (GDBusConnection *conn,
++           const char      *sender,
++           const char      *path,
++           const char      *interface,
++           const char      *signal,
++           GVariant        *parameters,
++           gpointer         user_data)
++{
++  struct modem *m;
++  struct context *ctx;
++  const char *name;
++  const char *object;
++  g_autoptr(GVariant) value = NULL;
++  g_autoptr(GVariant) properties = NULL;
++
++  if (g_str_equal (interface, OFONO_MANAGER_INTERFACE))
++    {
++      if (g_str_equal (signal, "ModemAdded") &&
++          g_variant_is_of_type (parameters, G_VARIANT_TYPE ("(oa{sv})")))
++        {
++          g_variant_get (parameters, "(&o@a{sv})", &object, &properties);
++          modem_add (object, properties);
++        }
++      else if (g_str_equal (signal, "ModemRemoved") &&
++               g_variant_is_of_type (parameters, G_VARIANT_TYPE ("(o)")))
++        {
++          g_variant_get (parameters, "(&o)", &object);
++          m = find_modem (object);
++          if (m != NULL)
++            modem_remove (m);
++        }
++      return;
++    }
++
++  if (g_str_equal (interface, OFONO_CONTEXT_INTERFACE))
++    {
++      if (!g_str_equal (signal, "PropertyChanged") ||
++          !g_variant_is_of_type (parameters, G_VARIANT_TYPE ("(sv)")))
++        return;
++
++      m = find_context_modem (path, &ctx);
++      if (m == NULL)
++        return;
++
++      g_variant_get (parameters, "(&sv)", &name, &value);
++      DBG ("context %s %s", path, name);
++      context_set_property (ctx, name, value);
++      update_bearer (m);
++      return;
++    }
++
++  m = find_modem (path);
++  if (m == NULL)
++    return;
++
++  if (g_str_equal (signal, "PropertyChanged"))
++    {
++      if (!g_variant_is_of_type (parameters, G_VARIANT_TYPE ("(sv)")))
++        return;
++
++      g_variant_get (parameters, "(&sv)", &name, &value);
++
++      if (g_str_equal (interface, OFONO_MODEM_INTERFACE))
++        {
++          if (g_str_equal (name, "Interfaces"))
++            modem_set_interfaces (m, value);
++          return;
++        }
++
++      if (g_str_equal (interface, OFONO_SIM_INTERFACE))
++        sim_set_property (m, name, value);
++      else if (g_str_equal (interface, OFONO_GPRS_INTERFACE))
++        gprs_set_property (m, name, value);
++
++      update_service ();
++      update_bearer (m);
++      return;
++    }
++
++  if (!g_str_equal (interface, OFONO_GPRS_INTERFACE))
++    return;
++
++  if (g_str_equal (signal, "ContextAdded") &&
++      g_variant_is_of_type (parameters, G_VARIANT_TYPE ("(oa{sv})")))
++    {
++      g_variant_get (parameters, "(&o@a{sv})", &object, &properties);
++      context_add (m, object, properties);
++      update_bearer (m);
++    }
++  else if (g_str_equal (signal, "ContextRemoved") &&
++           g_variant_is_of_type (parameters, G_VARIANT_TYPE ("(o)")))
++    {
++      g_variant_get (parameters, "(&o)", &object);
++      g_hash_table_remove (m->contexts, object);
++      update_bearer (m);
++    }
++}
++
++static void
++subscribe (const char *interface,
++           const char *signal)
++{
++  guint id;
++
++  id = g_dbus_connection_signal_subscribe (connection, OFONO_SERVICE, interface,
++                                           signal, NULL, NULL,
++                                           G_DBUS_SIGNAL_FLAGS_NONE,
++                                           on_signal, NULL, NULL);
++  subscriptions = g_slist_prepend (subscriptions, GUINT_TO_POINTER (id));
++}
++
++static void
++unsubscribe_all (void)
++{
++  for (GSList *l = subscriptions; l != NULL; l = l->next)
++    g_dbus_connection_signal_unsubscribe (connection, GPOINTER_TO_UINT (l->data));
++
++  g_clear_pointer (&subscriptions, g_slist_free);
++}
++
++static void
++ofono_appeared (GDBusConnection *conn,
++                const char      *name,
++                const char      *owner,
++                gpointer         user_data)
++{
++  DBG ("oFono is %s", owner);
++
++  g_free (ofono_owner);
++  ofono_owner = g_strdup (owner);
++
++  g_cancellable_cancel (ofono_cancellable);
++  g_clear_object (&ofono_cancellable);
++  ofono_cancellable = g_cancellable_new ();
++
++  subscribe (OFONO_MANAGER_INTERFACE, "ModemAdded");
++  subscribe (OFONO_MANAGER_INTERFACE, "ModemRemoved");
++  subscribe (OFONO_MODEM_INTERFACE, "PropertyChanged");
++  subscribe (OFONO_SIM_INTERFACE, "PropertyChanged");
++  subscribe (OFONO_GPRS_INTERFACE, "PropertyChanged");
++  subscribe (OFONO_GPRS_INTERFACE, "ContextAdded");
++  subscribe (OFONO_GPRS_INTERFACE, "ContextRemoved");
++  subscribe (OFONO_CONTEXT_INTERFACE, "PropertyChanged");
++
++  g_dbus_connection_call (connection, OFONO_SERVICE, "/", OFONO_MANAGER_INTERFACE,
++                          "GetModems", NULL, G_VARIANT_TYPE ("(a(oa{sv}))"),
++                          G_DBUS_CALL_FLAGS_NONE, -1, ofono_cancellable,
++                          get_modems_reply, NULL);
++}
++
++static void
++ofono_vanished (GDBusConnection *conn,
++                const char      *name,
++                gpointer         user_data)
++{
++  DBG ("oFono is gone");
++
++  g_cancellable_cancel (ofono_cancellable);
++  g_clear_object (&ofono_cancellable);
++
++  unsubscribe_all ();
++  modem_remove_all ();
++  g_clear_pointer (&ofono_owner, g_free);
++}
++
++static int
++ofono_init (void)
++{
++  g_autoptr(GError) error = NULL;
++
++  connection = g_bus_get_sync (G_BUS_TYPE_SYSTEM, NULL, &error);
++  if (connection == NULL)
++    {
++      g_warning ("Cannot connect to the system bus: %s", error->message);
++      return -EIO;
++    }
++
++  service = mms_service_create ();
++  if (service == NULL)
++    {
++      g_clear_object (&connection);
++      return -ENOMEM;
++    }
++
++  mms_service_set_identity (service, IDENTIFIER);
++
++  modem_list = g_ptr_array_new_with_free_func ((GDestroyNotify) modem_free);
++
++  ofono_watch = g_bus_watch_name_on_connection (connection, OFONO_SERVICE,
++                                                G_BUS_NAME_WATCHER_FLAGS_NONE,
++                                                ofono_appeared, ofono_vanished,
++                                                NULL, NULL);
++  return 0;
++}
++
++static void
++ofono_exit (void)
++{
++  if (connection == NULL)
++    return;
++
++  g_bus_unwatch_name (ofono_watch);
++  ofono_watch = 0;
++
++  g_cancellable_cancel (ofono_cancellable);
++  g_clear_object (&ofono_cancellable);
++
++  unsubscribe_all ();
++  modem_remove_all ();
++  g_clear_pointer (&modem_list, g_ptr_array_unref);
++  g_clear_pointer (&ofono_owner, g_free);
++
++  mms_service_unref (service);
++  service = NULL;
++
++  /* Send UnregisterAgent before letting go of the connection */
++  g_dbus_connection_flush_sync (connection, NULL, NULL);
++  g_clear_object (&connection);
++}
++
++MMS_PLUGIN_DEFINE (ofono, ofono_init, ofono_exit)
+-- 
+2.53.0
+
