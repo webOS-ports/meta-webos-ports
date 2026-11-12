@@ -1,0 +1,1843 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] unit: test the atoms that queue D-Bus requests
+
+Builds the real network, radio-settings, sms and call-forwarding atoms on
+a small model of the modem, with scripted drivers that finish an
+operation when the test says so, and calls them from a second bus
+connection. For each atom: a second client gets an answer and not
+InProgress, requests that can share one driver call do, a failure reaches
+the right requests, nothing is answered twice, and what waits when the
+atom goes away is answered, also when the driver answers from remove().
+
+Runs under dbus-run-session; without a bus it reports itself skipped.
+test-dbus.c now allows a test without a start callback.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+diff --git a/Makefile.am b/Makefile.am
+index 10f591d..b21f7ec 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -997,6 +997,20 @@ unit_test_dbus_queue_LDADD = gdbus/libgdbus-internal.la @GLIB_LIBS@ \
+ 				@DBUS_LIBS@ $(ell_ldadd) -ldl
+ unit_objects += $(unit_test_dbus_queue_OBJECTS)
+ 
++unit_tests += unit/test-dbus-queue-atoms
++
++unit_test_dbus_queue_atoms_SOURCES = unit/test-dbus-queue-atoms.c \
++				unit/test-dbus.c unit/test-dbus.h \
++				src/dbus-queue.c src/dbus.c src/network.c \
++				src/radio-settings.c src/sms.c \
++				src/call-forwarding.c src/smsagent.c \
++				src/message.c src/smsutil.c src/simutil.c \
++				src/storage.c src/watch.c src/common.c \
++				src/util.c
++unit_test_dbus_queue_atoms_LDADD = gdbus/libgdbus-internal.la @GLIB_LIBS@ \
++				@DBUS_LIBS@ $(ell_ldadd)
++unit_objects += $(unit_test_dbus_queue_atoms_OBJECTS)
++
+ LOG_DRIVER = env AM_TAP_AWK='$(AWK)' $(SHELL) \
+ 			$(top_srcdir)/build-aux/tap-driver.sh
+ 
+diff --git a/unit/test-dbus-queue-atoms.c b/unit/test-dbus-queue-atoms.c
+new file mode 100644
+index 0000000..b986450
+--- /dev/null
++++ b/unit/test-dbus-queue-atoms.c
+@@ -0,0 +1,1781 @@
++/*
++ * oFono - Open Source Telephony
++ *
++ * The atoms that keep D-Bus requests instead of answering InProgress:
++ * org.ofono.NetworkRegistration, RadioSettings, MessageManager and
++ * CallForwarding. A second client must get an answer, not an error, and no
++ * request may stay unanswered or be answered twice, also when the atom goes
++ * away with requests waiting.
++ *
++ * The real atoms, the D-Bus helpers and the queue are built into this test,
++ * on a small model of src/modem.c, with scripted drivers that finish each
++ * operation when the test says so. Clients are a second connection to the
++ * bus: run it under dbus-run-session. Without a bus the test reports itself
++ * skipped.
++ *
++ * SPDX-License-Identifier: GPL-2.0-only
++ */
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <stdarg.h>
++/* The checks are asserts, some with side effects: keep them in any build */
++#undef NDEBUG
++#include <assert.h>
++
++#include <glib.h>
++#include <gdbus.h>
++
++#include "ofono.h"
++#include "common.h"
++#include "simutil.h"
++#include "smsutil.h"
++#include "test-dbus.h"
++
++#define MODEM_PATH "/test_0"
++#define ERR_CANCELED "org.ofono.Error.Canceled"
++#define ERR_FAILED "org.ofono.Error.Failed"
++#define ERR_BUSY "org.ofono.Error.InProgress"
++
++/* ---- logging ------------------------------------------------------------ */
++
++static void vlog(const char *format, va_list ap)
++{
++	if (!getenv("TEST_VERBOSE"))
++		return;
++
++	vfprintf(stderr, format, ap);
++	fputc('\n', stderr);
++}
++
++void ofono_debug(const char *format, ...)
++{
++	va_list ap;
++
++	va_start(ap, format);
++	vlog(format, ap);
++	va_end(ap);
++}
++
++void ofono_info(const char *format, ...)
++{
++	va_list ap;
++
++	va_start(ap, format);
++	vlog(format, ap);
++	va_end(ap);
++}
++
++void ofono_warn(const char *format, ...)
++{
++	va_list ap;
++
++	va_start(ap, format);
++	vlog(format, ap);
++	va_end(ap);
++}
++
++void ofono_error(const char *format, ...)
++{
++	va_list ap;
++
++	va_start(ap, format);
++	vfprintf(stderr, format, ap);
++	va_end(ap);
++	fputc('\n', stderr);
++}
++
++/* ---- a model of the modem and atom layer --------------------------------- */
++
++struct ofono_modem {
++	GSList *atoms;
++	GSList *watches;
++	unsigned int next_watch;
++};
++
++struct ofono_atom {
++	enum ofono_atom_type type;
++	void (*destruct)(struct ofono_atom *atom);
++	void (*unregister)(struct ofono_atom *atom);
++	void *data;
++	struct ofono_modem *modem;
++};
++
++struct atom_watch {
++	unsigned int id;
++	ofono_destroy_func destroy;
++	void *data;
++};
++
++struct ofono_atom *__ofono_modem_add_atom(struct ofono_modem *modem,
++					enum ofono_atom_type type,
++					void (*destruct)(struct ofono_atom *),
++					void *data)
++{
++	struct ofono_atom *atom = g_new0(struct ofono_atom, 1);
++
++	atom->type = type;
++	atom->destruct = destruct;
++	atom->data = data;
++	atom->modem = modem;
++	modem->atoms = g_slist_prepend(modem->atoms, atom);
++
++	return atom;
++}
++
++void *__ofono_atom_get_data(struct ofono_atom *atom)
++{
++	return atom->data;
++}
++
++const char *__ofono_atom_get_path(struct ofono_atom *atom)
++{
++	return MODEM_PATH;
++}
++
++struct ofono_modem *__ofono_atom_get_modem(struct ofono_atom *atom)
++{
++	return atom->modem;
++}
++
++void __ofono_atom_register(struct ofono_atom *atom,
++				void (*unregister)(struct ofono_atom *))
++{
++	atom->unregister = unregister;
++}
++
++/* As __ofono_atom_free() in src/modem.c: unregister, then destruct */
++void __ofono_atom_free(struct ofono_atom *atom)
++{
++	struct ofono_modem *modem = atom->modem;
++
++	modem->atoms = g_slist_remove(modem->atoms, atom);
++
++	if (atom->unregister) {
++		atom->unregister(atom);
++		atom->unregister = NULL;
++	}
++
++	if (atom->destruct)
++		atom->destruct(atom);
++
++	g_free(atom);
++}
++
++unsigned int __ofono_modem_add_atom_watch(struct ofono_modem *modem,
++					enum ofono_atom_type type,
++					ofono_atom_watch_func notify,
++					void *data, ofono_destroy_func destroy)
++{
++	struct atom_watch *w = g_new0(struct atom_watch, 1);
++
++	w->id = ++modem->next_watch;
++	w->destroy = destroy;
++	w->data = data;
++	modem->watches = g_slist_append(modem->watches, w);
++
++	return w->id;
++}
++
++gboolean __ofono_modem_remove_atom_watch(struct ofono_modem *modem,
++						unsigned int id)
++{
++	GSList *l;
++
++	for (l = modem->watches; l; l = l->next) {
++		struct atom_watch *w = l->data;
++
++		if (w->id != id)
++			continue;
++
++		modem->watches = g_slist_delete_link(modem->watches, l);
++
++		if (w->destroy)
++			w->destroy(w->data);
++
++		g_free(w);
++		return TRUE;
++	}
++
++	return FALSE;
++}
++
++struct ofono_atom *__ofono_modem_find_atom(struct ofono_modem *modem,
++						enum ofono_atom_type type)
++{
++	return NULL;
++}
++
++void __ofono_modem_foreach_registered_atom(struct ofono_modem *modem,
++						enum ofono_atom_type type,
++						ofono_atom_func callback,
++						void *data)
++{
++}
++
++ofono_bool_t ofono_modem_get_online(struct ofono_modem *modem)
++{
++	return TRUE;
++}
++
++void ofono_modem_add_interface(struct ofono_modem *modem,
++				const char *interface)
++{
++}
++
++void ofono_modem_remove_interface(struct ofono_modem *modem,
++				const char *interface)
++{
++}
++
++const void *__ofono_driver_find(const char *type, const char *name,
++				const struct ofono_driver_desc *start,
++				const struct ofono_driver_desc *stop)
++{
++	const struct ofono_driver_desc *d;
++
++	for (d = start; d < stop; d++)
++		if (!strcmp(d->name, name))
++			return d->driver;
++
++	return NULL;
++}
++
++int __ofono_driver_register(const char *type, const char *name,
++				const void *driver)
++{
++	return 0;
++}
++
++void __ofono_driver_unregister(const char *type, const void *driver)
++{
++}
++
++/* ---- the rest of the core that the atoms link against ------------------- */
++
++static gboolean test_ussd_busy;
++
++gboolean __ofono_ussd_is_busy(struct ofono_ussd *ussd)
++{
++	return test_ussd_busy;
++}
++
++gboolean __ofono_ussd_ssc_register(struct ofono_ussd *ussd, const char *sc,
++					ofono_ussd_ssc_cb_t cb, void *data,
++					ofono_destroy_func destroy)
++{
++	return TRUE;
++}
++
++void __ofono_ussd_ssc_unregister(struct ofono_ussd *ussd, const char *sc)
++{
++}
++
++void __ofono_nettime_info_received(struct ofono_modem *modem,
++					struct ofono_network_time *info)
++{
++}
++
++void __ofono_history_sms_received(struct ofono_modem *modem,
++					const struct ofono_uuid *uuid,
++					const char *from,
++					const struct tm *remote,
++					const struct tm *local,
++					const char *text)
++{
++}
++
++void __ofono_history_sms_send_pending(struct ofono_modem *modem,
++					const struct ofono_uuid *uuid,
++					const char *to,
++					time_t when, const char *text)
++{
++}
++
++void __ofono_history_sms_send_status(struct ofono_modem *modem,
++					const struct ofono_uuid *uuid,
++					time_t when,
++					enum ofono_history_sms_status status)
++{
++}
++
++void __ofono_message_waiting_mwi(struct ofono_message_waiting *mw,
++				struct sms *sms, gboolean *out_discard)
++{
++}
++
++int __ofono_sms_sim_download(struct ofono_stk *stk, const struct sms *msg,
++				__ofono_sms_sim_download_cb_t cb, void *data)
++{
++	return -1;
++}
++
++/* No test here has a SIM or an HFP emulator: the atoms take the no-SIM path */
++ofono_bool_t __ofono_sim_service_available(struct ofono_sim *sim,
++						int ust_service,
++						int sst_service)
++{
++	return FALSE;
++}
++
++struct ofono_sim_context *ofono_sim_context_create(struct ofono_sim *sim)
++{
++	return NULL;
++}
++
++void ofono_sim_context_free(struct ofono_sim_context *context)
++{
++}
++
++const char *ofono_sim_get_imsi(struct ofono_sim *sim)
++{
++	return NULL;
++}
++
++const char *ofono_sim_get_spn(struct ofono_sim *sim)
++{
++	return NULL;
++}
++
++ofono_bool_t ofono_sim_add_spn_watch(struct ofono_sim *sim, unsigned int *id,
++					ofono_sim_spn_cb_t cb, void *data,
++					ofono_destroy_func destroy)
++{
++	return FALSE;
++}
++
++ofono_bool_t ofono_sim_remove_spn_watch(struct ofono_sim *sim, unsigned int *id)
++{
++	return FALSE;
++}
++
++int ofono_sim_read(struct ofono_sim_context *context, int id,
++			enum ofono_sim_file_structure expected,
++			ofono_sim_file_read_cb_t cb, void *data)
++{
++	return -1;
++}
++
++int ofono_sim_write(struct ofono_sim_context *context, int id,
++			ofono_sim_file_write_cb_t cb,
++			enum ofono_sim_file_structure structure, int record,
++			const unsigned char *data, int length, void *userdata)
++{
++	return -1;
++}
++
++unsigned int ofono_sim_add_file_watch(struct ofono_sim_context *context,
++					int id, ofono_sim_file_changed_cb_t cb,
++					void *userdata,
++					ofono_destroy_func destroy)
++{
++	return 0;
++}
++
++ofono_bool_t __ofono_emulator_add_atom_handler(struct ofono_atom *atom,
++					const char *prefix,
++					ofono_emulator_request_cb_t cb,
++					void *data, ofono_destroy_func destroy)
++{
++	return FALSE;
++}
++
++void __ofono_emulator_remove_atom_handler(struct ofono_atom *atom,
++						const char *prefix)
++{
++}
++
++enum ofono_emulator_request_type ofono_emulator_request_get_type(
++					struct ofono_emulator_request *req)
++{
++	return OFONO_EMULATOR_REQUEST_TYPE_COMMAND_ONLY;
++}
++
++ofono_bool_t ofono_emulator_request_next_number(
++					struct ofono_emulator_request *req,
++					int *number)
++{
++	return FALSE;
++}
++
++void ofono_emulator_send_final(struct ofono_emulator *em,
++				const struct ofono_error *final)
++{
++}
++
++void ofono_emulator_send_info(struct ofono_emulator *em, const char *line,
++				ofono_bool_t last)
++{
++}
++
++void ofono_emulator_set_indicator(struct ofono_emulator *em,
++					const char *name, int value)
++{
++}
++
++/* ---- scripted drivers --------------------------------------------------- */
++
++enum op_kind {
++	OP_SCAN,
++	OP_REGISTER_AUTO,
++	OP_REGISTER_MANUAL,
++	OP_RAT_QUERY,
++	OP_RAT_SET,
++	OP_SCA_QUERY,
++	OP_SCA_SET,
++	OP_CF_QUERY,
++};
++
++struct op {
++	enum op_kind kind;
++	void *cb;
++	void *data;
++	unsigned int mode;
++};
++
++/* The driver operations the atoms have started and not finished */
++static GQueue ops = G_QUEUE_INIT;
++static unsigned int ops_started;
++
++/* The next operation of this kind fails within the driver call */
++static int sync_fail_kind = -1;
++
++/* The driver is being removed: starting anything now is a bug */
++static gboolean driver_removing;
++
++/* The driver's remove() finishes what it has, with an error */
++static gboolean fail_ops_on_remove;
++
++static const struct ofono_error error_ok = { OFONO_ERROR_TYPE_NO_ERROR, 0 };
++static const struct ofono_error error_failed = { OFONO_ERROR_TYPE_FAILURE, 0 };
++
++static const struct ofono_network_operator test_operator = {
++	.name = "Test",
++	.mcc = "204",
++	.mnc = "08",
++	.status = OPERATOR_STATUS_AVAILABLE,
++	.tech = ACCESS_TECHNOLOGY_GSM,
++};
++
++static void op_run(struct op *op, gboolean ok)
++{
++	const struct ofono_error *e = ok ? &error_ok : &error_failed;
++
++	switch (op->kind) {
++	case OP_SCAN:
++		((ofono_netreg_operator_list_cb_t) op->cb)(e, ok ? 1 : 0,
++					ok ? &test_operator : NULL, op->data);
++		break;
++	case OP_REGISTER_AUTO:
++	case OP_REGISTER_MANUAL:
++		((ofono_netreg_register_cb_t) op->cb)(e, op->data);
++		break;
++	case OP_RAT_QUERY:
++		((ofono_radio_settings_rat_mode_query_cb_t) op->cb)(e,
++				OFONO_RADIO_ACCESS_MODE_UMTS, op->data);
++		break;
++	case OP_RAT_SET:
++		((ofono_radio_settings_rat_mode_set_cb_t) op->cb)(e, op->data);
++		break;
++	case OP_SCA_QUERY: {
++		struct ofono_phone_number sca = { .type = 145 };
++
++		strcpy(sca.number, "31600000000");
++		((ofono_sms_sca_query_cb_t) op->cb)(e, ok ? &sca : NULL,
++								op->data);
++		break;
++	}
++	case OP_SCA_SET:
++		((ofono_sms_sca_set_cb_t) op->cb)(e, op->data);
++		break;
++	case OP_CF_QUERY:
++		((ofono_call_forwarding_query_cb_t) op->cb)(e, 0, NULL,
++								op->data);
++		break;
++	}
++}
++
++static void op_add(enum op_kind kind, void *cb, void *data, unsigned int mode)
++{
++	struct op *op = g_new0(struct op, 1);
++
++	assert(!driver_removing);
++
++	op->kind = kind;
++	op->cb = cb;
++	op->data = data;
++	op->mode = mode;
++	ops_started++;
++
++	if ((int) kind == sync_fail_kind) {
++		sync_fail_kind = -1;
++		op_run(op, FALSE);
++		g_free(op);
++		return;
++	}
++
++	g_queue_push_tail(&ops, op);
++}
++
++/* Finishes the oldest operation, which must be of this kind */
++static void op_finish(enum op_kind kind, gboolean ok)
++{
++	struct op *op = g_queue_pop_head(&ops);
++
++	assert(op);
++	g_assert_cmpint(op->kind, ==, kind);
++	op_run(op, ok);
++	g_free(op);
++}
++
++static void driver_remove_common(void)
++{
++	struct op *op;
++
++	driver_removing = TRUE;
++
++	while (fail_ops_on_remove && (op = g_queue_pop_head(&ops))) {
++		op_run(op, FALSE);
++		g_free(op);
++	}
++
++	/* A driver cancels the rest without calling back */
++	g_queue_clear_full(&ops, g_free);
++	driver_removing = FALSE;
++}
++
++static int netreg_probe(struct ofono_netreg *netreg, unsigned int vendor,
++			void *data)
++{
++	return 0;
++}
++
++static void netreg_remove_driver(struct ofono_netreg *netreg)
++{
++	driver_remove_common();
++}
++
++static void netreg_list(struct ofono_netreg *netreg,
++			ofono_netreg_operator_list_cb_t cb, void *data)
++{
++	op_add(OP_SCAN, cb, data, 0);
++}
++
++static void netreg_auto(struct ofono_netreg *netreg,
++			ofono_netreg_register_cb_t cb, void *data)
++{
++	op_add(OP_REGISTER_AUTO, cb, data, 0);
++}
++
++static void netreg_manual(struct ofono_netreg *netreg, const char *mcc,
++			const char *mnc, ofono_netreg_register_cb_t cb,
++			void *data)
++{
++	op_add(OP_REGISTER_MANUAL, cb, data, 0);
++}
++
++static const struct ofono_netreg_driver test_netreg_driver = {
++	.probe = netreg_probe,
++	.remove = netreg_remove_driver,
++	.list_operators = netreg_list,
++	.register_auto = netreg_auto,
++	.register_manual = netreg_manual,
++};
++
++OFONO_ATOM_DRIVER_BUILTIN(netreg, test, &test_netreg_driver)
++
++static int radio_probe(struct ofono_radio_settings *rs, unsigned int vendor,
++			void *data)
++{
++	return 0;
++}
++
++static void radio_remove_driver(struct ofono_radio_settings *rs)
++{
++	driver_remove_common();
++}
++
++static void radio_query(struct ofono_radio_settings *rs,
++			ofono_radio_settings_rat_mode_query_cb_t cb, void *data)
++{
++	op_add(OP_RAT_QUERY, cb, data, 0);
++}
++
++static void radio_set(struct ofono_radio_settings *rs, unsigned int mode,
++			ofono_radio_settings_rat_mode_set_cb_t cb, void *data)
++{
++	op_add(OP_RAT_SET, cb, data, mode);
++}
++
++static const struct ofono_radio_settings_driver test_radio_driver = {
++	.probe = radio_probe,
++	.remove = radio_remove_driver,
++	.query_rat_mode = radio_query,
++	.set_rat_mode = radio_set,
++};
++
++OFONO_ATOM_DRIVER_BUILTIN(radio_settings, test, &test_radio_driver)
++
++static int sms_probe(struct ofono_sms *sms, unsigned int vendor, void *data)
++{
++	return 0;
++}
++
++static void sms_remove_driver(struct ofono_sms *sms)
++{
++	driver_remove_common();
++}
++
++static void sms_sca_query(struct ofono_sms *sms, ofono_sms_sca_query_cb_t cb,
++				void *data)
++{
++	op_add(OP_SCA_QUERY, cb, data, 0);
++}
++
++static void sms_sca_set(struct ofono_sms *sms,
++			const struct ofono_phone_number *sca,
++			ofono_sms_sca_set_cb_t cb, void *data)
++{
++	op_add(OP_SCA_SET, cb, data, 0);
++}
++
++static const struct ofono_sms_driver test_sms_driver = {
++	.probe = sms_probe,
++	.remove = sms_remove_driver,
++	.sca_query = sms_sca_query,
++	.sca_set = sms_sca_set,
++};
++
++OFONO_ATOM_DRIVER_BUILTIN(sms, test, &test_sms_driver)
++
++static int cf_probe(struct ofono_call_forwarding *cf, unsigned int vendor,
++			void *data)
++{
++	return 0;
++}
++
++static void cf_remove_driver(struct ofono_call_forwarding *cf)
++{
++	driver_remove_common();
++}
++
++static void cf_query(struct ofono_call_forwarding *cf, int type, int cls,
++			ofono_call_forwarding_query_cb_t cb, void *data)
++{
++	op_add(OP_CF_QUERY, cb, data, 0);
++}
++
++static const struct ofono_call_forwarding_driver test_cf_driver = {
++	.probe = cf_probe,
++	.remove = cf_remove_driver,
++	.query = cf_query,
++};
++
++OFONO_ATOM_DRIVER_BUILTIN(call_forwarding, test, &test_cf_driver)
++
++/* ---- the client end ------------------------------------------------------ */
++
++struct call {
++	unsigned int replies;
++	char *error;
++	DBusMessage *reply;
++};
++
++static struct test_dbus_context dbus;
++static struct ofono_modem modem;
++static unsigned int stray_replies;
++static guint timeout_id;
++
++static gboolean test_timeout(gpointer data)
++{
++	assert(!"TIMEOUT");
++	return G_SOURCE_REMOVE;
++}
++
++/* A reply the client is not waiting for comes this way: a second answer */
++static DBusHandlerResult client_filter(DBusConnection *conn, DBusMessage *msg,
++					void *data)
++{
++	int type = dbus_message_get_type(msg);
++
++	if (type == DBUS_MESSAGE_TYPE_METHOD_RETURN ||
++			type == DBUS_MESSAGE_TYPE_ERROR)
++		stray_replies++;
++
++	return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
++}
++
++static void on_reply(DBusPendingCall *pending, void *data)
++{
++	struct call *call = data;
++	DBusMessage *reply = dbus_pending_call_steal_reply(pending);
++
++	call->replies++;
++
++	if (dbus_message_get_type(reply) == DBUS_MESSAGE_TYPE_ERROR)
++		call->error = g_strdup(dbus_message_get_error_name(reply));
++
++	if (call->reply)
++		dbus_message_unref(call->reply);
++
++	call->reply = reply;
++	dbus_pending_call_unref(pending);
++}
++
++static void call_done(struct call *call)
++{
++	g_free(call->error);
++
++	if (call->reply)
++		dbus_message_unref(call->reply);
++}
++
++static void test_begin(void)
++{
++	memset(&dbus, 0, sizeof(dbus));
++	memset(&modem, 0, sizeof(modem));
++	stray_replies = 0;
++	ops_started = 0;
++	sync_fail_kind = -1;
++	fail_ops_on_remove = FALSE;
++	test_ussd_busy = FALSE;
++
++	timeout_id = g_timeout_add_seconds(30, test_timeout, NULL);
++
++	test_dbus_setup(&dbus);
++	assert(dbus_connection_add_filter(dbus.client_connection,
++						client_filter, NULL, NULL));
++}
++
++/* Returns when everything sent so far was handled and answered */
++static void flush(void)
++{
++	struct call ping = { 0 };
++
++	test_dbus_send(&dbus, test_dbus_new_call(&dbus, "/",
++				"org.freedesktop.DBus.Peer", "Ping"),
++				on_reply, &ping);
++
++	while (!ping.replies)
++		g_main_context_iteration(NULL, TRUE);
++
++	g_assert_cmpstr(ping.error, ==, NULL);
++	call_done(&ping);
++}
++
++static void modem_flush(void)
++{
++	while (modem.atoms)
++		__ofono_atom_free(modem.atoms->data);
++
++	flush();
++}
++
++static void test_end(void)
++{
++	modem_flush();
++	g_assert_cmpuint(stray_replies, ==, 0);
++	assert(g_queue_is_empty(&ops));
++
++	dbus_connection_remove_filter(dbus.client_connection, client_filter,
++					NULL);
++	test_dbus_shutdown(&dbus);
++	g_source_remove(timeout_id);
++}
++
++static void call_method(struct call *call, const char *path, const char *iface,
++			const char *method)
++{
++	test_dbus_send(&dbus, test_dbus_new_call(&dbus, path, iface, method),
++			on_reply, call);
++}
++
++static void set_property(struct call *call, const char *iface,
++				const char *name, const char *value)
++{
++	DBusMessage *msg = test_dbus_new_call(&dbus, MODEM_PATH, iface,
++							"SetProperty");
++	DBusMessageIter iter, var;
++
++	dbus_message_iter_init_append(msg, &iter);
++	dbus_message_iter_append_basic(&iter, DBUS_TYPE_STRING, &name);
++	dbus_message_iter_open_container(&iter, DBUS_TYPE_VARIANT,
++					DBUS_TYPE_STRING_AS_STRING, &var);
++	dbus_message_iter_append_basic(&var, DBUS_TYPE_STRING, &value);
++	dbus_message_iter_close_container(&iter, &var);
++
++	test_dbus_send(&dbus, msg, on_reply, call);
++}
++
++static const char *prop_string(struct call *call, const char *name)
++{
++	DBusMessageIter iter, dict;
++
++	assert(call->reply);
++	assert(dbus_message_iter_init(call->reply, &iter));
++	dbus_message_iter_recurse(&iter, &dict);
++
++	while (dbus_message_iter_get_arg_type(&dict) == DBUS_TYPE_DICT_ENTRY) {
++		DBusMessageIter entry, var;
++		const char *key;
++		const char *value;
++
++		dbus_message_iter_recurse(&dict, &entry);
++		dbus_message_iter_get_basic(&entry, &key);
++		dbus_message_iter_next(&entry);
++		dbus_message_iter_recurse(&entry, &var);
++
++		if (!strcmp(key, name)) {
++			dbus_message_iter_get_basic(&var, &value);
++			return value;
++		}
++
++		dbus_message_iter_next(&dict);
++	}
++
++	return NULL;
++}
++
++/* Number of operators in a Scan reply, and the path of the last one */
++static unsigned int scan_result(struct call *call, const char **path)
++{
++	DBusMessageIter iter, array;
++	unsigned int n = 0;
++
++	assert(call->reply);
++	g_assert_cmpstr(dbus_message_get_signature(call->reply), ==,
++							"a(oa{sv})");
++	assert(dbus_message_iter_init(call->reply, &iter));
++	dbus_message_iter_recurse(&iter, &array);
++
++	while (dbus_message_iter_get_arg_type(&array) == DBUS_TYPE_STRUCT) {
++		DBusMessageIter st;
++
++		dbus_message_iter_recurse(&array, &st);
++
++		if (path)
++			dbus_message_iter_get_basic(&st, path);
++
++		n++;
++		dbus_message_iter_next(&array);
++	}
++
++	return n;
++}
++
++static void assert_ok(struct call *call)
++{
++	g_assert_cmpuint(call->replies, ==, 1);
++	g_assert_cmpstr(call->error, ==, NULL);
++}
++
++static void assert_error(struct call *call, const char *error)
++{
++	g_assert_cmpuint(call->replies, ==, 1);
++	g_assert_cmpstr(call->error, ==, error);
++}
++
++/* ---- org.ofono.NetworkRegistration --------------------------------------- */
++
++#define NETREG OFONO_NETWORK_REGISTRATION_INTERFACE
++
++static void netreg_setup(void)
++{
++	struct ofono_netreg *netreg;
++
++	test_begin();
++	netreg = ofono_netreg_create(&modem, 0, "test", NULL);
++	assert(netreg);
++	ofono_netreg_register(netreg);
++}
++
++static void scan(struct call *call)
++{
++	call_method(call, MODEM_PATH, NETREG, "Scan");
++}
++
++static void regist(struct call *call)
++{
++	call_method(call, MODEM_PATH, NETREG, "Register");
++}
++
++/* One client: goes to the driver at once and gets one answer, as ever */
++static void test_netreg_single(void)
++{
++	struct call a = { 0 }, b = { 0 };
++
++	netreg_setup();
++
++	scan(&a);
++	flush();
++	g_assert_cmpuint(ops_started, ==, 1);
++	g_assert_cmpuint(a.replies, ==, 0);
++	op_finish(OP_SCAN, TRUE);
++	flush();
++	assert_ok(&a);
++	g_assert_cmpuint(scan_result(&a, NULL), ==, 1);
++
++	regist(&b);
++	flush();
++	g_assert_cmpuint(ops_started, ==, 2);
++	op_finish(OP_REGISTER_AUTO, TRUE);
++	flush();
++	assert_ok(&b);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++}
++
++/* Clients asking while a scan runs share its result, the driver sees one */
++static void test_netreg_scan_shared(void)
++{
++	struct call a = { 0 }, b = { 0 }, c = { 0 };
++
++	netreg_setup();
++
++	scan(&a);
++	scan(&b);
++	scan(&c);
++	flush();
++	g_assert_cmpuint(ops_started, ==, 1);
++	g_assert_cmpuint(a.replies + b.replies + c.replies, ==, 0);
++
++	op_finish(OP_SCAN, TRUE);
++	flush();
++	assert_ok(&a);
++	assert_ok(&b);
++	assert_ok(&c);
++	g_assert_cmpuint(scan_result(&a, NULL), ==, 1);
++	g_assert_cmpuint(scan_result(&c, NULL), ==, 1);
++	g_assert_cmpuint(ops_started, ==, 1);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++	call_done(&c);
++}
++
++static void test_netreg_scan_failed(void)
++{
++	struct call a = { 0 }, b = { 0 };
++
++	netreg_setup();
++
++	scan(&a);
++	scan(&b);
++	flush();
++	op_finish(OP_SCAN, FALSE);
++	flush();
++	assert_error(&a, ERR_FAILED);
++	assert_error(&b, ERR_FAILED);
++	g_assert_cmpuint(ops_started, ==, 1);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++}
++
++/* Register runs once per request, one after the other */
++static void test_netreg_register_queued(void)
++{
++	struct call a = { 0 }, b = { 0 };
++
++	netreg_setup();
++
++	regist(&a);
++	regist(&b);
++	flush();
++	g_assert_cmpuint(ops_started, ==, 1);
++	op_finish(OP_REGISTER_AUTO, TRUE);
++	flush();
++	assert_ok(&a);
++	g_assert_cmpuint(b.replies, ==, 0);
++	g_assert_cmpuint(ops_started, ==, 2);
++	op_finish(OP_REGISTER_AUTO, TRUE);
++	flush();
++	assert_ok(&b);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++}
++
++/* A failed Register fails the ones behind it, as Sailfish does */
++static void test_netreg_register_failed(void)
++{
++	struct call a = { 0 }, b = { 0 };
++
++	netreg_setup();
++
++	regist(&a);
++	regist(&b);
++	flush();
++	op_finish(OP_REGISTER_AUTO, FALSE);
++	flush();
++	assert_error(&a, ERR_FAILED);
++	assert_error(&b, ERR_FAILED);
++	g_assert_cmpuint(ops_started, ==, 1);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++}
++
++static void test_netreg_mixed(void)
++{
++	struct call a = { 0 }, b = { 0 }, c = { 0 };
++
++	netreg_setup();
++
++	scan(&a);
++	regist(&b);
++	scan(&c);
++	flush();
++	g_assert_cmpuint(ops_started, ==, 1);
++
++	/* The later Scan shares the result, Register is next */
++	op_finish(OP_SCAN, TRUE);
++	flush();
++	assert_ok(&a);
++	assert_ok(&c);
++	g_assert_cmpuint(b.replies, ==, 0);
++	g_assert_cmpuint(ops_started, ==, 2);
++
++	op_finish(OP_REGISTER_AUTO, TRUE);
++	flush();
++	assert_ok(&b);
++	g_assert_cmpuint(ops_started, ==, 2);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++	call_done(&c);
++}
++
++/* A queued request whose driver call fails on the spot must not stop the rest */
++static void test_netreg_sync_failure(void)
++{
++	struct call a = { 0 }, b = { 0 }, c = { 0 };
++
++	netreg_setup();
++
++	regist(&a);
++	scan(&b);
++	regist(&c);
++	flush();
++
++	sync_fail_kind = OP_SCAN;
++	op_finish(OP_REGISTER_AUTO, TRUE);
++	flush();
++	assert_ok(&a);
++	assert_error(&b, ERR_FAILED);
++	g_assert_cmpuint(ops_started, ==, 3);
++
++	op_finish(OP_REGISTER_AUTO, TRUE);
++	flush();
++	assert_ok(&c);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++	call_done(&c);
++}
++
++/* Registering on an operator is not queued, in Sailfish neither */
++static void test_netreg_manual(void)
++{
++	struct call a = { 0 }, b = { 0 }, c = { 0 }, d = { 0 }, e = { 0 };
++	const char *path = NULL;
++	char *op_path;
++
++	netreg_setup();
++
++	scan(&a);
++	flush();
++	op_finish(OP_SCAN, TRUE);
++	flush();
++	assert_ok(&a);
++	g_assert_cmpuint(scan_result(&a, &path), ==, 1);
++	op_path = g_strdup(path);
++
++	/* While something runs: InProgress at once */
++	scan(&b);
++	flush();
++	call_method(&c, op_path, OFONO_NETWORK_OPERATOR_INTERFACE, "Register");
++	flush();
++	assert_error(&c, ERR_BUSY);
++	op_finish(OP_SCAN, TRUE);
++	flush();
++	assert_ok(&b);
++
++	/* A Scan behind it survives its failure, and runs */
++	call_method(&d, op_path, OFONO_NETWORK_OPERATOR_INTERFACE, "Register");
++	scan(&e);
++	flush();
++	g_assert_cmpuint(ops_started, ==, 3);
++	op_finish(OP_REGISTER_MANUAL, FALSE);
++	flush();
++	assert_error(&d, ERR_FAILED);
++	g_assert_cmpuint(e.replies, ==, 0);
++	g_assert_cmpuint(ops_started, ==, 4);
++	op_finish(OP_SCAN, TRUE);
++	flush();
++	assert_ok(&e);
++
++	g_free(op_path);
++	test_end();
++	call_done(&a);
++	call_done(&b);
++	call_done(&c);
++	call_done(&d);
++	call_done(&e);
++}
++
++/* The modem goes with requests waiting: all answered, once */
++static void test_netreg_removed(void)
++{
++	struct call a = { 0 }, b = { 0 }, c = { 0 };
++
++	netreg_setup();
++
++	scan(&a);
++	regist(&b);
++	scan(&c);
++	flush();
++
++	modem_flush();
++	assert_error(&a, ERR_CANCELED);
++	assert_error(&b, ERR_CANCELED);
++	assert_error(&c, ERR_CANCELED);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++	call_done(&c);
++}
++
++/* A driver that fails its operations in remove() must not get the next one */
++static void test_netreg_removed_driver_answers(void)
++{
++	struct call a = { 0 }, b = { 0 };
++
++	netreg_setup();
++
++	regist(&a);
++	scan(&b);
++	flush();
++
++	fail_ops_on_remove = TRUE;
++	modem_flush();
++	assert_error(&a, ERR_CANCELED);
++	assert_error(&b, ERR_CANCELED);
++	g_assert_cmpuint(ops_started, ==, 1);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++}
++
++/* ---- org.ofono.RadioSettings --------------------------------------------- */
++
++#define RADIO OFONO_RADIO_SETTINGS_INTERFACE
++#define TECH "TechnologyPreference"
++
++static void radio_setup(void)
++{
++	struct ofono_radio_settings *rs;
++
++	test_begin();
++	rs = ofono_radio_settings_create(&modem, 0, "test", NULL);
++	assert(rs);
++	ofono_radio_settings_register(rs);
++}
++
++static void radio_get(struct call *call)
++{
++	call_method(call, MODEM_PATH, RADIO, "GetProperties");
++}
++
++/* Reads the settings once, so that they are cached */
++static void radio_cache(void)
++{
++	struct call a = { 0 };
++
++	radio_get(&a);
++	flush();
++	op_finish(OP_RAT_QUERY, TRUE);
++	flush();
++	assert_ok(&a);
++	g_assert_cmpstr(prop_string(&a, TECH), ==, "umts");
++	call_done(&a);
++}
++
++static void test_radio_single(void)
++{
++	struct call a = { 0 }, b = { 0 };
++
++	radio_setup();
++
++	radio_get(&a);
++	flush();
++	g_assert_cmpuint(ops_started, ==, 1);
++	g_assert_cmpuint(a.replies, ==, 0);
++	op_finish(OP_RAT_QUERY, TRUE);
++	flush();
++	assert_ok(&a);
++
++	/* Cached: no driver, no waiting */
++	radio_get(&b);
++	flush();
++	assert_ok(&b);
++	g_assert_cmpuint(ops_started, ==, 1);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++}
++
++static void test_radio_get_shared(void)
++{
++	struct call a = { 0 }, b = { 0 }, c = { 0 };
++
++	radio_setup();
++
++	radio_get(&a);
++	radio_get(&b);
++	radio_get(&c);
++	flush();
++	g_assert_cmpuint(ops_started, ==, 1);
++	op_finish(OP_RAT_QUERY, TRUE);
++	flush();
++	assert_ok(&a);
++	assert_ok(&b);
++	assert_ok(&c);
++	g_assert_cmpstr(prop_string(&c, TECH), ==, "umts");
++	g_assert_cmpuint(ops_started, ==, 1);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++	call_done(&c);
++}
++
++/* A failed query fails the one who asked, the next one tries again */
++static void test_radio_get_failed(void)
++{
++	struct call a = { 0 }, b = { 0 };
++
++	radio_setup();
++
++	radio_get(&a);
++	radio_get(&b);
++	flush();
++	op_finish(OP_RAT_QUERY, FALSE);
++	flush();
++	assert_error(&a, ERR_FAILED);
++	g_assert_cmpuint(b.replies, ==, 0);
++	g_assert_cmpuint(ops_started, ==, 2);
++	op_finish(OP_RAT_QUERY, TRUE);
++	flush();
++	assert_ok(&b);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++}
++
++/* What is queued behind a change must see the changed value */
++static void test_radio_get_after_set(void)
++{
++	struct call a = { 0 }, b = { 0 };
++
++	radio_setup();
++	radio_cache();
++
++	set_property(&a, RADIO, TECH, "lte");
++	radio_get(&b);
++	flush();
++	g_assert_cmpuint(b.replies, ==, 0);
++	op_finish(OP_RAT_SET, TRUE);
++	flush();
++	assert_ok(&a);
++	assert_ok(&b);
++	g_assert_cmpstr(prop_string(&b, TECH), ==, "lte");
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++}
++
++/* Two changes in a row: the second one wins, also when it goes back */
++static void test_radio_set_back(void)
++{
++	struct call a = { 0 }, b = { 0 }, c = { 0 };
++
++	radio_setup();
++	radio_cache();
++
++	set_property(&a, RADIO, TECH, "lte");
++	set_property(&b, RADIO, TECH, "umts");
++	flush();
++	g_assert_cmpuint(ops_started, ==, 2);
++	op_finish(OP_RAT_SET, TRUE);
++	flush();
++	assert_ok(&a);
++	g_assert_cmpuint(b.replies, ==, 0);
++	g_assert_cmpuint(ops_started, ==, 3);
++	op_finish(OP_RAT_SET, TRUE);
++	flush();
++	assert_ok(&b);
++
++	radio_get(&c);
++	flush();
++	assert_ok(&c);
++	g_assert_cmpstr(prop_string(&c, TECH), ==, "umts");
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++	call_done(&c);
++}
++
++/* A request that cannot start is answered and takes the next along */
++static void test_radio_bad_request_queued(void)
++{
++	struct call a = { 0 }, b = { 0 }, c = { 0 };
++
++	radio_setup();
++	radio_cache();
++
++	set_property(&a, RADIO, TECH, "lte");
++	set_property(&b, RADIO, TECH, "no-such-mode");
++	set_property(&c, RADIO, TECH, "lte");
++	flush();
++	op_finish(OP_RAT_SET, TRUE);
++	flush();
++	assert_ok(&a);
++	assert_error(&b, "org.ofono.Error.InvalidArguments");
++	assert_ok(&c);
++	g_assert_cmpuint(ops_started, ==, 2);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++	call_done(&c);
++}
++
++static void test_radio_removed(void)
++{
++	struct call a = { 0 }, b = { 0 }, c = { 0 };
++
++	radio_setup();
++
++	radio_get(&a);
++	set_property(&b, RADIO, TECH, "lte");
++	radio_get(&c);
++	flush();
++
++	modem_flush();
++	assert_error(&a, ERR_CANCELED);
++	assert_error(&b, ERR_CANCELED);
++	assert_error(&c, ERR_CANCELED);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++	call_done(&c);
++}
++
++static void test_radio_removed_driver_answers(void)
++{
++	struct call a = { 0 }, b = { 0 };
++
++	radio_setup();
++	radio_cache();
++
++	set_property(&a, RADIO, TECH, "lte");
++	set_property(&b, RADIO, TECH, "gsm");
++	flush();
++
++	fail_ops_on_remove = TRUE;
++	modem_flush();
++	assert_error(&a, ERR_CANCELED);
++	assert_error(&b, ERR_CANCELED);
++	g_assert_cmpuint(ops_started, ==, 2);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++}
++
++/* ---- org.ofono.MessageManager -------------------------------------------- */
++
++#define MM OFONO_MESSAGE_MANAGER_INTERFACE
++#define SCA "ServiceCenterAddress"
++
++static void sms_setup(void)
++{
++	struct ofono_sms *sms;
++
++	test_begin();
++	sms = ofono_sms_create(&modem, 0, "test", NULL);
++	assert(sms);
++	ofono_sms_register(sms);
++}
++
++static void sms_get(struct call *call)
++{
++	call_method(call, MODEM_PATH, MM, "GetProperties");
++}
++
++static void test_sms_single(void)
++{
++	struct call a = { 0 }, b = { 0 };
++
++	sms_setup();
++
++	sms_get(&a);
++	flush();
++	g_assert_cmpuint(ops_started, ==, 1);
++	g_assert_cmpuint(a.replies, ==, 0);
++	op_finish(OP_SCA_QUERY, TRUE);
++	flush();
++	assert_ok(&a);
++	g_assert_cmpstr(prop_string(&a, SCA), ==, "+31600000000");
++
++	sms_get(&b);
++	flush();
++	assert_ok(&b);
++	g_assert_cmpuint(ops_started, ==, 1);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++}
++
++static void test_sms_get_shared(void)
++{
++	struct call a = { 0 }, b = { 0 }, c = { 0 };
++
++	sms_setup();
++
++	sms_get(&a);
++	sms_get(&b);
++	sms_get(&c);
++	flush();
++	g_assert_cmpuint(ops_started, ==, 1);
++	op_finish(OP_SCA_QUERY, TRUE);
++	flush();
++	assert_ok(&a);
++	assert_ok(&b);
++	assert_ok(&c);
++	g_assert_cmpstr(prop_string(&c, SCA), ==, "+31600000000");
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++	call_done(&c);
++}
++
++/* As before: no SCA is no error, and the next client queries again */
++static void test_sms_get_failed(void)
++{
++	struct call a = { 0 }, b = { 0 }, c = { 0 };
++
++	sms_setup();
++
++	sms_get(&a);
++	sms_get(&b);
++	flush();
++	op_finish(OP_SCA_QUERY, FALSE);
++	flush();
++	assert_ok(&a);
++	assert_ok(&b);
++	g_assert_cmpuint(ops_started, ==, 1);
++
++	sms_get(&c);
++	flush();
++	g_assert_cmpuint(ops_started, ==, 2);
++	op_finish(OP_SCA_QUERY, TRUE);
++	flush();
++	assert_ok(&c);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++	call_done(&c);
++}
++
++/* SetProperty and GetProperties do not wait for each other any more */
++static void test_sms_set_and_get(void)
++{
++	struct call a = { 0 }, b = { 0 };
++
++	sms_setup();
++
++	sms_get(&a);
++	flush();
++	set_property(&b, MM, SCA, "+31600000001");
++	flush();
++	g_assert_cmpuint(ops_started, ==, 2);
++
++	op_finish(OP_SCA_QUERY, TRUE);
++	flush();
++	assert_ok(&a);
++	g_assert_cmpuint(b.replies, ==, 0);
++
++	op_finish(OP_SCA_SET, TRUE);
++	flush();
++	op_finish(OP_SCA_QUERY, TRUE);
++	flush();
++	assert_ok(&b);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++}
++
++static void test_sms_removed(void)
++{
++	struct call a = { 0 }, b = { 0 };
++
++	sms_setup();
++
++	sms_get(&a);
++	sms_get(&b);
++	flush();
++
++	modem_flush();
++	assert_error(&a, ERR_CANCELED);
++	assert_error(&b, ERR_CANCELED);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++}
++
++static void test_sms_removed_driver_answers(void)
++{
++	struct call a = { 0 }, b = { 0 };
++
++	sms_setup();
++
++	sms_get(&a);
++	sms_get(&b);
++	flush();
++
++	fail_ops_on_remove = TRUE;
++	modem_flush();
++	assert_error(&a, ERR_CANCELED);
++	assert_error(&b, ERR_CANCELED);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++}
++
++/* ---- org.ofono.CallForwarding -------------------------------------------- */
++
++#define CF OFONO_CALL_FORWARDING_INTERFACE
++
++static void cf_setup(void)
++{
++	struct ofono_call_forwarding *cf;
++
++	test_begin();
++	cf = ofono_call_forwarding_create(&modem, 0, "test", NULL);
++	assert(cf);
++	ofono_call_forwarding_register(cf);
++}
++
++static void cf_get(struct call *call)
++{
++	call_method(call, MODEM_PATH, CF, "GetProperties");
++}
++
++/* One query per condition, then everyone waiting is told */
++static void cf_finish_query(void)
++{
++	int i;
++
++	for (i = 0; i < 4; i++) {
++		flush();
++		op_finish(OP_CF_QUERY, TRUE);
++	}
++
++	flush();
++}
++
++static void test_cf_single(void)
++{
++	struct call a = { 0 }, b = { 0 };
++
++	cf_setup();
++
++	cf_get(&a);
++	flush();
++	g_assert_cmpuint(ops_started, ==, 1);
++	g_assert_cmpuint(a.replies, ==, 0);
++	cf_finish_query();
++	assert_ok(&a);
++	g_assert_cmpuint(ops_started, ==, 4);
++
++	cf_get(&b);
++	flush();
++	assert_ok(&b);
++	g_assert_cmpuint(ops_started, ==, 4);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++}
++
++static void test_cf_get_shared(void)
++{
++	struct call a = { 0 }, b = { 0 }, c = { 0 };
++
++	cf_setup();
++
++	cf_get(&a);
++	flush();
++
++	/* Half way through the conditions counts as well */
++	op_finish(OP_CF_QUERY, TRUE);
++	cf_get(&b);
++	cf_get(&c);
++	flush();
++	g_assert_cmpuint(a.replies + b.replies + c.replies, ==, 0);
++
++	op_finish(OP_CF_QUERY, TRUE);
++	flush();
++	op_finish(OP_CF_QUERY, TRUE);
++	flush();
++	op_finish(OP_CF_QUERY, TRUE);
++	flush();
++	assert_ok(&a);
++	assert_ok(&b);
++	assert_ok(&c);
++	g_assert_cmpuint(ops_started, ==, 4);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++	call_done(&c);
++}
++
++/* Changing something during the query is still InProgress */
++static void test_cf_set_during_get(void)
++{
++	struct call a = { 0 }, b = { 0 };
++
++	cf_setup();
++
++	cf_get(&a);
++	flush();
++	set_property(&b, CF, "VoiceUnconditional", "+31600000001");
++	flush();
++	assert_error(&b, ERR_BUSY);
++	g_assert_cmpuint(a.replies, ==, 0);
++	cf_finish_query();
++	assert_ok(&a);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++}
++
++/* USSD still blocks a query about to start, not one that is running */
++static void test_cf_ussd_busy(void)
++{
++	struct call a = { 0 }, b = { 0 }, c = { 0 };
++
++	cf_setup();
++
++	test_ussd_busy = TRUE;
++	cf_get(&a);
++	flush();
++	assert_error(&a, ERR_BUSY);
++	test_ussd_busy = FALSE;
++
++	cf_get(&b);
++	flush();
++	test_ussd_busy = TRUE;
++	cf_get(&c);
++	flush();
++	g_assert_cmpuint(c.replies, ==, 0);
++	test_ussd_busy = FALSE;
++	cf_finish_query();
++	assert_ok(&b);
++	assert_ok(&c);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++	call_done(&c);
++}
++
++static void test_cf_removed(void)
++{
++	struct call a = { 0 }, b = { 0 };
++
++	cf_setup();
++
++	cf_get(&a);
++	cf_get(&b);
++	flush();
++
++	modem_flush();
++	assert_error(&a, ERR_CANCELED);
++	assert_error(&b, ERR_CANCELED);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++}
++
++int main(int argc, char **argv)
++{
++	test_dbus_require_bus();
++
++	g_test_init(&argc, &argv, NULL);
++
++#define T(name) g_test_add_func("/dbus-queue-atoms/" #name, test_ ## name)
++	T(netreg_single);
++	T(netreg_scan_shared);
++	T(netreg_scan_failed);
++	T(netreg_register_queued);
++	T(netreg_register_failed);
++	T(netreg_mixed);
++	T(netreg_sync_failure);
++	T(netreg_manual);
++	T(netreg_removed);
++	T(netreg_removed_driver_answers);
++	T(radio_single);
++	T(radio_get_shared);
++	T(radio_get_failed);
++	T(radio_get_after_set);
++	T(radio_set_back);
++	T(radio_bad_request_queued);
++	T(radio_removed);
++	T(radio_removed_driver_answers);
++	T(sms_single);
++	T(sms_get_shared);
++	T(sms_get_failed);
++	T(sms_set_and_get);
++	T(sms_removed);
++	T(sms_removed_driver_answers);
++	T(cf_single);
++	T(cf_get_shared);
++	T(cf_set_during_get);
++	T(cf_ussd_busy);
++	T(cf_removed);
++#undef T
++
++	return g_test_run();
++}
+diff --git a/unit/test-dbus.c b/unit/test-dbus.c
+index c0081bc..0fb3ced 100644
+--- a/unit/test-dbus.c
++++ b/unit/test-dbus.c
+@@ -83,7 +83,8 @@ static gboolean test_dbus_start(gpointer data)
+ 	struct test_dbus_context *test = data;
+ 
+ 	test->start_id = 0;
+-	test->start(test);
++	if (test->start)
++		test->start(test);
+ 	return G_SOURCE_REMOVE;
+ }
+ 

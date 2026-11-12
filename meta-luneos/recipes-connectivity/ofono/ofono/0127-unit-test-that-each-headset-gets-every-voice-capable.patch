@@ -1,0 +1,500 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] unit: test that each headset gets every voice capable modem
+
+Extend the 0118 test of hfp_ag_bluez5 to the connection path. BlueZ's
+NewConnection is called with one end of a socketpair and a fake
+emulator records what the plugin asks of it.
+
+It checks that:
+- the emulator gets every modem with a ready SIM and a voicecall atom,
+  in order, and not one without voicecall;
+- a headset is turned away while no modem is active;
+- a modem whose voicecall atom appears while a headset is connected
+  joins its emulator, a modem already in is not added again, and an
+  emulator whose headset has gone is not touched;
+- a headset hanging up, and RequestDisconnection, remove the HUP watch
+  and close our duplicate of the socket.
+
+The 0117 cases are unchanged. The voicecall atom stub is now a struct
+ofono_atom rather than an int cast to one, which clang flagged with
+-Wcast-align on aarch64 and x86-64, and the asserts stay on in a build
+with NDEBUG.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+diff --git a/unit/test-hfp-ag-bluez5.c b/unit/test-hfp-ag-bluez5.c
+index 753e270..7709ee2 100644
+--- a/unit/test-hfp-ag-bluez5.c
++++ b/unit/test-hfp-ag-bluez5.c
+@@ -17,7 +17,10 @@
+ 
+ #include "../plugins/hfp_ag_bluez5.c"
+ 
++/* The checks are asserts, some with side effects: keep them in any build */
++#undef NDEBUG
+ #include <assert.h>
++#include <fcntl.h>
+ 
+ /* ---- oFono core stubs --------------------------------------------- */
+ 
+@@ -43,9 +46,9 @@ struct ofono_atom {
+ 
+ static DBusConnection *ofono_conn;
+ static ofono_modemwatch_cb_t modemwatch_cb;
+-static struct ofono_modem *modems_present[2];
++static struct ofono_modem *modems_present[4];
+ static unsigned int n_modems_present;
+-static int voicecall_atom;	/* only its address is used */
++static struct ofono_atom voicecall_atom;	/* only its address is used */
+ 
+ DBusConnection *ofono_dbus_get_connection(void)
+ {
+@@ -142,7 +145,7 @@ struct ofono_atom *__ofono_modem_find_atom(struct ofono_modem *modem,
+ 						enum ofono_atom_type type)
+ {
+ 	if (type == OFONO_ATOM_TYPE_VOICECALL && modem->has_voicecall)
+-		return (struct ofono_atom *) &voicecall_atom;
++		return &voicecall_atom;
+ 
+ 	return NULL;
+ }
+@@ -179,27 +182,80 @@ enum ofono_sim_state ofono_sim_get_state(struct ofono_sim *sim)
+ 	return sim->state;
+ }
+ 
+-/* Not reached: no HFP connection is made in this test */
++/*
++ * A headset connection makes one emulator; these record what the plugin
++ * asks of it. The real emulator ignores a modem added twice, as here.
++ */
++struct ofono_emulator {
++	struct ofono_modem *modems[4];
++	unsigned int n_modems;
++	bool gone;
++	int fd;
++	struct ofono_handsfree_card *card;
++};
++
++struct ofono_handsfree_card {
++	void *data;
++};
++
++static struct ofono_emulator *last_em;
++
+ struct ofono_emulator *ofono_emulator_create(enum ofono_emulator_type type)
+ {
+-	abort();
++	struct ofono_emulator *em = g_new0(struct ofono_emulator, 1);
++
++	assert(type == OFONO_EMULATOR_TYPE_HFP);
++	em->fd = -1;
++	last_em = em;
++	return em;
+ }
+ 
+ void ofono_emulator_add_modem(struct ofono_emulator *em,
+ 				struct ofono_modem *modem)
+ {
+-	abort();
++	unsigned int i;
++
++	/* the plugin must have forgotten an emulator whose headset left */
++	assert(!em->gone);
++
++	for (i = 0; i < em->n_modems; i++)
++		if (em->modems[i] == modem)
++			return;
++
++	assert(em->n_modems < G_N_ELEMENTS(em->modems));
++	em->modems[em->n_modems++] = modem;
+ }
+ 
+ void ofono_emulator_register(struct ofono_emulator *em, int fd)
+ {
+-	abort();
++	em->fd = fd;
+ }
+ 
+ void ofono_emulator_set_handsfree_card(struct ofono_emulator *em,
+ 					struct ofono_handsfree_card *card)
+ {
+-	abort();
++	em->card = card;
++}
++
++/*
++ * As the headset goes: the card is removed with the emulator. The emulator
++ * is only marked gone, so a later use of it fails an assertion instead of
++ * going unnoticed; emulator_free() releases it at the end of the test.
++ */
++static void emulator_disconnect(struct ofono_emulator *em)
++{
++	hfp_card_remove(em->card);
++	g_free(em->card);
++	em->card = NULL;
++	close(em->fd);
++	em->fd = -1;
++	em->gone = true;
++}
++
++static void emulator_free(struct ofono_emulator *em)
++{
++	assert(em->gone);
++	g_free(em);
+ }
+ 
+ int ofono_emulator_start_codec_negotiation(struct ofono_emulator *em,
+@@ -212,30 +268,28 @@ struct ofono_handsfree_card *ofono_handsfree_card_create(unsigned int vendor,
+ 				enum ofono_handsfree_card_type type,
+ 				const char *driver, void *data)
+ {
+-	abort();
++	return g_new0(struct ofono_handsfree_card, 1);
+ }
+ 
+ void ofono_handsfree_card_set_data(struct ofono_handsfree_card *card,
+ 					void *data)
+ {
+-	abort();
++	card->data = data;
+ }
+ 
+ void *ofono_handsfree_card_get_data(struct ofono_handsfree_card *card)
+ {
+-	abort();
++	return card->data;
+ }
+ 
+ void ofono_handsfree_card_set_remote(struct ofono_handsfree_card *card,
+ 					const char *remote)
+ {
+-	abort();
+ }
+ 
+ void ofono_handsfree_card_set_local(struct ofono_handsfree_card *card,
+ 					const char *local)
+ {
+-	abort();
+ }
+ 
+ void ofono_handsfree_audio_ref(void)
+@@ -347,6 +401,8 @@ static void modem_add(struct ofono_modem *modem)
+ {
+ 	struct ofono_atom sim_atom = { .data = modem->sim };
+ 
++	assert(n_modems_present < G_N_ELEMENTS(modems_present));
++	assert(n_modems_present < G_N_ELEMENTS(modems_present));
+ 	modems_present[n_modems_present++] = modem;
+ 	assert(modemwatch_cb);
+ 	modemwatch_cb(modem, TRUE, NULL);
+@@ -362,6 +418,60 @@ static void sim_set_state(struct ofono_modem *modem, enum ofono_sim_state s)
+ 		modem->sim->cb(s, modem->sim->cb_data);
+ }
+ 
++#define HEADSET_PATH "/org/bluez/hci0/dev_74_1A_E0_20_8F_18"
++
++/*
++ * BlueZ handing over a connected headset: NewConnection with the RFCOMM
++ * socket, played here by one end of a socketpair. *peer is the headset end.
++ */
++static DBusMessage *headset_connect(int *peer)
++{
++	DBusMessage *msg, *reply;
++	DBusMessageIter iter, dict;
++	const char *path = HEADSET_PATH;
++	int sv[2];
++
++	assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
++
++	msg = dbus_message_new_method_call(BLUEZ_SERVICE,
++						HFP_AG_EXT_PROFILE_PATH,
++						BLUEZ_PROFILE_INTERFACE,
++						"NewConnection");
++	dbus_message_iter_init_append(msg, &iter);
++	dbus_message_iter_append_basic(&iter, DBUS_TYPE_OBJECT_PATH, &path);
++	dbus_message_iter_append_basic(&iter, DBUS_TYPE_UNIX_FD, &sv[0]);
++	dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY, "{sv}",
++						&dict);
++	dbus_message_iter_close_container(&iter, &dict);
++
++	/* the message holds its own copy of the fd */
++	close(sv[0]);
++
++	/* as if received: a reply needs a serial to answer */
++	dbus_message_set_serial(msg, 1);
++
++	reply = profile_new_connection(ofono_conn, msg, NULL);
++	dbus_message_unref(msg);
++
++	*peer = sv[1];
++	return reply;
++}
++
++static bool reply_is_error(DBusMessage *reply)
++{
++	return dbus_message_get_type(reply) == DBUS_MESSAGE_TYPE_ERROR;
++}
++
++static void voicecall_appears(struct ofono_modem *modem)
++{
++	struct ofono_atom vc_atom = { .data = NULL };
++
++	modem->has_voicecall = true;
++	assert(modem->vc_notify);
++	modem->vc_notify(&vc_atom, OFONO_ATOM_WATCH_CONDITION_REGISTERED,
++				modem->vc_data);
++}
++
+ static void test_setup(void)
+ {
+ 	DBusError err;
+@@ -503,6 +613,231 @@ static void test_no_voicecall_no_register(void)
+ 	fake_bluez_stop(bz);
+ }
+ 
++/* A headset is served by one emulator holding both SIMs, in order */
++static void test_connection_serves_all_modems(void)
++{
++	struct fake_bluez *bz;
++	struct ofono_modem *m1, *m2, *m3;
++	DBusMessage *reply;
++	int peer;
++
++	test_setup();
++	bz = fake_bluez_start();
++	assert(hfp_ag_init() == 0);
++
++	m1 = modem_new(true);
++	m2 = modem_new(true);
++	m3 = modem_new(false);	/* no voicecall: never offered */
++	modem_add(m1);
++	modem_add(m2);
++	modem_add(m3);
++	sim_set_state(m1, OFONO_SIM_STATE_READY);
++	sim_set_state(m2, OFONO_SIM_STATE_READY);
++	sim_set_state(m3, OFONO_SIM_STATE_READY);
++	spin(100);
++
++	last_em = NULL;
++	reply = headset_connect(&peer);
++	assert(!reply_is_error(reply));
++	dbus_message_unref(reply);
++
++	assert(last_em);
++	assert(last_em->fd >= 0);
++	assert(last_em->card);
++	assert(last_em->n_modems == 2);
++	assert(last_em->modems[0] == m1);
++	assert(last_em->modems[1] == m2);
++
++	emulator_disconnect(last_em);
++	emulator_free(last_em);
++	close(peer);
++	spin(50);
++
++	test_teardown();
++	fake_bluez_stop(bz);
++}
++
++/* No modem can take calls yet: the headset is turned away */
++static void test_connection_rejected_without_modem(void)
++{
++	struct fake_bluez *bz;
++	struct ofono_modem *m;
++	DBusMessage *reply;
++	int peer;
++
++	test_setup();
++	bz = fake_bluez_start();
++	assert(hfp_ag_init() == 0);
++
++	m = modem_new(true);
++	modem_add(m);
++	spin(50);
++
++	last_em = NULL;
++	reply = headset_connect(&peer);
++	assert(reply_is_error(reply));
++	assert(last_em == NULL);
++	dbus_message_unref(reply);
++	close(peer);
++
++	test_teardown();
++	fake_bluez_stop(bz);
++}
++
++/*
++ * A SIM that becomes ready, or a voicecall atom that appears, while a
++ * headset is connected joins its emulator; once the headset is gone it
++ * is not touched again.
++ */
++static void test_modem_joins_connected_headset(void)
++{
++	struct fake_bluez *bz;
++	struct ofono_modem *m1, *m2;
++	struct ofono_emulator *em;
++	DBusMessage *reply;
++	int peer;
++
++	test_setup();
++	bz = fake_bluez_start();
++	assert(hfp_ag_init() == 0);
++
++	m1 = modem_new(true);
++	m2 = modem_new(false);
++	modem_add(m1);
++	modem_add(m2);
++	sim_set_state(m1, OFONO_SIM_STATE_READY);
++	spin(50);
++
++	reply = headset_connect(&peer);
++	assert(!reply_is_error(reply));
++	dbus_message_unref(reply);
++	em = last_em;
++	assert(em->n_modems == 1 && em->modems[0] == m1);
++
++	/* SIM ready first, but no voicecall yet: not offered */
++	sim_set_state(m2, OFONO_SIM_STATE_READY);
++	assert(em->n_modems == 1);
++
++	voicecall_appears(m2);
++	assert(em->n_modems == 2 && em->modems[1] == m2);
++
++	/* A modem already in is not added twice */
++	sim_set_state(m1, OFONO_SIM_STATE_READY);
++	assert(em->n_modems == 2);
++
++	emulator_disconnect(em);
++	close(peer);
++	spin(50);
++
++	/* the emulator is gone; a SIM coming back must not reach it */
++	sim_set_state(m2, OFONO_SIM_STATE_NOT_PRESENT);
++	sim_set_state(m2, OFONO_SIM_STATE_READY);
++	emulator_free(em);
++
++	test_teardown();
++	fake_bluez_stop(bz);
++}
++
++/*
++ * The headset hangs up: the HUP watch goes, and with it our duplicate of
++ * the RFCOMM socket, instead of the main loop polling a dead fd.
++ */
++static void test_hangup_closes_watch(void)
++{
++	struct fake_bluez *bz;
++	struct ofono_modem *m;
++	struct watch_fd *watch;
++	DBusMessage *reply;
++	int peer, watch_fd;
++
++	test_setup();
++	bz = fake_bluez_start();
++	assert(hfp_ag_init() == 0);
++
++	m = modem_new(true);
++	modem_add(m);
++	sim_set_state(m, OFONO_SIM_STATE_READY);
++	spin(50);
++
++	reply = headset_connect(&peer);
++	assert(!reply_is_error(reply));
++	dbus_message_unref(reply);
++
++	watch = g_hash_table_lookup(connection_hash, HEADSET_PATH);
++	assert(watch);
++	watch_fd = watch->fd;
++	assert(fcntl(watch_fd, F_GETFD) != -1);
++
++	/* the headset end goes, and the emulator's end with it */
++	close(peer);
++	emulator_disconnect(last_em);
++	emulator_free(last_em);
++	spin(100);
++
++	assert(g_hash_table_size(connection_hash) == 0);
++	assert(fcntl(watch_fd, F_GETFD) == -1 && errno == EBADF);
++
++	test_teardown();
++	fake_bluez_stop(bz);
++}
++
++/*
++ * BlueZ asks to disconnect: the socket is shut down and the HUP watch is
++ * removed with its entry, not left polling an fd that has been closed.
++ */
++static void test_request_disconnection(void)
++{
++	struct fake_bluez *bz;
++	struct ofono_modem *m;
++	struct watch_fd *watch;
++	DBusMessage *msg, *reply;
++	const char *path = HEADSET_PATH;
++	unsigned int id;
++	int peer, watch_fd;
++
++	test_setup();
++	bz = fake_bluez_start();
++	assert(hfp_ag_init() == 0);
++
++	m = modem_new(true);
++	modem_add(m);
++	sim_set_state(m, OFONO_SIM_STATE_READY);
++	spin(50);
++
++	reply = headset_connect(&peer);
++	assert(!reply_is_error(reply));
++	dbus_message_unref(reply);
++
++	watch = g_hash_table_lookup(connection_hash, HEADSET_PATH);
++	assert(watch);
++	id = watch->id;
++	watch_fd = watch->fd;
++
++	msg = dbus_message_new_method_call(BLUEZ_SERVICE,
++						HFP_AG_EXT_PROFILE_PATH,
++						BLUEZ_PROFILE_INTERFACE,
++						"RequestDisconnection");
++	dbus_message_append_args(msg, DBUS_TYPE_OBJECT_PATH, &path,
++					DBUS_TYPE_INVALID);
++	dbus_message_set_serial(msg, 2);
++	reply = profile_disconnection(ofono_conn, msg, NULL);
++	assert(!reply_is_error(reply));
++	dbus_message_unref(reply);
++	dbus_message_unref(msg);
++
++	assert(g_hash_table_size(connection_hash) == 0);
++	assert(g_main_context_find_source_by_id(NULL, id) == NULL);
++	assert(fcntl(watch_fd, F_GETFD) == -1 && errno == EBADF);
++
++	emulator_disconnect(last_em);
++	emulator_free(last_em);
++	close(peer);
++	spin(50);
++
++	test_teardown();
++	fake_bluez_stop(bz);
++}
++
+ int main(int argc, char **argv)
+ {
+ 	if (!getenv("DBUS_SESSION_BUS_ADDRESS")) {
+@@ -520,6 +855,16 @@ int main(int argc, char **argv)
+ 				test_register_when_bluez_appears);
+ 	g_test_add_func("/hfp_ag_bluez5/no-voicecall-no-register",
+ 				test_no_voicecall_no_register);
++	g_test_add_func("/hfp_ag_bluez5/connection-serves-all-modems",
++				test_connection_serves_all_modems);
++	g_test_add_func("/hfp_ag_bluez5/connection-rejected-without-modem",
++				test_connection_rejected_without_modem);
++	g_test_add_func("/hfp_ag_bluez5/modem-joins-connected-headset",
++				test_modem_joins_connected_headset);
++	g_test_add_func("/hfp_ag_bluez5/hangup-closes-watch",
++				test_hangup_closes_watch);
++	g_test_add_func("/hfp_ag_bluez5/request-disconnection",
++				test_request_disconnection);
+ 
+ 	return g_test_run();
+ }

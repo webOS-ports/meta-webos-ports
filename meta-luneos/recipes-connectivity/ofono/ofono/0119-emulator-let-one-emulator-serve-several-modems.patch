@@ -1,0 +1,401 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] emulator: let one emulator serve several modems
+
+An emulator belongs to one modem: ofono_emulator_create(modem, type)
+adds a single EMULATOR_HFP or EMULATOR_DUN atom and the link goes down
+with it. hfp_ag_bluez5 therefore picks one voicecall capable modem for
+each headset, the first one with a ready SIM, and a dual-SIM phone only
+ever shows the headset the calls of that one. On the mindphone (MT6739,
+two SIMs) a call on /ril_0 reached the phone but never the Nuraphone:
+no RING, no +CIEV, no +CLCC.
+
+Take the API from Sailfish OS oFono d9c68c4f ("[ofono] Support multiple
+modems in emulator. JB#42297", Juho Hämäläinen):
+ofono_emulator_create(type) makes the emulator, and
+ofono_emulator_add_modem(em, modem) gives it one atom on each modem it
+serves. ofono_emulator_register() registers all of them; a modem added
+to a link that is already up is registered straight away, and adding a
+modem twice does nothing. The link stays up while any of its atoms is
+registered and is torn down with the last one, so a modem going away no
+longer takes the headset with it. The emulator is freed with its last
+atom.
+
+The call lookup for +CLIP and RING now searches the voicecall atom of
+every modem. Sailfish stops at the first modem that has a voicecall
+atom, which misses a call on the second SIM; this does not.
+
+hfp_ag_bluez5, dun_gw_bluez5 and examples/emulator.c create the
+emulator and add the one modem they used before, so nothing changes
+for them yet; DUN stays a single-modem service. 0123 gives the HFP
+emulator every voice capable modem.
+
+The command handlers and the call indicators are still shared by all
+modems here, as in Sailfish; the next two patches give them per-modem
+state.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+diff --git a/examples/emulator.c b/examples/emulator.c
+index 927cf1f..7a59f25 100644
+--- a/examples/emulator.c
++++ b/examples/emulator.c
+@@ -110,10 +110,11 @@ static gboolean on_socket_connected(GIOChannel *chan, GIOCondition cond,
+ 
+ 	DBG("Picked modem %p for emulator", modem);
+ 
+-	em = ofono_emulator_create(modem, GPOINTER_TO_INT(user));
++	em = ofono_emulator_create(GPOINTER_TO_INT(user));
+ 	if (!em)
+ 		goto error;
+ 
++	ofono_emulator_add_modem(em, modem);
+ 	ofono_emulator_register(em, fd);
+ 	return TRUE;
+ 
+diff --git a/include/emulator.h b/include/emulator.h
+index d631196..94a70fa 100644
+--- a/include/emulator.h
++++ b/include/emulator.h
+@@ -56,8 +56,9 @@ typedef void (*ofono_emulator_request_cb_t)(struct ofono_emulator *em,
+ 					struct ofono_emulator_request *req,
+ 					void *data);
+ 
+-struct ofono_emulator *ofono_emulator_create(struct ofono_modem *modem,
+-						enum ofono_emulator_type type);
++struct ofono_emulator *ofono_emulator_create(enum ofono_emulator_type type);
++void ofono_emulator_add_modem(struct ofono_emulator *em,
++				struct ofono_modem *modem);
+ 
+ void ofono_emulator_register(struct ofono_emulator *em, int fd);
+ 
+diff --git a/plugins/dun_gw_bluez5.c b/plugins/dun_gw_bluez5.c
+index 396528b..794de70 100644
+--- a/plugins/dun_gw_bluez5.c
++++ b/plugins/dun_gw_bluez5.c
+@@ -78,7 +78,7 @@ static DBusMessage *profile_new_connection(DBusConnection *conn,
+ 	modem = modems->data;
+ 	DBG("Picked modem %p for emulator", modem);
+ 
+-	em = ofono_emulator_create(modem, OFONO_EMULATOR_TYPE_DUN);
++	em = ofono_emulator_create(OFONO_EMULATOR_TYPE_DUN);
+ 	if (em == NULL) {
+ 		close(fd);
+ 		return g_dbus_create_error(msg, BLUEZ_ERROR_INTERFACE
+@@ -86,6 +86,8 @@ static DBusMessage *profile_new_connection(DBusConnection *conn,
+ 						"Not enough resources");
+ 	}
+ 
++	/* DUN stays on one modem: PPP runs over a single data connection */
++	ofono_emulator_add_modem(em, modem);
+ 	ofono_emulator_register(em, fd);
+ 
+ 	return dbus_message_new_method_return(msg);
+diff --git a/plugins/hfp_ag_bluez5.c b/plugins/hfp_ag_bluez5.c
+index ccc60c5..4a1dfaa 100644
+--- a/plugins/hfp_ag_bluez5.c
++++ b/plugins/hfp_ag_bluez5.c
+@@ -287,7 +287,7 @@ static DBusMessage *profile_new_connection(DBusConnection *conn,
+ 
+ 	bt_ba2str(&saddr.rc_bdaddr, remote);
+ 
+-	em = ofono_emulator_create(modem, OFONO_EMULATOR_TYPE_HFP);
++	em = ofono_emulator_create(OFONO_EMULATOR_TYPE_HFP);
+ 	if (em == NULL) {
+ 		close(fd);
+ 		return g_dbus_create_error(msg, BLUEZ_ERROR_INTERFACE
+@@ -295,6 +295,7 @@ static DBusMessage *profile_new_connection(DBusConnection *conn,
+ 						"Not enough resources");
+ 	}
+ 
++	ofono_emulator_add_modem(em, modem);
+ 	ofono_emulator_register(em, fd);
+ 
+ 	fd_dup = dup(fd);
+diff --git a/src/emulator.c b/src/emulator.c
+index b79af94..3967c19 100644
+--- a/src/emulator.c
++++ b/src/emulator.c
+@@ -36,8 +36,14 @@ struct hfp_codec_info {
+ 	ofono_bool_t supported;
+ };
+ 
+-struct ofono_emulator {
++/* One modem the emulator serves, through that modem's emulator atom */
++struct emulator_modem {
+ 	struct ofono_atom *atom;
++};
++
++struct ofono_emulator {
++	GSList *modems;		/* struct emulator_modem, in order added */
++	bool registered;
+ 	enum ofono_emulator_type type;
+ 	GAtServer *server;
+ 	GAtPPP *ppp;
+@@ -345,14 +351,28 @@ static struct indicator *find_indicator(struct ofono_emulator *em,
+ static struct ofono_call *find_call_with_status(struct ofono_emulator *em,
+ 								int status)
+ {
+-	struct ofono_modem *modem = __ofono_atom_get_modem(em->atom);
+-	struct ofono_voicecall *vc;
++	GSList *l;
+ 
+-	vc = __ofono_atom_find(OFONO_ATOM_TYPE_VOICECALL, modem);
+-	if (vc == NULL)
+-		return NULL;
++	for (l = em->modems; l; l = l->next) {
++		struct emulator_modem *m = l->data;
++		struct ofono_modem *modem;
++		struct ofono_voicecall *vc;
++		struct ofono_call *call;
++
++		if (!__ofono_atom_get_registered(m->atom))
++			continue;
++
++		modem = __ofono_atom_get_modem(m->atom);
++		vc = __ofono_atom_find(OFONO_ATOM_TYPE_VOICECALL, modem);
++		if (vc == NULL)
++			continue;
++
++		call = __ofono_voicecall_find_call_with_status(vc, status);
++		if (call)
++			return call;
++	}
+ 
+-	return __ofono_voicecall_find_call_with_status(vc, status);
++	return NULL;
+ }
+ 
+ static void notify_deferred_indicators(GAtServer *server, void *user_data)
+@@ -1162,13 +1182,44 @@ static void emulator_add_indicator(struct ofono_emulator *em, const char* name,
+ 	em->indicators = g_slist_append(em->indicators, ind);
+ }
+ 
+-static void emulator_unregister(struct ofono_atom *atom)
++static struct emulator_modem *find_modem_by_atom(struct ofono_emulator *em,
++						struct ofono_atom *atom)
++{
++	GSList *l;
++
++	for (l = em->modems; l; l = l->next) {
++		struct emulator_modem *m = l->data;
++
++		if (m->atom == atom)
++			return m;
++	}
++
++	return NULL;
++}
++
++static bool other_modem_registered(struct ofono_emulator *em,
++					struct ofono_atom *atom)
++{
++	GSList *l;
++
++	for (l = em->modems; l; l = l->next) {
++		struct emulator_modem *m = l->data;
++
++		if (m->atom != atom && __ofono_atom_get_registered(m->atom))
++			return true;
++	}
++
++	return false;
++}
++
++static void emulator_teardown(struct ofono_emulator *em)
+ {
+-	struct ofono_emulator *em = __ofono_atom_get_data(atom);
+ 	GSList *l;
+ 
+ 	DBG("%p", em);
+ 
++	em->registered = false;
++
+ 	if (em->callsetup_source) {
+ 		g_source_remove(em->callsetup_source);
+ 		em->callsetup_source = 0;
+@@ -1199,12 +1250,32 @@ static void emulator_unregister(struct ofono_atom *atom)
+ 	em->card = NULL;
+ }
+ 
++static void emulator_unregister(struct ofono_atom *atom)
++{
++	struct ofono_emulator *em = __ofono_atom_get_data(atom);
++
++	DBG("%p, atom %p", em, atom);
++
++	/*
++	 * A modem going away only takes its own atom with it. The link
++	 * stays up for as long as the emulator serves any modem at all.
++	 */
++	if (other_modem_registered(em, atom))
++		return;
++
++	emulator_teardown(em);
++}
++
+ void ofono_emulator_register(struct ofono_emulator *em, int fd)
+ {
+ 	GIOChannel *io;
++	GSList *l;
+ 
+ 	DBG("%p, %d", em, fd);
+ 
++	if (em->registered)
++		return;
++
+ 	if (fd < 0)
+ 		return;
+ 
+@@ -1254,7 +1325,13 @@ void ofono_emulator_register(struct ofono_emulator *em, int fd)
+ 		g_at_server_register(em->server, "+BCS", bcs_cb, em, NULL);
+ 	}
+ 
+-	__ofono_atom_register(em->atom, emulator_unregister);
++	em->registered = true;
++
++	for (l = em->modems; l; l = l->next) {
++		struct emulator_modem *m = l->data;
++
++		__ofono_atom_register(m->atom, emulator_unregister);
++	}
+ 
+ 	switch (em->type) {
+ 	case OFONO_EMULATOR_TYPE_DUN:
+@@ -1273,25 +1350,27 @@ void ofono_emulator_register(struct ofono_emulator *em, int fd)
+ static void emulator_remove(struct ofono_atom *atom)
+ {
+ 	struct ofono_emulator *em = __ofono_atom_get_data(atom);
++	struct emulator_modem *m = find_modem_by_atom(em, atom);
+ 
+ 	DBG("atom: %p", atom);
+ 
+-	g_free(em);
++	if (m) {
++		em->modems = g_slist_remove(em->modems, m);
++		g_free(m);
++	}
++
++	/* The emulator lives for as long as it serves a modem */
++	if (em->modems == NULL)
++		g_free(em);
+ }
+ 
+-struct ofono_emulator *ofono_emulator_create(struct ofono_modem *modem,
+-						enum ofono_emulator_type type)
++struct ofono_emulator *ofono_emulator_create(enum ofono_emulator_type type)
+ {
+ 	struct ofono_emulator *em;
+-	enum ofono_atom_type atom_t;
+ 
+-	DBG("modem: %p, type: %d", modem, type);
++	DBG("type: %d", type);
+ 
+-	if (type == OFONO_EMULATOR_TYPE_DUN)
+-		atom_t = OFONO_ATOM_TYPE_EMULATOR_DUN;
+-	else if (type == OFONO_EMULATOR_TYPE_HFP)
+-		atom_t = OFONO_ATOM_TYPE_EMULATOR_HFP;
+-	else
++	if (type != OFONO_EMULATOR_TYPE_DUN && type != OFONO_EMULATOR_TYPE_HFP)
+ 		return NULL;
+ 
+ 	em = g_try_new0(struct ofono_emulator, 1);
+@@ -1310,15 +1389,75 @@ struct ofono_emulator *ofono_emulator_create(struct ofono_modem *modem,
+ 	em->events_mode = 3;	/* default mode is forwarding events */
+ 	em->cmee_mode = 0;	/* CME ERROR disabled by default */
+ 
+-	em->atom = __ofono_modem_add_atom_offline(modem, atom_t,
++	return em;
++}
++
++void ofono_emulator_add_modem(struct ofono_emulator *em,
++				struct ofono_modem *modem)
++{
++	enum ofono_atom_type atom_t;
++	struct emulator_modem *m;
++	GSList *l;
++
++	if (em == NULL || modem == NULL)
++		return;
++
++	for (l = em->modems; l; l = l->next) {
++		m = l->data;
++
++		if (__ofono_atom_get_modem(m->atom) == modem)
++			return;
++	}
++
++	DBG("%p, modem %p", em, modem);
++
++	if (em->type == OFONO_EMULATOR_TYPE_DUN)
++		atom_t = OFONO_ATOM_TYPE_EMULATOR_DUN;
++	else
++		atom_t = OFONO_ATOM_TYPE_EMULATOR_HFP;
++
++	m = g_new0(struct emulator_modem, 1);
++	m->atom = __ofono_modem_add_atom_offline(modem, atom_t,
+ 							emulator_remove, em);
++	em->modems = g_slist_append(em->modems, m);
+ 
+-	return em;
++	/* Joining a live link: the modem's atoms hook up straight away */
++	if (em->registered)
++		__ofono_atom_register(m->atom, emulator_unregister);
+ }
+ 
+ void ofono_emulator_remove(struct ofono_emulator *em)
+ {
+-	__ofono_atom_free(em->atom);
++	GSList *atoms = NULL;
++	GSList *l;
++
++	DBG("%p", em);
++
++	if (em->modems == NULL) {
++		if (em->registered)
++			emulator_teardown(em);
++
++		g_free(em);
++		return;
++	}
++
++	/*
++	 * Freeing the atoms tears the link down with the last registered
++	 * one, and frees the emulator with the last one of all. Walk a copy
++	 * of the atoms, since each free also unlinks its modem.
++	 */
++	for (l = em->modems; l; l = l->next) {
++		struct emulator_modem *m = l->data;
++
++		atoms = g_slist_prepend(atoms, m->atom);
++	}
++
++	atoms = g_slist_reverse(atoms);
++
++	for (l = atoms; l; l = l->next)
++		__ofono_atom_free(l->data);
++
++	g_slist_free(atoms);
+ }
+ 
+ void ofono_emulator_send_final(struct ofono_emulator *em,
+diff --git a/unit/test-hfp-ag-bluez5.c b/unit/test-hfp-ag-bluez5.c
+index 831ad8f..753e270 100644
+--- a/unit/test-hfp-ag-bluez5.c
++++ b/unit/test-hfp-ag-bluez5.c
+@@ -180,8 +180,13 @@ enum ofono_sim_state ofono_sim_get_state(struct ofono_sim *sim)
+ }
+ 
+ /* Not reached: no HFP connection is made in this test */
+-struct ofono_emulator *ofono_emulator_create(struct ofono_modem *modem,
+-						enum ofono_emulator_type type)
++struct ofono_emulator *ofono_emulator_create(enum ofono_emulator_type type)
++{
++	abort();
++}
++
++void ofono_emulator_add_modem(struct ofono_emulator *em,
++				struct ofono_modem *modem)
+ {
+ 	abort();
+ }
