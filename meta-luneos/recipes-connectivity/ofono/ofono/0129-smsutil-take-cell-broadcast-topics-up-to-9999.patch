@@ -1,0 +1,143 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] smsutil: take cell broadcast topics up to 9999
+
+The Topics property of org.ofono.CellBroadcast took 0 to 999, and
+cbs_optimize_ranges() had a bitmap of as many bits. Every public warning
+identifier is above that: ETWS starts at 4352, CMAS and EU-Alert at 4370.
+So voicecall's channel catalog, which sets them, gets "Argument format is
+not recognized" for a whole set of topics, and a phone subscribes to no
+warning at all. On the Mindphone that is the state of both modems.
+
+The EFcbmi and EFcbmir reads had the same limit, so warning identifiers a
+SIM asks for were dropped as well.
+
+Sailfish made this change in 93352582. Here the bitmap stays on the stack:
+1250 bytes is no burden. The loop counter in cbs_optimize_ranges() is an
+unsigned short, so the limit cannot go past 65534 without changing that.
+
+"1-5, 3333" in the invalid ranges of test-sms is now valid, so 10000 takes
+its place, and the new test checks what comes out, not only that something
+does.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+diff --git a/src/cbs.c b/src/cbs.c
+index 8113673..843710e 100644
+--- a/src/cbs.c
++++ b/src/cbs.c
+@@ -704,7 +704,7 @@ static void sim_cbmi_read_cb(int ok, int length, int record,
+ 
+ 		mi = (data[i] << 8) + data[i+1];
+ 
+-		if (mi > 999)
++		if (mi > CBS_MAX_TOPIC)
+ 			continue;
+ 
+ 		range = g_new0(struct cbs_topic_range, 1);
+@@ -751,7 +751,7 @@ static void sim_cbmir_read_cb(int ok, int length, int record,
+ 		min = (data[i] << 8) + data[i+1];
+ 		max = (data[i+2] << 8) + data[i+3];
+ 
+-		if (min > 999 || max > 999 || min > max)
++		if (min > CBS_MAX_TOPIC || max > CBS_MAX_TOPIC || min > max)
+ 			continue;
+ 
+ 		range = g_new0(struct cbs_topic_range, 1);
+diff --git a/src/smsutil.c b/src/smsutil.c
+index 84895c4..7bf6a5e 100644
+--- a/src/smsutil.c
++++ b/src/smsutil.c
+@@ -4451,7 +4451,7 @@ out:
+ GSList *cbs_optimize_ranges(GSList *ranges)
+ {
+ 	struct cbs_topic_range *range;
+-	unsigned char bitmap[125];
++	unsigned char bitmap[CBS_MAX_TOPIC / 8 + 1];
+ 	GSList *l;
+ 	unsigned short i;
+ 	GSList *ret = NULL;
+@@ -4471,7 +4471,7 @@ GSList *cbs_optimize_ranges(GSList *ranges)
+ 
+ 	range = NULL;
+ 
+-	for (i = 0; i <= 999; i++) {
++	for (i = 0; i <= CBS_MAX_TOPIC; i++) {
+ 		int byte_offset = i / 8;
+ 		int bit = i % 8;
+ 
+@@ -4511,10 +4511,10 @@ GSList *cbs_extract_topic_ranges(const char *ranges)
+ 	GSList *tmp;
+ 
+ 	while (next_range(ranges, &offset, &min, &max) == TRUE) {
+-		if (min < 0 || min > 999)
++		if (min < 0 || min > CBS_MAX_TOPIC)
+ 			return NULL;
+ 
+-		if (max < 0 || max > 999)
++		if (max < 0 || max > CBS_MAX_TOPIC)
+ 			return NULL;
+ 
+ 		if (max < min)
+diff --git a/src/smsutil.h b/src/smsutil.h
+index 2c1c7d2..e622b5f 100644
+--- a/src/smsutil.h
++++ b/src/smsutil.h
+@@ -8,6 +8,7 @@
+ enum cbs_language;
+ 
+ #define CBS_MAX_GSM_CHARS 93
++#define CBS_MAX_TOPIC 9999
+ #define SMS_MSGID_LEN 20
+ 
+ enum sms_type {
+diff --git a/unit/test-sms.c b/unit/test-sms.c
+index 630468b..15322da 100644
+--- a/unit/test-sms.c
++++ b/unit/test-sms.c
+@@ -1505,8 +1505,10 @@ static void test_cbs_padding_character(void)
+ 
+ static const char *ranges[] = { "1-5, 2, 3, 600, 569-900, 999",
+ 				"0-20, 33, 44, 50-60, 20-50, 1-5, 5, 3, 5",
++				"4370-4379,4383,4386-4392,4400",
++				"0-9999",
+ 				NULL };
+-static const char *inv_ranges[] = { "1-5, 3333", "1-5, afbcd", "1-5, 3-5,,",
++static const char *inv_ranges[] = { "1-5, 10000", "1-5, afbcd", "1-5, 3-5,,",
+ 					"1-5, 3-5, c", NULL };
+ 
+ static void test_range_minimizer(void)
+@@ -1541,6 +1543,23 @@ static void test_range_minimizer(void)
+ 	}
+ }
+ 
++/* What voicecall's channel catalog asks for in the Netherlands */
++static void test_range_public_warning(void)
++{
++	static const char topics[] = "4370-4379,4383,4386-4392,4400";
++	GSList *r = cbs_extract_topic_ranges(topics);
++	char *rangestr;
++
++	g_assert(r != NULL);
++
++	rangestr = cbs_topic_ranges_to_string(r);
++	g_assert(rangestr != NULL);
++	g_assert_cmpstr(rangestr, ==, topics);
++
++	g_free(rangestr);
++	g_slist_free_full(r, g_free);
++}
++
+ static void test_sr_assembly(void)
+ {
+ 	const char *sr_pdu1 = "06040D91945152991136F00160124130340A0160124130"
+@@ -1795,6 +1814,9 @@ int main(int argc, char **argv)
+ 
+ 	g_test_add_func("/testsms/Range minimizer", test_range_minimizer);
+ 
++	g_test_add_func("/testsms/Public warning ranges",
++			test_range_public_warning);
++
+ 	g_test_add_func("/testsms/Status Report Assembly", test_sr_assembly);
+ 
+ 	g_test_add_data_func("/testsms/Test WAP Push 1", &wap_push_1,

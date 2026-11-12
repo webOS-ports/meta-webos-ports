@@ -25,6 +25,7 @@ SRC_URI:append = " \
   file://ofono.service \
   file://ofono-halium.service \
   file://70-ofono-modem.rules \
+  file://ofono.service.d/luneos-hardening.conf \
 "
 
 # Series that lets out-of-tree plugins supply atom drivers again, and that
@@ -52,6 +53,29 @@ SRC_URI:append = " \
   file://0114-radio-settings-never-report-a-technology-preference-.patch \
   file://0115-ussd-accept-pre-decoded-UTF-8-from-drivers.patch \
   file://0116-sim-do-not-walk-a-freed-watch-list-in-open_channel_cb.patch \
+  file://0117-hfp_ag_bluez5-register-the-profile-again-when-BlueZ-r.patch \
+  file://0118-unit-test-that-the-HFP-AG-profile-follows-BlueZ.patch \
+  file://0119-emulator-let-one-emulator-serve-several-modems.patch \
+  file://0120-emulator-keep-the-command-handlers-of-each-modem-apa.patch \
+  file://0121-emulator-merge-the-call-indicators-of-all-modems.patch \
+  file://0122-voicecall-answer-headset-commands-on-the-modem-that.patch \
+  file://0123-hfp_ag_bluez5-serve-every-voice-capable-modem-from-o.patch \
+  file://0124-hfp_ag_bluez5-remove-the-HUP-watch-together-with-its.patch \
+  file://0125-emulator-accept-AT-BAC-with-CVSD-anywhere-in-the-lis.patch \
+  file://0126-unit-test-one-HFP-emulator-serving-the-calls-of-two.patch \
+  file://0127-unit-test-that-each-headset-gets-every-voice-capable.patch \
+  file://0128-emulator-do-not-write-to-a-headset-whose-link-has-gone.patch \
+  file://0129-smsutil-take-cell-broadcast-topics-up-to-9999.patch \
+  file://0130-cbs-a-public-warning-is-not-a-base-station-id.patch \
+  file://0131-unit-decode-the-pages-of-a-real-NL-Alert.patch \
+  file://0132-core-add-a-queue-for-D-Bus-requests.patch \
+  file://0133-unit-test-the-D-Bus-request-queue.patch \
+  file://0134-network-queue-Scan-and-Register-requests.patch \
+  file://0135-radio-settings-queue-requests.patch \
+  file://0136-sms-queue-GetProperties-requests-while-waiting-for-s.patch \
+  file://0137-call-forwarding-allow-multiple-pending-GetProperties.patch \
+  file://0138-unit-test-the-atoms-that-queue-D-Bus-requests.patch \
+  file://0139-sim-forget-the-IMPI-when-the-SIM-state-is-freed.patch \
 "
 
 # On Halium the modem is driven by ofono-binder-plugin. The in-tree ril
@@ -95,6 +119,10 @@ do_install:append() {
         install -d ${D}${sbindir}
         install -m 0755 ${UNPACKDIR}/ofono-binder-wait.sh ${D}${sbindir}/ofono-binder-wait.sh
     fi
+
+    # Sandbox for both units; see the file for what ofonod still needs.
+    install -D -m 0644 ${UNPACKDIR}/ofono.service.d/luneos-hardening.conf \
+        ${D}${systemd_unitdir}/system/ofono.service.d/luneos-hardening.conf
 
     if [ -e ${UNPACKDIR}/70-ofono-modem.rules ]; then
         # Install udev rule for mainline modem
