@@ -15,11 +15,14 @@ LIC_FILES_CHKSUM = " \
 # qtbase-native, gated on the wayland DISTRO_FEATURE which LuneOS sets.
 DEPENDS = "qtdeclarative wayland-native qtwayland qtbase-native qt-features-webos pmloglib webos-wayland-extensions glib-2.0 qtwayland-webos"
 
-SRCREV = "ccd88045869516e5e70878f68c8188b11082e052"
+# herrie/bluetooth2-migration until its pull request is merged: the shell
+# may use bluetooth2 (bluetooth.query, bluetooth.operation).
+SRCREV = "2b1a0a0f645fa8f2390ec04f374842427a1d55f6"
+WEBOS_GIT_PARAM_BRANCH = "herrie/bluetooth2-migration"
 
 PV = "2.0.0-424"
 
-PR = "r90"
+PR = "r95"
 
 inherit webos_qmake6
 inherit pkgconfig

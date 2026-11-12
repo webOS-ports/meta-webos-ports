@@ -3,8 +3,12 @@ LICENSE = "LGPL-2.1-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "0.5+git"
+PE = "5"
 
-SRCREV = "d0556d944acc6e4970cd9e7cd62d152ceb179c39"
+# herrie/bluetooth2-migration until its pull request is merged:
+# LuneOS.Bluetooth on com.webos.service.bluetooth2, without BluezQt.
+SRCREV = "d6e5fbb77e9721f69a3b31218951567c70da06d2"
+WEBOS_GIT_PARAM_BRANCH = "herrie/bluetooth2-migration"
 
 PR = "r4"
 
@@ -13,7 +17,7 @@ PR = "r4"
 # QML app sees the camera on a Halium device. The SPI header it needs comes
 # from qtmultimedia built with -DFEATURE_gstreamer_qt_api=ON; without it the
 # factory compiles to a stub and reports itself unavailable.
-DEPENDS = "qtbase qtdeclarative luna-service2 luna-sysmgr-common libwebos-application qtdeclarative-native bluez-qt qtmultimedia qtsvg gstreamer1.0 gstreamer1.0-plugins-bad zbar"
+DEPENDS = "qtbase qtdeclarative luna-service2 luna-sysmgr-common libwebos-application qtdeclarative-native qtmultimedia qtsvg gstreamer1.0 gstreamer1.0-plugins-bad zbar"
 # TextField draws its background with QtQuick.Effects, which lives in
 # qtdeclarative-qmlplugins (this used to be Qt5Compat's ColorOverlay).
 RDEPENDS:${PN} = "qtdeclarative-qmlplugins"

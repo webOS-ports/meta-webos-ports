@@ -15,7 +15,10 @@ DEPENDS = "glib-2.0"
 # changes as commits, the CMake 4 fix this recipe used to patch in among them.
 # Plain SRCREV: submission tags are a webosose convention.
 PV = "1.0.0-26+git"
-SRCREV = "80746873c94cfafa4b83ef2d4dd2a94bf2f868ee"
+# herrie/bluetooth2-migration until its pull request is merged:
+# connectDevice, disconnectDevice and requestPairingAuthorization.
+SRCREV = "990816183046de2f61f4c7f7d216830fc1c802a7"
+WEBOS_GIT_PARAM_BRANCH = "herrie/bluetooth2-migration"
 PR = "r5"
 
 inherit webos_component

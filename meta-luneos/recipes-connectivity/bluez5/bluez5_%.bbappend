@@ -14,13 +14,10 @@ SRC_URI += " \
 
 # Patches coming from webOS OSE
 #
-# 0014 makes bluetoothd ignore the IO capability the SIL registers and pair
-# everything as NoInputNoOutput (Just Works, no MITM protection). It stays
-# until the UI has a pairing agent that shows numeric comparison and passkey
-# prompts and that path has been tested end to end; dropping it earlier
-# risks pairing requests nobody can confirm. main.conf sets
-# JustWorksRepairing = never so a spoofed bonded device cannot silently
-# replace its link key in the meantime.
+# webOS OSE's 0014 (every agent registers as NoInputNoOutput) is not applied:
+# com.webos.service.bluetooth2 registers DisplayYesNo and Settings shows the
+# passkey to compare. main.conf sets JustWorksRepairing = never so a spoofed
+# bonded device cannot silently replace its link key.
 SRC_URI += " \
     file://0001-Fix-advertise-time-out-when-default-is-set-to-zero.patch \
     file://0002-Send-disconnect-signal-on-remote-device-disconnect.patch \
@@ -35,7 +32,6 @@ SRC_URI += " \
     file://0011-Implementation-to-get-connectedUuid-s-in-case-of-inc.patch \
     file://0012-Fix-for-updating-connected-uuids-when-profile-is-dis.patch \
     file://0013-Fix-device-getStatus-not-updated-when-unpaired.patch \
-    file://0014-Set-default-pairing-capability-as-NoInputNoOutput.patch \
     file://0015-AVRCP-getting-supported-notification-events.patch \
     file://0016-Modified-MapInstanceName-MapInstanceProperties-parsi.patch \
     file://0017-Enabled-EMAIL-support-based-on-MAPInstance-Name-Modi.patch \
