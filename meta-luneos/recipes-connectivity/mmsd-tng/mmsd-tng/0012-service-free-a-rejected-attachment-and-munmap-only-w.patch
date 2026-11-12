@@ -1,0 +1,103 @@
+From 893fd3e3c68cb94330be804d413f029b01016df7 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 13:43:52 +0100
+Subject: [PATCH] service: free a rejected attachment, and munmap only what was
+ mapped
+
+send_message_get_attachments() leaked the attachment it was adding,
+and its mapping, when the file could not be mapped or made the message
+too large. Free both.
+
+The running total was an int, so a few large files could wrap it past
+TotalMaxAttachmentSize. Keep it in a gsize and compare the remaining
+room instead of the sum, so it cannot overflow.
+
+release_data() munmap()ed every attachment except the SMIL part, which
+it told apart by its Content-Type. A client sending a file as
+"application/smil" got its mapping passed to g_free(). Record in the
+attachment whether its data is mapped, and free it accordingly.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/mmsutil.h |  2 ++
+ src/service.c | 25 ++++++++++++++++---------
+ 2 files changed, 18 insertions(+), 9 deletions(-)
+
+diff --git a/src/mmsutil.h b/src/mmsutil.h
+index 976dca3..e43d9a6 100644
+--- a/src/mmsutil.h
++++ b/src/mmsutil.h
+@@ -168,6 +168,8 @@ struct mms_attachment
+   size_t length;
+   char *content_type;
+   char *content_id;
++  /* data is an mmap() of the file to send, not an allocation */
++  gboolean mapped;
+ };
+ 
+ struct mms_message
+diff --git a/src/service.c b/src/service.c
+index d32e125..8b2471b 100644
+--- a/src/service.c
++++ b/src/service.c
+@@ -1051,7 +1051,7 @@ send_message_get_attachments (GVariant           *attachments,
+ {
+   gsize number_of_attachments;
+   GVariantIter iter;
+-  int attach_total_size = 0;
++  gsize attach_total_size = 0;
+ 
+   number_of_attachments = g_variant_iter_init (&iter, attachments);
+   DBG ("number_of_attachments %" G_GSIZE_FORMAT, number_of_attachments);
+@@ -1107,20 +1107,27 @@ send_message_get_attachments (GVariant           *attachments,
+         return FALSE;
+ 
+       if (mmap_file (file_path, &ptr, &attach->length) == FALSE)
+-        return FALSE;
+-
+-      attach_total_size = attach_total_size + attach->length;
++        {
++          g_free (attach);
++          return FALSE;
++        }
+ 
+-      DBG ("Total attachment size: %d", attach_total_size);
+       DBG ("Maximum Attachment Total Size (in bytes): %d", service->max_attach_total_size);
+ 
+-      if (attach_total_size > service->max_attach_total_size)
++      if (service->max_attach_total_size <= 0 ||
++          attach->length > (gsize) service->max_attach_total_size - attach_total_size)
+         {
+           DBG ("Error: Total Attachment size too large!");
++          munmap (ptr, attach->length);
++          g_free (attach);
+           return FALSE;
+         }
+ 
++      attach_total_size += attach->length;
++      DBG ("Total attachment size: %" G_GSIZE_FORMAT, attach_total_size);
++
+       attach->data = ptr;
++      attach->mapped = TRUE;
+ 
+       attach->content_id = g_strdup (content_id);
+ 
+@@ -1730,10 +1737,10 @@ release_data (gpointer data,
+ {
+   struct mms_attachment *attach = data;
+ 
+-  if (mms_attachment_is_smil (attach))
+-    g_free (attach->data);
+-  else
++  if (attach->mapped)
+     munmap (attach->data, attach->length);
++  else
++    g_free (attach->data);
+ }
+ 
+ static void
+-- 
+2.53.0
+

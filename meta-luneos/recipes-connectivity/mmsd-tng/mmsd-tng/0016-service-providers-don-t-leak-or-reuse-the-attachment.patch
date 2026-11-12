@@ -1,0 +1,134 @@
+From e2d87aa5e8a91d2d05fa565b145c3740d930226f Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 13:51:21 +0100
+Subject: [PATCH] service-providers: don't leak or reuse the attachment size
+
+The parser kept the mmsattachmentsize of an <apn> in mmssize, but
+never freed it, and did not clear it when the next <apn> started as it
+does the APN, MMSC and proxy. An APN without mmsattachmentsize that
+followed one with it in the same provider was reported with the earlier
+APN's size.
+
+Clear it at each <apn> and free it with the parse context, and add a
+test for an APN without a size after one with it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/service-providers.c         |  2 ++
+ unit/test-service-providers.c   | 41 +++++++++++++++++++++++++++++++++
+ unit/test-service-providers.xml | 18 +++++++++++++++
+ 3 files changed, 61 insertions(+)
+
+diff --git a/src/service-providers.c b/src/service-providers.c
+index bd51a54..3fa5320 100644
+--- a/src/service-providers.c
++++ b/src/service-providers.c
+@@ -146,6 +146,7 @@ parser_gsm_start (ParseContext *parse_context,
+       g_clear_pointer (&parse_context->apn, g_free);
+       g_clear_pointer (&parse_context->mmsc, g_free);
+       g_clear_pointer (&parse_context->proxy, g_free);
++      g_clear_pointer (&parse_context->mmssize, g_free);
+ 
+       for (i = 0; attribute_names && attribute_names[i]; i++)
+         if (strcmp (attribute_names[i], "value") == 0)
+@@ -358,6 +359,7 @@ finish_parse_context (ParseContext *parse_context,
+   g_free (parse_context->apn_to_check);
+   g_free (parse_context->mmsc);
+   g_free (parse_context->proxy);
++  g_free (parse_context->mmssize);
+   g_slice_free (ParseContext, parse_context);
+ }
+ 
+diff --git a/unit/test-service-providers.c b/unit/test-service-providers.c
+index 1faa305..7251d77 100644
+--- a/unit/test-service-providers.c
++++ b/unit/test-service-providers.c
+@@ -90,6 +90,46 @@ test_combined_mms_apn (void)
+ 
+ /*****************************************************************************/
+ 
++static void
++test_no_size_carryover_cb (const char *apn,
++                           const char *mmsc,
++                           const char *proxy,
++                           const char *mmssize,
++                           GError     *error,
++                           gpointer    user_data)
++{
++  GMainLoop *loop = user_data;
++
++  g_main_loop_quit (loop);
++
++  g_assert_no_error (error);
++  g_assert_cmpstr (apn, ==, "unsized.example.com");
++  g_assert_cmpstr (mmsc, ==, "http://mms.unsized.example.com/");
++  g_assert_null (proxy);
++  g_assert_null (mmssize);
++}
++
++/*
++ * This tests an APN without the "mmsattachmentsize" attribute that follows
++ * one with it: it must not get the earlier APN's attachment size.
++ */
++static void
++test_no_size_carryover (void)
++{
++  GMainLoop *loop = g_main_loop_new (NULL, FALSE);
++
++  mmsd_service_providers_find_settings (SOURCE_ROOT
++                                        "/unit/test-service-providers.xml",
++                                        "444111",
++                                        "unsized.example.com",
++                                        test_no_size_carryover_cb,
++                                        loop);
++  g_main_loop_run (loop);
++  g_main_loop_unref (loop);
++}
++
++/*****************************************************************************/
++
+ static void
+ test_missing_mmsc_apn_cb (const char *apn,
+                           const char *mmsc,
+@@ -236,6 +276,7 @@ main (int    argc,
+ 
+   g_test_add_func ("/service-providers/seperate_mms_apn", test_seperate_mms_apn);
+   g_test_add_func ("/service-providers/combined_mms_apn", test_combined_mms_apn);
++  g_test_add_func ("/service-providers/no_size_carryover", test_no_size_carryover);
+   g_test_add_func ("/service-providers/missing_mmsc_apn", test_missing_mmsc_apn);
+   g_test_add_func ("/service-providers/missing_mmsc_apn_two", test_missing_mmsc_apn_two);
+   g_test_add_func ("/service-providers/negative", test_negative);
+diff --git a/unit/test-service-providers.xml b/unit/test-service-providers.xml
+index b4159d7..309bb07 100644
+--- a/unit/test-service-providers.xml
++++ b/unit/test-service-providers.xml
+@@ -82,6 +82,24 @@
+ 			</apn>
+ 		</gsm>
+ 	</provider>
++
++	<provider>
++		<name>Carryover</name>
++		<gsm>
++			<network-id mcc="444" mnc="111"/>
++			<apn value="sized.example.com">
++				<usage type="mms"/>
++				<name>MMS APN with an attachment size</name>
++				<mmsc>http://mms.sized.example.com/</mmsc>
++				<mmsattachmentsize>1048576</mmsattachmentsize>
++			</apn>
++			<apn value="unsized.example.com">
++				<usage type="mms"/>
++				<name>MMS APN without an attachment size</name>
++				<mmsc>http://mms.unsized.example.com/</mmsc>
++			</apn>
++		</gsm>
++	</provider>
+ </country>
+ 
+ </serviceproviders>
+-- 
+2.53.0
+

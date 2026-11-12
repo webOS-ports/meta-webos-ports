@@ -1,0 +1,197 @@
+From 481bfe674e383c4e107f5273872119b7990f3608 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 13:32:07 +0100
+Subject: [PATCH] Fix the build with clang
+
+clang rejects process_request(): the declarations at the top of the POST
+case are in the scope of the whole switch, so the jump to the default
+label crosses the initialisation of g_autofree contents:
+
+  service.c: error: cannot jump from switch statement to this case label
+
+Give the case its own block. With -Dwerror=true clang also stops at:
+
+ - on_name_lost() always exits; mark it G_GNUC_NORETURN
+   (-Wmissing-noreturn);
+ - the Insert-address-token 129 stored in a char (-Wconstant-conversion);
+ - MMS_PART_HEADER_CONTENT_ID passed as an enum mms_header
+   (-Wimplicit-enum-enum-cast); cast it, as the value is only used as the
+   token octet;
+ - the test's pragma for -Wdiscarded-qualifiers, which clang does not
+   know; use clang's name for the same warning there.
+
+Built with GCC 15 and clang 21 for x86-64, aarch64 and armv7 with
+-Dwerror=true; the unit tests pass on all three.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/main.c          |  2 +-
+ src/mmsutil.c       |  4 +-
+ src/service.c       | 90 +++++++++++++++++++++++----------------------
+ unit/test-mmsutil.c |  4 ++
+ 4 files changed, 53 insertions(+), 47 deletions(-)
+
+diff --git a/src/main.c b/src/main.c
+index 694ece8..74f1d83 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -85,7 +85,7 @@ on_name_acquired (GDBusConnection *connection,
+   DBG ("Dbus name acquired!");
+ }
+ 
+-static void
++G_GNUC_NORETURN static void
+ on_name_lost (GDBusConnection *connection,
+               const gchar     *name,
+               gpointer         user_data)
+diff --git a/src/mmsutil.c b/src/mmsutil.c
+index e39a8c6..f117712 100644
+--- a/src/mmsutil.c
++++ b/src/mmsutil.c
+@@ -1630,7 +1630,7 @@ encode_from (struct file_buffer *fb,
+     return FALSE;
+ 
+   ptr[0] = 1;
+-  ptr[1] = 129;
++  ptr[1] = (char) 0x81;    /* Insert-address-token */
+ 
+   return TRUE;
+ }
+@@ -1998,7 +1998,7 @@ mms_encode_send_req_part_header (struct mms_attachment *part,
+ 
+   /* Encode content-id */
+   if (part->content_id != NULL)
+-    if (encode_quoted_string (fb, MMS_PART_HEADER_CONTENT_ID,
++    if (encode_quoted_string (fb, (enum mms_header) MMS_PART_HEADER_CONTENT_ID,
+                               &part->content_id) == FALSE)
+       return FALSE;
+ 
+diff --git a/src/service.c b/src/service.c
+index 1a1c74e..335a1db 100644
+--- a/src/service.c
++++ b/src/service.c
+@@ -3962,57 +3962,59 @@ process_request (struct mms_request *request)
+ 
+     case MMS_REQUEST_TYPE_POST:
+     case MMS_REQUEST_TYPE_POST_TMP:
+-      /* Collect contents of file to POST */
+-      gsize length;
+-      g_autofree gchar *contents = NULL;
+-      GBytes *request_body = NULL;
+-      SoupMessageHeaders *message_headers = NULL;
+-
+-      create_new_web_message (request, "POST", service->mmsc, &msg);
+-      if (msg == NULL)
+-        {
+-          g_critical ("Unable to create POST message");
+-          return NULL;
+-        }
+-      g_file_get_contents (request->data_path, &contents, &length,
+-                           NULL);
+-      if (contents == NULL)
+-        {
+-          g_critical ("Unable to read contents of file: %s\n",
+-                      request->data_path);
+-          return NULL;
+-        }
++      {
++        /* Collect contents of file to POST */
++        gsize length;
++        g_autofree gchar *contents = NULL;
++        GBytes *request_body = NULL;
++        SoupMessageHeaders *message_headers = NULL;
++
++        create_new_web_message (request, "POST", service->mmsc, &msg);
++        if (msg == NULL)
++          {
++            g_critical ("Unable to create POST message");
++            return NULL;
++          }
++        g_file_get_contents (request->data_path, &contents, &length,
++                             NULL);
++        if (contents == NULL)
++          {
++            g_critical ("Unable to read contents of file: %s\n",
++                        request->data_path);
++            return NULL;
++          }
+ 
+-      request_body = g_bytes_new (contents, length);
+-      request->data_to_post_path = g_strdup (request->data_path);
++        request_body = g_bytes_new (contents, length);
++        request->data_to_post_path = g_strdup (request->data_path);
+ 
+-      if (request->fd == -1)
+-        {
+-          /* Prepare fd for response reception */
+-          g_free (request->data_path);
++        if (request->fd == -1)
++          {
++            /* Prepare fd for response reception */
++            g_free (request->data_path);
+ 
+-          request->data_path = g_strdup_printf ("%spost-rsp.XXXXXX.mms",
+-                                                service->request_path);
++            request->data_path = g_strdup_printf ("%spost-rsp.XXXXXX.mms",
++                                                  service->request_path);
+ 
+-          request->fd = g_mkstemp_full (request->data_path,
+-                                        O_WRONLY | O_CREAT | O_TRUNC,
+-                                        S_IWUSR | S_IRUSR);
+-        }
++            request->fd = g_mkstemp_full (request->data_path,
++                                          O_WRONLY | O_CREAT | O_TRUNC,
++                                          S_IWUSR | S_IRUSR);
++          }
+ 
+-      message_headers = soup_message_get_request_headers (msg);
+-      soup_message_headers_replace (message_headers,
+-                                    "Content-Type",
+-                                    DEFAULT_CONTENT_TYPE);
++        message_headers = soup_message_get_request_headers (msg);
++        soup_message_headers_replace (message_headers,
++                                      "Content-Type",
++                                      DEFAULT_CONTENT_TYPE);
+ 
+-      soup_message_set_request_body_from_bytes (msg, NULL, request_body);
+-      g_bytes_unref (request_body);
+-      service->cancel_current_msg = g_cancellable_new ();
+-      soup_session_send_and_read_async (request->service->web, msg, 0, service->cancel_current_msg,
+-                                        (GAsyncReadyCallback)on_message_done, request);
+-      DBG ("POST %" G_GSIZE_FORMAT " bytes to %s", length, service->mmsc);
+-      DBG ("Sending <%s>", request->data_to_post_path);
++        soup_message_set_request_body_from_bytes (msg, NULL, request_body);
++        g_bytes_unref (request_body);
++        service->cancel_current_msg = g_cancellable_new ();
++        soup_session_send_and_read_async (request->service->web, msg, 0, service->cancel_current_msg,
++                                          (GAsyncReadyCallback)on_message_done, request);
++        DBG ("POST %" G_GSIZE_FORMAT " bytes to %s", length, service->mmsc);
++        DBG ("Sending <%s>", request->data_to_post_path);
+ 
+-      return msg;
++        return msg;
++      }
+      default:
+       g_critical ("You should not have gotten here");
+     }
+diff --git a/unit/test-mmsutil.c b/unit/test-mmsutil.c
+index f7cda34..d9d3ed3 100644
+--- a/unit/test-mmsutil.c
++++ b/unit/test-mmsutil.c
+@@ -959,7 +959,11 @@ struct mms_encode_test
+   const unsigned char pdu[];
+ };
+ #pragma GCC diagnostic push
++#ifdef __clang__
++#pragma GCC diagnostic ignored "-Wincompatible-pointer-types-discards-qualifiers"
++#else
+ #pragma GCC diagnostic ignored "-Wdiscarded-qualifiers"
++#endif
+ static const struct mms_encode_test mms_m_notifyresp_ind_test_1 = {
+   .msg = {
+     .type = MMS_MESSAGE_TYPE_NOTIFYRESP_IND,
+-- 
+2.53.0
+

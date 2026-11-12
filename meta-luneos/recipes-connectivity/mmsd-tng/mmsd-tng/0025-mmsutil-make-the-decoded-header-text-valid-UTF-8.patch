@@ -1,0 +1,171 @@
+From f258590dc76a2ae47ead4c0c6788b28dc55b55f5 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 14:17:43 +0100
+Subject: [PATCH] mmsutil: make the decoded header text valid UTF-8
+
+The text headers of a received PDU (Subject, From, To, the Content-ID
+and Content-Type of each part, and so on) were copied as they came, and
+a Text-string, or an Encoded-string-value that claims UTF-8, need not
+be valid UTF-8. These strings are exported over D-Bus and put in
+GVariants with g_variant_new_string(), which rejects invalid UTF-8 with
+a critical and returns NULL, so an MMS with a stray byte in its Subject
+broke the message on its way to the client.
+
+Replace invalid sequences with U+FFFD where the text is decoded, and
+add a test for both forms.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/mmsutil.c       | 31 +++++++++++++++++++++++++------
+ unit/test-mmsutil.c | 35 +++++++++++++++++++++++++++++++++++
+ 2 files changed, 60 insertions(+), 6 deletions(-)
+
+diff --git a/src/mmsutil.c b/src/mmsutil.c
+index b5e4a1c..9323917 100644
+--- a/src/mmsutil.c
++++ b/src/mmsutil.c
+@@ -193,6 +193,24 @@ charset_index2string (unsigned int index)
+   return NULL;
+ }
+ 
++/*
++ * Text in a PDU need not be UTF-8, whatever its charset says, but it ends up
++ * in D-Bus strings and GVariants, which must be. Replace what is not.
++ */
++static char *
++take_valid_utf8 (char *text)
++{
++  char *valid;
++
++  if (text == NULL || g_utf8_validate (text, -1, NULL))
++    return text;
++
++  valid = g_utf8_make_valid (text, -1);
++  g_free (text);
++
++  return valid;
++}
++
+ static gboolean
+ extract_short (struct wsp_header_iter *iter,
+                void                   *user)
+@@ -226,7 +244,7 @@ decode_text (struct wsp_header_iter *iter)
+   DBG ("claimed len: %u", l);
+   DBG ("val: %.*s", (int) l, p);
+ 
+-  return wsp_decode_text_dup (p, l);
++  return take_valid_utf8 (wsp_decode_text_dup (p, l));
+ }
+ 
+ static gboolean
+@@ -262,7 +280,7 @@ decode_encoded_string_with_mib_enum (const unsigned char *p,
+   if (mib_enum == 106)
+     {
+       /* header is UTF-8 already */
+-      return wsp_decode_text_dup (p + consumed, l - consumed);
++      return take_valid_utf8 (wsp_decode_text_dup (p + consumed, l - consumed));
+     }
+ 
+   /* convert to UTF-8 */
+@@ -292,7 +310,7 @@ extract_text_array_element (struct wsp_header_iter *iter,
+     {
+     case WSP_VALUE_TYPE_TEXT:
+       /* Text-string */
+-      element = wsp_decode_text_dup (p, l);
++      element = take_valid_utf8 (wsp_decode_text_dup (p, l));
+       break;
+     case WSP_VALUE_TYPE_LONG:
+       /* (Value-len) Char-set Text-string */
+@@ -357,7 +375,7 @@ extract_encoded_text (struct wsp_header_iter *iter,
+     {
+     case WSP_VALUE_TYPE_TEXT:
+       /* Text-string */
+-      dec_text = wsp_decode_text_dup (p, l);
++      dec_text = take_valid_utf8 (wsp_decode_text_dup (p, l));
+       break;
+     case WSP_VALUE_TYPE_LONG:
+       /* (Value-len) Char-set Text-string */
+@@ -543,7 +561,7 @@ extract_from (struct wsp_header_iter *iter,
+       text = decode_encoded_string_with_mib_enum (p + consumed, val_len);
+     }
+   else
+-    text = wsp_decode_text_dup (p, l);
++    text = take_valid_utf8 (wsp_decode_text_dup (p, l));
+ 
+   if (text == NULL)
+     {
+@@ -1095,7 +1113,7 @@ extract_content_id (struct wsp_header_iter *iter,
+       if (text == NULL)
+         return FALSE;
+ 
+-      *out = g_strdup (text);
++      *out = take_valid_utf8 (g_strdup (text));
+     }
+ 
+   DBG ("extracted content-id %s\n", *out);
+@@ -1208,6 +1226,7 @@ mms_parse_attachments (struct wsp_header_iter *iter,
+       else
+         part->content_type = g_strconcat (mimetype, ";charset=",
+                                           charset, NULL);
++      part->content_type = take_valid_utf8 (part->content_type);
+ 
+       part->length = wsp_multipart_iter_get_body_len (&mi);
+       part->offset = (const unsigned char *)
+diff --git a/unit/test-mmsutil.c b/unit/test-mmsutil.c
+index 60993eb..ad0e54a 100644
+--- a/unit/test-mmsutil.c
++++ b/unit/test-mmsutil.c
+@@ -1225,6 +1225,40 @@ test_encode_bad_content_type (void)
+   close (fd);
+ }
+ 
++/*
++ * The decoded header text ends up in D-Bus strings, so it must be valid
++ * UTF-8 whatever the PDU holds. Subject: "a" 0xff "b" (Text-string), and
++ * Subject: UTF-8 charset "c" 0xc3 "d" (Encoded-string-value).
++ */
++static void
++test_decode_invalid_utf8 (void)
++{
++  static const guint8 subjects[][9] = {
++    { 0x96, 'a', 0xff, 'b', 0x00 },
++    { 0x96, 0x05, 0xea, 'c', 0xc3, 'd', 0x00 },
++  };
++  static const gsize subject_len[] = { 5, 7 };
++  static const char *const expected[] = { "a\xef\xbf\xbd" "b", "c\xef\xbf\xbd" "d" };
++
++  for (gsize i = 0; i < G_N_ELEMENTS (subjects); i++)
++    {
++      gsize len = sizeof (ni_prefix) + sizeof (from_text) + subject_len[i];
++      g_autofree guint8 *pdu = g_malloc (len);
++      struct mms_message *msg = g_new0 (struct mms_message, 1);
++
++      memcpy (pdu, ni_prefix, sizeof (ni_prefix));
++      memcpy (pdu + sizeof (ni_prefix), from_text, sizeof (from_text));
++      memcpy (pdu + sizeof (ni_prefix) + sizeof (from_text), subjects[i],
++              subject_len[i]);
++
++      g_assert_true (mms_message_decode (pdu, len, msg));
++      g_assert_true (g_utf8_validate (msg->ni.subject, -1, NULL));
++      g_assert_cmpstr (msg->ni.subject, ==, expected[i]);
++
++      mms_message_free (msg);
++    }
++}
++
+ int
+ main (int    argc,
+       char **argv)
+@@ -1310,6 +1344,7 @@ main (int    argc,
+                    test_encode_bad_content_type);
+   g_test_add_func ("/mmsutil/Decode two Content-IDs",
+                    test_decode_two_content_ids);
++  g_test_add_func ("/mmsutil/Decode invalid UTF-8", test_decode_invalid_utf8);
+ 
+   return g_test_run ();
+ }
+-- 
+2.53.0
+

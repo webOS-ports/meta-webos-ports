@@ -1,0 +1,109 @@
+From afed7ee1e2042c66910fe355353765a3ca4d617a Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 14:09:47 +0100
+Subject: [PATCH] wsputil: keep Content-Type decoding inside its Value-length
+
+In the Value-length form of a Content-Type, wsp_decode_content_type()
+decoded the media type with the length of the whole buffer instead of
+the Value-length. A media type that ran past the Value-length was
+accepted, and "len - media_len" then wrapped, so the caller got a
+parameter length of almost 4 GiB, which mmsutil.c and the push handler
+use to walk the parameters and the headers that follow.
+
+For a Long-integer media type the value was read starting one octet
+too far, past the Short-length that wsp_decode_field() had already
+skipped, so a well-known extension type was looked up wrongly and the
+read could leave the PDU.
+
+An unknown extension media type returned success with a NULL media
+type. Reject it instead.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/wsputil.c       | 10 ++++++++--
+ unit/test-wsputil.c | 29 +++++++++++++++++++++++++++++
+ 2 files changed, 37 insertions(+), 2 deletions(-)
+
+diff --git a/src/wsputil.c b/src/wsputil.c
+index 6d729c1..e7316b3 100644
+--- a/src/wsputil.c
++++ b/src/wsputil.c
+@@ -573,7 +573,8 @@ wsp_decode_content_type (const unsigned char *pdu,
+       unsigned int media_len;
+       unsigned int value_len;
+ 
+-      if (wsp_decode_field (data, max, &value_type, &data,
++      /* The media type must fit in the Value-length */
++      if (wsp_decode_field (data, len, &value_type, &data,
+                             &value_len, &media_len) != TRUE)
+         return FALSE;
+ 
+@@ -590,10 +591,15 @@ wsp_decode_content_type (const unsigned char *pdu,
+           if (value_len > sizeof(unsigned int))
+             return FALSE;
+ 
++          /* data already points past the Short-length */
+           for (i = 0; i < value_len; i++)
+-            var = (var << 8) | pdu_val[i + 1];
++            var = (var << 8) | pdu_val[i];
+ 
+           data = get_text_entry (var, extension_mimetypes);
++
++          /* Unknown extension media type */
++          if (data == NULL)
++            return FALSE;
+         }
+     }
+ 
+diff --git a/unit/test-wsputil.c b/unit/test-wsputil.c
+index ba12f76..fd40503 100644
+--- a/unit/test-wsputil.c
++++ b/unit/test-wsputil.c
+@@ -550,6 +550,33 @@ test_parameter_iter_bounds (void)
+   g_assert_false (wsp_parameter_iter_next (&pi, &param));
+ }
+ 
++static void
++test_decode_content_type_bounds (void)
++{
++  /* Value-length 3, Long-integer 0x0201 */
++  static const guint8 longint[] = { 0x03, 0x02, 0x02, 0x01 };
++  /* Value-length 2, but the media type text runs on to the 5th octet */
++  static const guint8 overrun[] = { 0x02, 'a', 'b', 'c', 0x00 };
++  /* Value-length 3, unknown Long-integer media type */
++  static const guint8 unknown[] = { 0x03, 0x02, 0x7f, 0x7f };
++  g_autofree guint8 *pdu1 = exact_copy (longint, sizeof (longint));
++  g_autofree guint8 *pdu2 = exact_copy (overrun, sizeof (overrun));
++  g_autofree guint8 *pdu3 = exact_copy (unknown, sizeof (unknown));
++  const void *ct;
++  unsigned int consumed, param_len;
++
++  g_assert_true (wsp_decode_content_type (pdu1, sizeof (longint), &ct,
++                                          &consumed, &param_len));
++  g_assert_cmpstr (ct, ==, "application/vnd.uplanet.cacheop-wbxml");
++  g_assert_cmpuint (consumed + param_len, ==, sizeof (longint));
++
++  g_assert_false (wsp_decode_content_type (pdu2, sizeof (overrun), &ct,
++                                           &consumed, &param_len));
++
++  g_assert_false (wsp_decode_content_type (pdu3, sizeof (unknown), &ct,
++                                           &consumed, &param_len));
++}
++
+ int
+ main (int    argc,
+       char **argv)
+@@ -585,6 +612,8 @@ main (int    argc,
+                    test_decode_short_input);
+   g_test_add_func ("/wsputil/Parameter iter bounds",
+                    test_parameter_iter_bounds);
++  g_test_add_func ("/wsputil/Decode Content-Type bounds",
++                   test_decode_content_type_bounds);
+ 
+   return g_test_run ();
+ }
+-- 
+2.53.0
+
