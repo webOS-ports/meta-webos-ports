@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+"""Copy a shared library with some of its imports made weak.
+
+    elf-weaken-imports <in.so> <out.so> <symbol> [<symbol> ...]
+
+An old vendor library can import a function the GSI's libraries no longer
+export under that name. hybris then refuses to load the library, and with it
+everything that links it. On the Unihertz Titan (Android 10 vendor, Android 16
+GSI) that is the GPU driver: libGLES_mali.so needs libladder.so, which imports
+
+    _ZN11unwindstack8Unwinder11FormatFrameEm   Unwinder::FormatFrame(size_t)
+
+while Android 16's libunwindstack has the same method only as const,
+_ZNK11unwindstack8Unwinder11FormatFrameEm. Making the import weak lets the
+library load. It resolves to nothing, so a call to it would crash. The
+function is only called to format a call stack for a debug log, which happens
+after something has already gone wrong.
+
+Each symbol must be an undefined (imported) GLOBAL symbol in .dynsym. Anything
+else - a defined symbol, a symbol that is already weak, a name that is not
+there - is an error and nothing is written, so a vendor update that changes
+the library is reported rather than silently patched. Only the binding byte of
+each named symbol changes; the rest of the file is copied unchanged.
+
+Exit status: 0 written, 1 a symbol could not be weakened, 2 bad usage or not
+an ELF shared library this can read.
+"""
+
+import os
+import struct
+import sys
+
+STB_GLOBAL = 1
+STB_WEAK = 2
+SHT_DYNSYM = 11
+SHN_UNDEF = 0
+
+
+class ElfError(Exception):
+    pass
+
+
+def dynsym_imports(data):
+    """Map each undefined .dynsym name to the offsets of its st_info bytes."""
+    if len(data) < 0x40 or data[:4] != b"\x7fELF":
+        raise ElfError("not an ELF file")
+    ei_class, ei_data = data[4], data[5]
+    if ei_data != 1:
+        raise ElfError("not little-endian")
+    if ei_class == 2:
+        shoff, = struct.unpack_from("<Q", data, 0x28)
+        shentsize, shnum, _ = struct.unpack_from("<HHH", data, 0x3A)
+        sh_fmt, sym_size = "<IIQQQQIIQQ", 24
+    elif ei_class == 1:
+        shoff, = struct.unpack_from("<I", data, 0x20)
+        shentsize, shnum, _ = struct.unpack_from("<HHH", data, 0x2E)
+        sh_fmt, sym_size = "<IIIIIIIIII", 16
+    else:
+        raise ElfError(f"unknown ELF class {ei_class}")
+    if shentsize != struct.calcsize(sh_fmt) or shoff + shnum * shentsize > len(data):
+        raise ElfError("section header table out of range")
+
+    sections = [struct.unpack_from(sh_fmt, data, shoff + i * shentsize)
+                for i in range(shnum)]
+    dynsyms = [s for s in sections if s[1] == SHT_DYNSYM]
+    if len(dynsyms) != 1:
+        raise ElfError(f"expected one .dynsym, found {len(dynsyms)}")
+    sym = dynsyms[0]
+    sym_off, sym_len, sym_link = sym[4], sym[5], sym[6]
+    if sym_link >= shnum:
+        raise ElfError(".dynsym links to a section that does not exist")
+    str_off, str_len = sections[sym_link][4], sections[sym_link][5]
+    if sym_off + sym_len > len(data) or str_off + str_len > len(data):
+        raise ElfError(".dynsym or its string table out of range")
+
+    imports = {}
+    for i in range(sym_len // sym_size):
+        off = sym_off + i * sym_size
+        st_name, = struct.unpack_from("<I", data, off)
+        if ei_class == 2:
+            info_off, shndx_off = off + 4, off + 6
+        else:
+            info_off, shndx_off = off + 12, off + 14
+        st_shndx, = struct.unpack_from("<H", data, shndx_off)
+        if st_name >= str_len:
+            raise ElfError(f"symbol {i} names outside the string table")
+        end = data.find(b"\0", str_off + st_name, str_off + str_len)
+        if end < 0:
+            raise ElfError(f"symbol {i} has an unterminated name")
+        name = data[str_off + st_name:end].decode("ascii", "replace")
+        imports.setdefault(name, []).append((info_off, st_shndx))
+    return imports
+
+
+def weaken(data, symbols):
+    """Return a patched copy of data, or raise ElfError naming what failed."""
+    table = dynsym_imports(data)
+    out = bytearray(data)
+    problems = []
+    for name in symbols:
+        entries = table.get(name)
+        if not entries:
+            problems.append(f"{name}: not in .dynsym")
+            continue
+        for info_off, shndx in entries:
+            info = out[info_off]
+            if shndx != SHN_UNDEF:
+                problems.append(f"{name}: defined here, not imported")
+            elif info >> 4 != STB_GLOBAL:
+                problems.append(f"{name}: binding {info >> 4}, not GLOBAL")
+            else:
+                out[info_off] = (STB_WEAK << 4) | (info & 0xF)
+    if problems:
+        raise ElfError("; ".join(problems))
+    return bytes(out)
+
+
+def main(argv):
+    if len(argv) < 4:
+        sys.stderr.write("usage: elf-weaken-imports <in.so> <out.so> <symbol>...\n")
+        return 2
+    src, dst, symbols = argv[1], argv[2], argv[3:]
+    try:
+        with open(src, "rb") as f:
+            data = f.read()
+        # A file this cannot read is a usage error (2), told apart from a
+        # readable library whose symbols do not qualify (1).
+        dynsym_imports(data)
+    except (OSError, ElfError) as e:
+        sys.stderr.write(f"elf-weaken-imports: {src}: {e}\n")
+        return 2
+    try:
+        patched = weaken(data, symbols)
+    except ElfError as e:
+        sys.stderr.write(f"elf-weaken-imports: {src}: {e}\n")
+        return 1
+
+    # Write next to the destination and rename, so a reader never sees half a
+    # library.
+    tmp = dst + ".tmp"
+    try:
+        with open(tmp, "wb") as f:
+            f.write(patched)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, dst)
+    except OSError as e:
+        sys.stderr.write(f"elf-weaken-imports: {dst}: {e}\n")
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

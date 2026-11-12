@@ -44,6 +44,53 @@ if [ "${deviceinfo_hybris_prefer_vndk:-0}" = "1" ] && [ -f "$SRC" ]; then
     echo "luneos-device-config: pulseaudio HYBRIS_USE_VENDOR_NAMESPACE=1 HYBRIS_PREFER_VNDK=1"
 fi
 
+# The stock system's libcgrouprc.so, for pulseaudio alone.
+#
+# On a vendor older than Android 11 the pair above is not enough. The Titan's
+# Android 10 (VNDK 29) audio HAL fails without it on
+#
+#   cannot locate symbol "android::TypeConverter<VectorTraits<audio_format_t>>::mTable"
+#     referenced by "/android/vendor/lib64/hw/audio.primary.mt6771.so"
+#
+# and with it the GSI's libcgrouprc.so, which the VNDK's libprocessgroup pulls
+# in from /system (it is LLNDK), binds to VNDK 29's libbase and misses Android
+# 11's android::base::LogMessage and ShouldLog. The phone's own system partition
+# is still the stock Android 10 one, and its libcgrouprc.so was built against
+# exactly that libbase. Measured on the Titan (12 Nov 2026): with that copy in
+# place of the GSI's, in pulseaudio's mount namespace only, module-droid-card
+# loads the HAL and the speaker plays.
+#
+#   deviceinfo_pulseaudio_stock_libcgrouprc="1"
+#
+# copies it out of the system partition with debugfs - read-only, nothing is
+# mounted - to $RUN/pulseaudio-stock/libcgrouprc.so, which pulseaudio.service's
+# 50-luneos-stock-libcgrouprc.conf drop-in binds over the GSI's for that one
+# unit. Everything else keeps the GSI's copy: its own processes need the new
+# libbase. Without the key, or if the copy fails, the file is absent and the
+# drop-in's optional bind does nothing.
+STOCK=$RUN/pulseaudio-stock/libcgrouprc.so
+rm -f "$STOCK"
+if [ "${deviceinfo_pulseaudio_stock_libcgrouprc:-0}" = "1" ]; then
+    part=/dev/disk/by-partlabel/system
+    if ! command -v debugfs >/dev/null 2>&1; then
+        echo "luneos-device-config: WARNING: no debugfs, cannot take libcgrouprc.so from the stock system" >&2
+    elif [ ! -b "$part" ]; then
+        echo "luneos-device-config: WARNING: no $part, cannot take libcgrouprc.so from the stock system" >&2
+    else
+        mkdir -p "$(dirname "$STOCK")"
+        # System-as-root since Android 10: the image's /system holds the libraries.
+        debugfs -R "dump /system/lib64/libcgrouprc.so $STOCK.tmp" "$part" >/dev/null 2>&1
+        if [ -s "$STOCK.tmp" ]; then
+            chmod 0644 "$STOCK.tmp"
+            mv "$STOCK.tmp" "$STOCK"
+            echo "luneos-device-config: pulseaudio gets the stock system's libcgrouprc.so"
+        else
+            rm -f "$STOCK.tmp"
+            echo "luneos-device-config: WARNING: no /system/lib64/libcgrouprc.so on $part" >&2
+        fi
+    fi
+fi
+
 # The rate module-droid-card opens the HAL outputs at.
 #
 # Unset, pulseaudio picks its default (44100 Hz). The MP01's HAL accepts that

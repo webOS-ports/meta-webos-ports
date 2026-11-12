@@ -1,0 +1,74 @@
+#!/bin/sh
+# Vendor libraries that import a symbol the GSI no longer exports.
+#
+# A vendor older than the GSI can link a function the GSI's libraries have since
+# renamed. hybris then cannot load the library, nor anything that needs it. On
+# the Unihertz Titan (Android 10 vendor, VNDK 29, under the Android 16 GSI) that
+# is the GPU driver, so the compositor aborted on every start and the screen
+# stayed black (12 Nov 2026):
+#
+#   cannot locate symbol "_ZN11unwindstack8Unwinder11FormatFrameEm"
+#     referenced by "/android/vendor/lib64/libladder.so"
+#   couldn't find an OpenGL ES implementation
+#
+# libGLES_mali.so needs libladder.so, a MediaTek call-stack logger, and Android
+# 16 made Unwinder::FormatFrame(size_t) const, which changes its name. The usual
+# remedy, HYBRIS_PREFER_VNDK, does not help here: it makes the GSI's own
+# libnativewindow and libhwc2_compat_layer resolve from VNDK 29 as well, and
+# those then miss Android 16 symbols instead.
+#
+# An adaptation lists the imports to make weak, as <path under /vendor>:<symbol>,
+# several symbols separated by commas, several libraries by spaces:
+#
+#   deviceinfo_vendor_weak_imports="lib64/libladder.so:_ZN11unwindstack8Unwinder11FormatFrameEm"
+#
+# elf-weaken-imports copies each library with those symbols' binding changed
+# from GLOBAL to WEAK and nothing else, into $GEN/files, and luneos-device-config
+# binds the copy over the vendor's file before surface-manager and pulseaudio
+# start. The vendor partition is never written. A weak import that stays
+# unresolved is a null function: only fit for a function that is not called in
+# normal running, like this one, which only formats a stack for a debug log.
+#
+# The helper refuses a symbol that is not an undefined GLOBAL import, so a
+# vendor update that changes the library is logged here and its file is left
+# alone rather than patched blind.
+[ -n "${deviceinfo_vendor_weak_imports:-}" ] || exit 0
+
+VENDOR=/android/vendor
+HELPER=/usr/lib/luneos-device-config/elf-weaken-imports
+
+if ! command -v python3 >/dev/null 2>&1 || [ ! -x "$HELPER" ]; then
+    echo "luneos-device-config: WARNING: no python3 or $HELPER, cannot weaken vendor imports" >&2
+    exit 0
+fi
+
+for entry in $deviceinfo_vendor_weak_imports; do
+    lib=${entry%%:*}
+    syms=${entry#*:}
+    case "$entry" in
+        *:*) ;;
+        *) echo "luneos-device-config: WARNING: vendor_weak_imports entry '$entry' has no ':<symbol>', ignoring" >&2
+           continue ;;
+    esac
+    case "$lib" in
+        ""|/*|*..*) echo "luneos-device-config: WARNING: vendor_weak_imports path '$lib' must be relative to /vendor, ignoring" >&2
+           continue ;;
+    esac
+    src=$VENDOR/$lib
+    if [ ! -f "$src" ]; then
+        echo "luneos-device-config: vendor_weak_imports: no $src, skipping"
+        continue
+    fi
+    out=$GEN/files$src
+    mkdir -p "$(dirname "$out")"
+    # Commas separate the symbols; word splitting hands them over one each.
+    list=$(echo "$syms" | tr ',' ' ')
+    # shellcheck disable=SC2086
+    if "$HELPER" "$src" "$out" $list; then
+        echo "luneos-device-config: $src: weakened $list"
+    else
+        rm -f "$out"
+        echo "luneos-device-config: WARNING: could not weaken imports of $src, leaving it as it is" >&2
+    fi
+done
+exit 0
