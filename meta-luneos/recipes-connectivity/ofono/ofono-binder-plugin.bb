@@ -2,7 +2,7 @@
 
 DESCRIPTION = "Binder based ofono plugin (Needed for Android 8.0+)."
 LICENSE = "GPL-2.0-only"
-LIC_FILES_CHKSUM = "file://LICENSE;md5=37fe900f9ece53e2621d89780f2031be"
+LIC_FILES_CHKSUM = "file://LICENSE;md5=79d356a113871df9a6301458b5de257a"
 SECTION = "webos/support"
 
 DEPENDS = "ofono ofono-ext libgbinder libgbinder-radio glib-2.0 libglibutil libofonobinderpluginext"
@@ -11,12 +11,19 @@ inherit pkgconfig
 
 SRC_URI = "git://github.com/mer-hybris/ofono-binder-plugin.git;branch=master;protocol=https \
            file://0001-binder_connman-do-not-read-non-basic-property-varian.patch \
-           file://0002-binder_sim-fix-logical-access-and-add-slot-switching.patch \
-           file://0100-adapt-to-ofono-2.x-atom-create-signatures.patch \
+           file://0002-ofono-binder-Return-SW1-SW2-with-logical-channel-APD.patch \
+           file://0003-ofono-binder-Implement-set_active_card_slot-with-set.patch \
+           file://0004-Build-against-upstream-oFono-2.x-plus-ofono-ext.patch \
+           file://0005-binder_voicecall-do-not-poll-calls-during-a-call-con.patch \
+           file://0006-unit-test-when-binder_voicecall-asks-for-the-call-li.patch \
+           file://0007-binder_call_barring-don-t-keep-asking-a-modem-which-.patch \
+           file://0008-ofono-binder-Don-t-make-supplementary-service-reques.patch \
+           file://0009-unit-test-the-call-settings-requests.patch \
+           file://0010-unit-free-failed-voicecall-requests-the-way-libgbind.patch \
 "
 
-PV = "1.1.28"
-SRCREV = "7e9d3d57a46e1ad62b6082203d6c0f62554fe08c"
+PV = "1.1.39"
+SRCREV = "f07d3ae5e6536d50c62fae36be1798bd77c05fa0"
 
 CFLAGS += "--sysroot=${RECIPE_SYSROOT} "
 LDFLAGS += "--sysroot=${RECIPE_SYSROOT} "

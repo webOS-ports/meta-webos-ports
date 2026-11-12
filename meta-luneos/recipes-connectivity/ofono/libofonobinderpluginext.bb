@@ -2,18 +2,19 @@
 
 DESCRIPTION = "Extension framework for ofono binder plugin"
 LICENSE = "GPL-2.0-only"
-LIC_FILES_CHKSUM = "file://../LICENSE;md5=37fe900f9ece53e2621d89780f2031be"
+LIC_FILES_CHKSUM = "file://../LICENSE;md5=79d356a113871df9a6301458b5de257a"
 SECTION = "webos/support"
 
 DEPENDS = "glib-2.0 libglibutil libgbinder-radio"
 
 inherit pkgconfig
 
+# Built from lib/ of the same tree
 SRC_URI = "git://github.com/mer-hybris/ofono-binder-plugin.git;branch=master;protocol=https"
 S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/lib"
 
-PV = "1.1.28"
-SRCREV = "7e9d3d57a46e1ad62b6082203d6c0f62554fe08c"
+PV = "1.1.39"
+SRCREV = "f07d3ae5e6536d50c62fae36be1798bd77c05fa0"
 
 CFLAGS += "--sysroot=${RECIPE_SYSROOT} "
 LDFLAGS += "--sysroot=${RECIPE_SYSROOT} "
