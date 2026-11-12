@@ -18,11 +18,11 @@ RPROVIDES:${PN}-examples = " \
     eos.widgetgallery \
 "
 
-SRCREV = "bfeb43a377d2f7ad0660281bb787876110d552bf"
+SRCREV = "0a8e10135db25281bb74404bddc50240fa393b8c"
 
 PV = "1.0.0-172"
 
-PR = "r43"
+PR = "r45"
 
 inherit webos_qmake6
 inherit pkgconfig
