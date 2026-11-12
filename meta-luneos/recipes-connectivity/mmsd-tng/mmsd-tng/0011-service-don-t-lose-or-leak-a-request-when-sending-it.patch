@@ -1,0 +1,339 @@
+From 79549f7748a54ad1fa602ffe86c91625e8f5a1ca Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 13:42:56 +0100
+Subject: [PATCH] service: don't lose or leak a request when sending it fails
+
+on_message_done() wrote the response body without checking it: when
+the transfer failed, soup_session_send_and_read_finish() returns NULL
+and g_bytes_get_size()/g_bytes_get_data() were called on it. A short
+write() was only logged, and fsync()/close() ran on whatever fd the
+request had. Write the body with a loop that retries short writes and
+EINTR, skip it when there is none, and only close a valid fd.
+
+on_message_done() also cleared service->cancel_current_msg and
+service->current_request_msg unconditionally. When the bearer goes away
+mms_service_bearer_notify() cancels the transfer and may start the next
+request before the cancelled one completes; its callback then threw
+away the new request's message and cancellable. Only clear them if they
+are still this request's. Use g_clear_object() for the message, which
+was never unreferenced before.
+
+When the request could not be sent at all, only a DNS failure requeued
+it. Failing to create the SoupMessage, to read the file to POST or to
+create the response file returned without requeueing or freeing the
+request, so it was lost, and the message it carried was never sent or
+reported as failed. Move the DNS failure handling into
+request_failed_before_sending() and use it for all of these.
+
+mms_request_destroy() did not close the request's fd, so a request
+dropped before its transfer completed leaked it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/service.c | 187 ++++++++++++++++++++++++++++++++++----------------
+ 1 file changed, 126 insertions(+), 61 deletions(-)
+
+diff --git a/src/service.c b/src/service.c
+index 08ee0a3..d32e125 100644
+--- a/src/service.c
++++ b/src/service.c
+@@ -688,18 +688,18 @@ handle_method_call_message (GDBusConnection       *connection,
+       mms = g_hash_table_lookup (service->messages, path);
+       if (mms == NULL)
+         {
+-        g_dbus_method_invocation_return_dbus_error (invocation,
+-                                                    MMS_MESSAGE_INTERFACE,
+-                                                    "Cannot find the MMS to delete!");
++          g_dbus_method_invocation_return_dbus_error (invocation,
++                                                      MMS_MESSAGE_INTERFACE,
++                                                      "Cannot find the MMS to delete!");
+           return;
+         }
+ 
+       uuid = g_strdup (mms->uuid);
+       if (mms_message_unregister (service, path, mms->message_registration_id) < 0)
+         {
+-        g_dbus_method_invocation_return_dbus_error (invocation,
+-                                                    MMS_MESSAGE_INTERFACE,
+-                                                    "There was an error deleting the MMS!");
++          g_dbus_method_invocation_return_dbus_error (invocation,
++                                                      MMS_MESSAGE_INTERFACE,
++                                                      "There was an error deleting the MMS!");
+           return;
+         }
+       mms_store_remove (service->identity, uuid);
+@@ -720,9 +720,9 @@ handle_method_call_message (GDBusConnection       *connection,
+       mms = g_hash_table_lookup (service->messages, path);
+       if (mms == NULL)
+         {
+-        g_dbus_method_invocation_return_dbus_error (invocation,
+-                                                    MMS_MESSAGE_INTERFACE,
+-                                                    "Cannot find this MMS!");
++          g_dbus_method_invocation_return_dbus_error (invocation,
++                                                      MMS_MESSAGE_INTERFACE,
++                                                      "Cannot find this MMS!");
+           return;
+         }
+ 
+@@ -864,6 +864,8 @@ mms_load_settings (struct mms_service *service)
+ static void
+ mms_request_destroy (struct mms_request *request)
+ {
++  if (request->fd >= 0)
++    close (request->fd);
+   g_free (request->data_path);
+   g_free (request->data_to_post_path);
+   g_free (request->location);
+@@ -3649,6 +3651,29 @@ service_retry_process_request_queue (gpointer user_data)
+   return FALSE;
+ }
+ 
++static gboolean
++write_all (int           fd,
++           const guint8 *data,
++           gsize         len)
++{
++  while (len > 0)
++    {
++      ssize_t written = write (fd, data, len);
++
++      if (written < 0)
++        {
++          if (errno == EINTR)
++            continue;
++          return FALSE;
++        }
++
++      data += written;
++      len -= written;
++    }
++
++  return TRUE;
++}
++
+ static void
+ on_message_done (SoupSession  *session,
+                  GAsyncResult *result,
+@@ -3656,16 +3681,12 @@ on_message_done (SoupSession  *session,
+ {
+   struct mms_request *request = user_data;
+   struct mms_service *service = request->service;
+-  gsize written = 0;
+-  gsize body_length = 0;
+   SoupMessage *msg;
+-  GBytes *body = NULL;
++  g_autoptr(GBytes) body = NULL;
+   g_autoptr(GError) error = NULL;
+ 
+   msg = soup_session_get_async_result_message (session, result);
+   body = soup_session_send_and_read_finish (session, result, &error);
+-  body_length = g_bytes_get_size (body);
+-  g_clear_object (&service->cancel_current_msg);
+ 
+   request->status = soup_message_get_status (msg);
+   if (error)
+@@ -3674,19 +3695,38 @@ on_message_done (SoupSession  *session,
+       request->status = 007;
+     }
+ 
++  /*
++   * A request that mms_service_bearer_notify() cancelled completes after
++   * it has dropped the request and possibly started the next one, so
++   * only let go of the message and its cancellable if they are still
++   * this request's.
++   */
++  if (service->current_request_msg == msg)
++    {
++      g_clear_object (&service->cancel_current_msg);
++      g_clear_object (&service->current_request_msg);
++    }
++
+   DBG ("status: %03u", request->status);
+-  DBG ("data size = %zd", body_length);
+ 
+-  written = write (request->fd, g_bytes_get_data (body, &body_length), body_length);
++  if (body != NULL)
++    {
++      gsize body_length;
++      const guint8 *data = g_bytes_get_data (body, &body_length);
+ 
+-  if (written != g_bytes_get_size (body))
+-    g_warning ("only %zd/%zd bytes written\n", written, body_length);
++      DBG ("data size = %" G_GSIZE_FORMAT, body_length);
+ 
+-  g_bytes_unref (body);
++      if (!write_all (request->fd, data, body_length))
++        g_warning ("Could not store the %" G_GSIZE_FORMAT " byte response: %s",
++                   body_length, g_strerror (errno));
++    }
+ 
+   /* Make sure the request is actually synced to disk */
+-  fsync (request->fd);
+-  close (request->fd);
++  if (request->fd >= 0)
++    {
++      fsync (request->fd);
++      close (request->fd);
++    }
+   request->fd = -1;
+ 
+   DBG ("request->result_cb=%p vs. retrieve_conf=%p/send_conf=%p/notify_resp=%p",
+@@ -3695,8 +3735,6 @@ on_message_done (SoupSession  *session,
+        result_request_send_conf,
+        result_request_notify_resp);
+ 
+-  service->current_request_msg = NULL;
+-
+   if (request->result_cb == NULL || request->result_cb (request) == TRUE)
+     mms_request_destroy (request);
+   else if (g_error_matches (error, G_TLS_ERROR, G_TLS_ERROR_BAD_CERTIFICATE))
+@@ -3882,6 +3920,56 @@ append_transaction_id (struct mms_request *request)
+     }
+ }
+ 
++/*
++ * The request could not be sent at all (the host did not resolve, or the
++ * message could not be built). Requeue it and, after MAX_ATTEMPTS, report
++ * the error and give the bearer a rest, as for a failed transfer; if it
++ * cannot even be requeued, drop it.
++ */
++static void
++request_failed_before_sending (struct mms_request  *request,
++                               enum mms_tx_rx_error error_type)
++{
++  if (mms_requeue_request (request) == TRUE)
++    {
++      DBG ("On attempt %d", request->attempt);
++      if (request->attempt >= MAX_ATTEMPTS)
++        {
++          const char *max_attempt_host = NULL;
++          g_autoptr(GUri) g_uri = NULL;
++
++          DBG ("Had Max attempts");
++          request->attempt = 0;
++          if (request->type == MMS_REQUEST_TYPE_GET ||
++              request->type == MMS_REQUEST_TYPE_POST_TMP)
++            g_uri = g_uri_parse (request->location, SOUP_HTTP_URI_FLAGS, NULL);
++          else if (request->type == MMS_REQUEST_TYPE_POST)
++            g_uri = g_uri_parse (request->service->mmsc, SOUP_HTTP_URI_FLAGS, NULL);
++
++          if (g_uri != NULL)
++            max_attempt_host = g_uri_get_host (g_uri);
++          else
++            max_attempt_host = "";
++
++          emit_message_tx_rx_error (request,
++                                    max_attempt_host,
++                                    error_type);
++          g_timeout_add_seconds (120, service_activate_bearer, request->service);
++          deactivate_bearer (request->service);
++          return;
++        }
++      else {
++          DBG ("Requeued Message");
++          return;
++        }
++    }
++  else {
++      unlink (request->data_path);
++      mms_request_destroy (request);
++      return;
++    }
++}
++
+ static void
+ create_new_web_message (struct mms_request *request,
+                         const char         *type,
+@@ -3900,44 +3988,8 @@ create_new_web_message (struct mms_request *request,
+   if (uri == NULL)
+     {
+       g_warning ("Failed to resolve DNS");
+-      if (mms_requeue_request (request) == TRUE)
+-        {
+-          DBG ("On attempt %d", request->attempt);
+-          if (request->attempt >= MAX_ATTEMPTS)
+-            {
+-              const char *max_attempt_host = NULL;
+-              g_autoptr(GUri) g_uri = NULL;
+-
+-              DBG ("Had Max attempts");
+-              request->attempt = 0;
+-              if (request->type == MMS_REQUEST_TYPE_GET ||
+-                  request->type == MMS_REQUEST_TYPE_POST_TMP)
+-                g_uri = g_uri_parse (request->location, SOUP_HTTP_URI_FLAGS, NULL);
+-              else if (request->type == MMS_REQUEST_TYPE_POST)
+-                g_uri = g_uri_parse (request->service->mmsc, SOUP_HTTP_URI_FLAGS, NULL);
+-
+-              if (g_uri != NULL)
+-                max_attempt_host = g_uri_get_host (g_uri);
+-              else
+-                max_attempt_host = "";
+-
+-              emit_message_tx_rx_error (request,
+-                                        max_attempt_host,
+-                                        MMS_TX_RX_ERROR_DNS);
+-              g_timeout_add_seconds (120, service_activate_bearer, request->service);
+-              deactivate_bearer (request->service);
+-              return;
+-            }
+-          else {
+-              DBG ("Requeued Message");
+-              return;
+-            }
+-        }
+-      else {
+-          unlink (request->data_path);
+-          mms_request_destroy (request);
+-          return;
+-        }
++      request_failed_before_sending (request, MMS_TX_RX_ERROR_DNS);
++      return;
+     }
+ 
+   if (*msg != NULL)
+@@ -3951,6 +4003,7 @@ create_new_web_message (struct mms_request *request,
+       if (*msg == NULL)
+         {
+           g_critical ("unable to create new libsoup GET message\n");
++          request_failed_before_sending (request, MMS_TX_RX_ERROR_UNKNOWN);
+           return;
+         }
+       message_headers_get = soup_message_get_request_headers ((*msg));
+@@ -3962,6 +4015,7 @@ create_new_web_message (struct mms_request *request,
+       if (*msg == NULL)
+         {
+           g_critical ("unable to create new libsoup POST message\n");
++          request_failed_before_sending (request, MMS_TX_RX_ERROR_UNKNOWN);
+           return;
+         }
+     }
+@@ -4055,6 +4109,8 @@ process_request (struct mms_request *request)
+           {
+             g_critical ("Unable to read contents of file: %s\n",
+                         request->data_path);
++            g_clear_object (&msg);
++            request_failed_before_sending (request, MMS_TX_RX_ERROR_UNKNOWN);
+             return NULL;
+           }
+ 
+@@ -4072,6 +4128,15 @@ process_request (struct mms_request *request)
+             request->fd = g_mkstemp_full (request->data_path,
+                                           O_WRONLY | O_CREAT | O_TRUNC,
+                                           S_IWUSR | S_IRUSR);
++            if (request->fd < 0)
++              {
++                g_critical ("Unable to create %s: %s", request->data_path,
++                            g_strerror (errno));
++                g_bytes_unref (request_body);
++                g_clear_object (&msg);
++                request_failed_before_sending (request, MMS_TX_RX_ERROR_UNKNOWN);
++                return NULL;
++              }
+           }
+ 
+         message_headers = soup_message_get_request_headers (msg);
+-- 
+2.53.0
+

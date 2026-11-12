@@ -1,0 +1,501 @@
+From 2f0bc098e96fc0e163fd5f05432c1fef815a801d Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 13:25:04 +0100
+Subject: [PATCH] wsputil: never read a Text-string past its length
+
+Since 5b4b965 ("Fix issue in decode_text_common()"), decode_text_common()
+goes on when the text has no End-of-string inside len and only fails if
+the caller asked for *consumed. It then runs strpbrk() over the text and
+returns it as a C string, so both the control-character check and the
+caller's g_strdup() read past len, through whatever follows the field in
+the PDU, until they happen to meet a NUL.
+
+Keep accepting such text, but bound everything by len: check the filters
+over the octets before the NUL (or all len of them), and add
+wsp_decode_text_dup() and wsp_decode_token_text_dup(), which return a
+copy of at most that many octets. Use them where mmsutil copied the
+result of wsp_decode_text() and wsp_decode_token_text().
+
+wsp_decode_quoted_string() returns a pointer that its callers use as a C
+string, so it now asks for the End-of-string. wsp_decode_text() also
+checks the length before reading the octet after a Quote, and decode_text()
+in mmsutil prints the value with %.*s rather than %*s, which is a minimum
+field width, not a maximum.
+
+Unit tests decode from heap buffers of exactly the input length, so a read
+past it fails under AddressSanitizer or valgrind.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/mmsutil.c       |  34 +++++---------
+ src/wsputil.c       | 112 +++++++++++++++++++++++++++++++++++++-------
+ src/wsputil.h       |   4 ++
+ unit/test-wsputil.c | 110 +++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 221 insertions(+), 39 deletions(-)
+
+diff --git a/src/mmsutil.c b/src/mmsutil.c
+index f117712..74a547e 100644
+--- a/src/mmsutil.c
++++ b/src/mmsutil.c
+@@ -211,25 +211,24 @@ extract_short (struct wsp_header_iter *iter,
+   return TRUE;
+ }
+ 
+-static const char *
++static char *
+ decode_text (struct wsp_header_iter *iter)
+ {
+   const unsigned char *p;
+-  unsigned int l = 32;
++  unsigned int l;
+ 
+   if (wsp_header_iter_get_val_type (iter) != WSP_VALUE_TYPE_TEXT)
+     {
+-      p = wsp_header_iter_get_val (iter);
+-      DBG ("could not decode text of (dummy) length %u: %*s", l - 1, l - 1, p + 1);
++      DBG ("value is not a Text-string");
+       return NULL;
+     }
+ 
+   p = wsp_header_iter_get_val (iter);
+   l = wsp_header_iter_get_val_len (iter);
+   DBG ("claimed len: %u", l);
+-  DBG ("val: %*s", l - 1, p);
++  DBG ("val: %.*s", (int) l, p);
+ 
+-  return wsp_decode_text (p, l, NULL);
++  return wsp_decode_text_dup (p, l);
+ }
+ 
+ static gboolean
+@@ -237,13 +236,13 @@ extract_text (struct wsp_header_iter *iter,
+               void                   *user)
+ {
+   char **out = user;
+-  const char *text;
++  char *text;
+ 
+   text = decode_text (iter);
+   if (text == NULL)
+     return FALSE;
+ 
+-  *out = g_strdup (text);
++  *out = text;
+ 
+   return TRUE;
+ }
+@@ -267,7 +266,6 @@ decode_encoded_string_with_mib_enum (const unsigned char *p,
+ {
+   unsigned int mib_enum;
+   unsigned int consumed;
+-  const char *text;
+   const char *from_codeset;
+   const char *to_codeset = "UTF-8";
+   gsize bytes_read;
+@@ -279,9 +277,7 @@ decode_encoded_string_with_mib_enum (const unsigned char *p,
+   if (mib_enum == 106)
+     {
+       /* header is UTF-8 already */
+-      text = wsp_decode_text (p + consumed, l - consumed, NULL);
+-
+-      return g_strdup (text);
++      return wsp_decode_text_dup (p + consumed, l - consumed);
+     }
+ 
+   /* convert to UTF-8 */
+@@ -299,7 +295,6 @@ extract_text_array_element (struct wsp_header_iter *iter,
+                             void                   *user)
+ {
+   char **out = user;
+-  const char *wsp_decoded_text;
+   char *tmp;
+   const unsigned char *p;
+   unsigned int l;
+@@ -312,8 +307,7 @@ extract_text_array_element (struct wsp_header_iter *iter,
+     {
+     case WSP_VALUE_TYPE_TEXT:
+       /* Text-string */
+-      wsp_decoded_text = wsp_decode_text (p, l, NULL);
+-      element = g_strdup (wsp_decoded_text);
++      element = wsp_decode_text_dup (p, l);
+       break;
+     case WSP_VALUE_TYPE_LONG:
+       /* (Value-len) Char-set Text-string */
+@@ -361,7 +355,6 @@ extract_encoded_text (struct wsp_header_iter *iter,
+   char **out = user;
+   const unsigned char *p;
+   unsigned int l;
+-  const char *text;
+ #pragma GCC diagnostic push
+ #pragma GCC diagnostic ignored "-Wuninitialized"
+   char *uninitialized_var (dec_text);
+@@ -382,8 +375,7 @@ extract_encoded_text (struct wsp_header_iter *iter,
+     {
+     case WSP_VALUE_TYPE_TEXT:
+       /* Text-string */
+-      text = wsp_decode_text (p, l, NULL);
+-      dec_text = g_strdup (text);
++      dec_text = wsp_decode_text_dup (p, l);
+       break;
+     case WSP_VALUE_TYPE_LONG:
+       /* (Value-len) Char-set Text-string */
+@@ -573,7 +565,7 @@ extract_message_class (struct wsp_header_iter *iter,
+   char **out = user;
+   const unsigned char *p;
+   unsigned int l;
+-  const char *text;
++  char *text;
+ 
+   if (wsp_header_iter_get_val_type (iter) == WSP_VALUE_TYPE_LONG)
+     return FALSE;
+@@ -601,11 +593,11 @@ extract_message_class (struct wsp_header_iter *iter,
+ 
+   l = wsp_header_iter_get_val_len (iter);
+ 
+-  text = wsp_decode_token_text (p, l, NULL);
++  text = wsp_decode_token_text_dup (p, l);
+   if (text == NULL)
+     return FALSE;
+ 
+-  *out = g_strdup (text);
++  *out = text;
+ 
+   return TRUE;
+ }
+diff --git a/src/wsputil.c b/src/wsputil.c
+index b3e33f6..d3c3ddc 100644
+--- a/src/wsputil.c
++++ b/src/wsputil.c
+@@ -179,25 +179,48 @@ static const char *ctl_chars = "\x01\x02\x03\x04\x05\x06\x07\x08\x0A"
+ 
+ static const char *sep_chars = "()<>@,;:\\\"/[]?={} \t";
+ 
++/* Whether any of the first n octets of s (none of which is NUL) is in set */
++static gboolean
++contains_any (const unsigned char *s,
++              size_t               n,
++              const char          *set)
++{
++  size_t i;
++
++  for (i = 0; i < n; i++)
++    if (strchr (set, s[i]) != NULL)
++      return TRUE;
++
++  return FALSE;
++}
++
++/*
++ * The text is the octets up to the first NUL, or all len octets when
++ * there is none inside len: some senders leave the End-of-string out of
++ * a Value-length'd field. Nothing past len is read in either case, and
++ * *text_len (if given) says how long the text is, since without the NUL
++ * the result is not a C string. *consumed needs the NUL, so a caller
++ * that asks for it gets NULL when there is none.
++ */
+ static const char *
+ decode_text_common (const unsigned char *pdu,
+                     unsigned int         len,
+                     gboolean             filter_ctl,
+                     gboolean             filter_sep,
+-                    unsigned int        *consumed)
++                    unsigned int        *consumed,
++                    unsigned int        *text_len)
+ {
+   const unsigned char *c;
++  unsigned int n;
+ 
+   c = memchr (pdu, '\0', len);
+-
+-  if (c == NULL)
+-    g_warning ("c is NULL!");
++  n = c ? (unsigned int) (c - pdu) : len;
+ 
+   /* RFC 2616 Section 2.2 */
+-  if (filter_ctl && strpbrk ((const char *) pdu, ctl_chars) != NULL)
++  if (filter_ctl && contains_any (pdu, n, ctl_chars))
+     return NULL;
+ 
+-  if (filter_sep && strpbrk ((const char *) pdu, sep_chars) != NULL)
++  if (filter_sep && contains_any (pdu, n, sep_chars))
+     return NULL;
+ 
+   if (consumed)
+@@ -205,11 +228,12 @@ decode_text_common (const unsigned char *pdu,
+       if (c == NULL)
+         return NULL;
+ 
+-      c += 1;
+-
+-      *consumed = c - pdu;
++      *consumed = n + 1;
+     }
+ 
++  if (text_len)
++    *text_len = n;
++
+   return (const char *) pdu;
+ }
+ 
+@@ -218,19 +242,40 @@ wsp_decode_token_text (const unsigned char *pdu,
+                        unsigned int         len,
+                        unsigned int        *consumed)
+ {
+-  return decode_text_common (pdu, len, TRUE, TRUE, consumed);
++  return decode_text_common (pdu, len, TRUE, TRUE, consumed, NULL);
+ }
+ 
+-const char *
+-wsp_decode_text (const unsigned char *pdu,
+-                 unsigned int         len,
+-                 unsigned int        *consumed)
++char *
++wsp_decode_token_text_dup (const unsigned char *pdu,
++                           unsigned int         len)
++{
++  const char *r;
++  unsigned int text_len;
++
++  r = decode_text_common (pdu, len, TRUE, TRUE, NULL, &text_len);
++  if (r == NULL)
++    return NULL;
++
++  return g_strndup (r, text_len);
++}
++
++static const char *
++decode_text (const unsigned char *pdu,
++             unsigned int         len,
++             unsigned int        *consumed,
++             unsigned int        *text_len)
+ {
+   const char *r;
+   unsigned int fudge = 0;
+ 
++  if (len == 0)
++    return NULL;
++
+   if (*pdu == 127)
+     {
++      if (len < 2)
++        return NULL;
++
+       pdu++;
+ 
+       /*
+@@ -256,25 +301,56 @@ wsp_decode_text (const unsigned char *pdu,
+       fudge += 1;
+     }
+ 
+-  r = decode_text_common (pdu, len, TRUE, FALSE, consumed);
++  r = decode_text_common (pdu, len, TRUE, FALSE, consumed, text_len);
+ 
+-  if (consumed)
++  if (r && consumed)
+     *consumed += fudge;
+ 
+   return r;
+ }
+ 
++const char *
++wsp_decode_text (const unsigned char *pdu,
++                 unsigned int         len,
++                 unsigned int        *consumed)
++{
++  return decode_text (pdu, len, consumed, NULL);
++}
++
++/*
++ * A copy of the Text-string at pdu, which also works when the text has no
++ * End-of-string inside len (see decode_text_common()).
++ */
++char *
++wsp_decode_text_dup (const unsigned char *pdu,
++                     unsigned int         len)
++{
++  const char *r;
++  unsigned int text_len;
++
++  r = decode_text (pdu, len, NULL, &text_len);
++  if (r == NULL)
++    return NULL;
++
++  return g_strndup (r, text_len);
++}
++
+ const char *
+ wsp_decode_quoted_string (const unsigned char *pdu,
+                           unsigned int         len,
+                           unsigned int        *consumed)
+ {
+   const char *text;
++  unsigned int text_consumed;
+ 
+-  text = wsp_decode_text (pdu, len, consumed);
++  /* The result is used as a C string, so it needs its End-of-string */
++  text = wsp_decode_text (pdu, len, &text_consumed);
+   if (text == NULL)
+     return NULL;
+ 
++  if (consumed)
++    *consumed = text_consumed;
++
+   if (*text != '"')
+     return NULL;
+ 
+@@ -402,7 +478,7 @@ wsp_decode_field (const unsigned char *pdu,
+     }
+   else {
+       if (decode_text_common (pdu, end - pdu,
+-                              TRUE, FALSE, &len) == NULL)
++                              TRUE, FALSE, &len, NULL) == NULL)
+         return FALSE;
+ 
+       value = WSP_VALUE_TYPE_TEXT;
+diff --git a/src/wsputil.h b/src/wsputil.h
+index dfcc58a..ecc6dab 100644
+--- a/src/wsputil.h
++++ b/src/wsputil.h
+@@ -167,6 +167,10 @@ const char *wsp_decode_token_text (const unsigned char *pdu,
+ const char *wsp_decode_text (const unsigned char *pdu,
+                              unsigned int         len,
+                              unsigned int        *consumed);
++char *wsp_decode_token_text_dup (const unsigned char *pdu,
++                                 unsigned int         len);
++char *wsp_decode_text_dup (const unsigned char *pdu,
++                           unsigned int         len);
+ const char *wsp_decode_quoted_string (const unsigned char *pdu,
+                                       unsigned int         len,
+                                       unsigned int        *consumed);
+diff --git a/unit/test-wsputil.c b/unit/test-wsputil.c
+index 71f2765..2786b73 100644
+--- a/unit/test-wsputil.c
++++ b/unit/test-wsputil.c
+@@ -395,6 +395,105 @@ test_wsp_text_header_iter (gconstpointer data)
+     }
+ }
+ 
++/*
++ * Each input is copied into a heap buffer of exactly its length, so a read
++ * past the end of it shows up under AddressSanitizer or valgrind.
++ */
++static guint8 *
++exact_copy (const guint8 *data,
++            gsize         len)
++{
++  return g_memdup2 (data, len);
++}
++
++static void
++test_decode_text_unterminated (void)
++{
++  static const guint8 abc[] = { 'a', 'b', 'c' };
++  g_autofree guint8 *pdu = exact_copy (abc, sizeof (abc));
++  g_autofree char *text = NULL;
++  unsigned int consumed;
++
++  /* Without an End-of-string inside len the text is all len octets */
++  text = wsp_decode_text_dup (pdu, sizeof (abc));
++  g_assert_cmpstr (text, ==, "abc");
++
++  /* but a caller that needs to know where it ends gets nothing */
++  g_assert_null (wsp_decode_text (pdu, sizeof (abc), &consumed));
++}
++
++static void
++test_decode_text_terminated (void)
++{
++  static const guint8 abc[] = { 'a', 'b', 'c', '\0', 'x' };
++  g_autofree guint8 *pdu = exact_copy (abc, sizeof (abc));
++  g_autofree char *text = NULL;
++  unsigned int consumed = 0;
++
++  text = wsp_decode_text_dup (pdu, sizeof (abc));
++  g_assert_cmpstr (text, ==, "abc");
++
++  g_assert_cmpstr (wsp_decode_text (pdu, sizeof (abc), &consumed), ==, "abc");
++  g_assert_cmpuint (consumed, ==, 4);
++}
++
++static void
++test_decode_text_quote (void)
++{
++  static const guint8 quote_only[] = { 0x7f };
++  static const guint8 quoted[] = { 0x7f, 0xc3, 0xa9, '\0' };
++  g_autofree guint8 *pdu1 = exact_copy (quote_only, sizeof (quote_only));
++  g_autofree guint8 *pdu2 = exact_copy (quoted, sizeof (quoted));
++  g_autofree char *text = NULL;
++  unsigned int consumed = 0;
++
++  /* A Quote with nothing after it */
++  g_assert_null (wsp_decode_text_dup (pdu1, sizeof (quote_only)));
++  g_assert_null (wsp_decode_text (pdu1, sizeof (quote_only), &consumed));
++
++  /* The Quote is not part of the text, but counts as consumed */
++  text = wsp_decode_text_dup (pdu2, sizeof (quoted));
++  g_assert_cmpstr (text, ==, "\xc3\xa9");
++  g_assert_nonnull (wsp_decode_text (pdu2, sizeof (quoted), &consumed));
++  g_assert_cmpuint (consumed, ==, 4);
++
++  /* and an empty field has no text */
++  g_assert_null (wsp_decode_text_dup (pdu2, 0));
++}
++
++static void
++test_decode_text_filter (void)
++{
++  /* The control character is past the End-of-string and must be ignored */
++  static const guint8 ok[] = { 'o', 'k', '\0', 0x01 };
++  /* and here it is part of the text */
++  static const guint8 bad[] = { 'b', 0x01, 'd' };
++  /* Token-text may not contain separators */
++  static const guint8 sep[] = { 'a', ' ', 'b' };
++  g_autofree guint8 *pdu1 = exact_copy (ok, sizeof (ok));
++  g_autofree guint8 *pdu2 = exact_copy (bad, sizeof (bad));
++  g_autofree guint8 *pdu3 = exact_copy (sep, sizeof (sep));
++  g_autofree char *text = NULL;
++  g_autofree char *token = NULL;
++
++  text = wsp_decode_text_dup (pdu1, sizeof (ok));
++  g_assert_cmpstr (text, ==, "ok");
++  g_assert_null (wsp_decode_text_dup (pdu2, sizeof (bad)));
++  g_assert_null (wsp_decode_token_text_dup (pdu3, sizeof (sep)));
++  token = wsp_decode_token_text_dup (pdu1, sizeof (ok));
++  g_assert_cmpstr (token, ==, "ok");
++}
++
++static void
++test_decode_quoted_string_unterminated (void)
++{
++  static const guint8 cid[] = { '"', '<', 'a', '>' };
++  g_autofree guint8 *pdu = exact_copy (cid, sizeof (cid));
++
++  /* The result is used as a C string, so the End-of-string is required */
++  g_assert_null (wsp_decode_quoted_string (pdu, sizeof (cid), NULL));
++}
++
+ int
+ main (int    argc,
+       char **argv)
+@@ -416,5 +515,16 @@ main (int    argc,
+                         &text_header_iter_1,
+                         test_wsp_text_header_iter);
+ 
++  g_test_add_func ("/wsputil/Decode unterminated Text-string",
++                   test_decode_text_unterminated);
++  g_test_add_func ("/wsputil/Decode terminated Text-string",
++                   test_decode_text_terminated);
++  g_test_add_func ("/wsputil/Decode quoted Text-string",
++                   test_decode_text_quote);
++  g_test_add_func ("/wsputil/Decode Text-string with control characters",
++                   test_decode_text_filter);
++  g_test_add_func ("/wsputil/Decode unterminated Quoted-string",
++                   test_decode_quoted_string_unterminated);
++
+   return g_test_run ();
+ }
+-- 
+2.53.0
+

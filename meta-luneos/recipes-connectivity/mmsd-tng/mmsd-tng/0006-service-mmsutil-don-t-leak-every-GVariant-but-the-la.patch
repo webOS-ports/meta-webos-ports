@@ -1,0 +1,153 @@
+From 19e25ae7290630240b20e965b81dd32821920653 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 13:13:21 +0100
+Subject: [PATCH] service, mmsutil: don't leak every GVariant but the last from
+ iterators
+
+send_message_get_recipients(), send_message_get_attachments() and
+mms_message_create_smil() declare their g_autoptr(GVariant) outside the
+loop and assign g_variant_iter_next_value() to it on every pass. The
+auto cleanup only runs once, at the end of the function, and by then the
+pointer holds the NULL that ended the loop, so each recipient and each
+attachment of every message sent leaks its GVariant.
+
+Declare the variable inside the loop body, so it is released at the end
+of every iteration, and add a unit test for mms_message_create_smil().
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/mmsutil.c       |  7 +++++--
+ src/service.c       | 15 +++++++++++----
+ unit/test-mmsutil.c | 23 +++++++++++++++++++++++
+ 3 files changed, 39 insertions(+), 6 deletions(-)
+
+diff --git a/src/mmsutil.c b/src/mmsutil.c
+index 7111be7..ca2f119 100644
+--- a/src/mmsutil.c
++++ b/src/mmsutil.c
+@@ -2207,7 +2207,6 @@ mms_message_create_smil (GVariant *attachments)
+   GString *smil, *smil_body;
+   gchar *smil_body_to_attach;
+   gchar *smil_to_return;
+-  g_autoptr(GVariant) single_attachment = NULL;
+   GVariantIter iter;
+   gboolean contains_only_image_video_plaintext = TRUE;
+   gboolean contains_image_or_video = FALSE;
+@@ -2219,12 +2218,16 @@ mms_message_create_smil (GVariant *attachments)
+   smil = g_string_new ("<smil><head><layout><root-layout");
+   smil_body = g_string_new (NULL);
+ 
+-  while ((single_attachment = g_variant_iter_next_value (&iter)))
++  for (;;)
+     {
++      g_autoptr(GVariant) single_attachment = g_variant_iter_next_value (&iter);
+       g_autofree char *content_id = NULL;
+       g_autofree char *mime_type = NULL;
+       g_autofree char *file_path = NULL;
+ 
++      if (single_attachment == NULL)
++        break;
++
+       g_variant_get (single_attachment, "(sss)", &content_id, &mime_type, &file_path);
+ 
+       if (!g_str_match_string ("image", mime_type, FALSE))
+diff --git a/src/service.c b/src/service.c
+index 335a1db..2662920 100644
+--- a/src/service.c
++++ b/src/service.c
+@@ -980,15 +980,19 @@ send_message_get_recipients (GVariant           *recipients,
+                              struct mms_service *service)
+ {
+   GVariantIter iter;
+-  g_autoptr(GVariant) single_recipient = NULL;
+ 
+   g_variant_iter_init (&iter, recipients);
+ 
+-  while ((single_recipient = g_variant_iter_next_value (&iter)))
++  for (;;)
+     {
++      g_autoptr(GVariant) single_recipient = g_variant_iter_next_value (&iter);
+       const char *rec;
+       g_autofree char *formatted_rec = NULL;
+       char *tmp;
++
++      if (single_recipient == NULL)
++        break;
++
+       rec = g_variant_get_string (single_recipient, NULL);
+ 
+       formatted_rec = phone_utils_format_number_e164 (rec,
+@@ -1024,7 +1028,6 @@ send_message_get_attachments (GVariant           *attachments,
+ {
+   gsize number_of_attachments;
+   GVariantIter iter;
+-  g_autoptr(GVariant) single_attachment = NULL;
+   int attach_total_size = 0;
+ 
+   number_of_attachments = g_variant_iter_init (&iter, attachments);
+@@ -1036,8 +1039,9 @@ send_message_get_attachments (GVariant           *attachments,
+       return FALSE;
+     }
+ 
+-  while ((single_attachment = g_variant_iter_next_value (&iter)))
++  for (;;)
+     {
++      g_autoptr(GVariant) single_attachment = g_variant_iter_next_value (&iter);
+       g_autofree char *content_id = NULL;
+       g_autofree char *mime_type = NULL;
+       g_autofree char *mime_type_test = NULL;
+@@ -1045,6 +1049,9 @@ send_message_get_attachments (GVariant           *attachments,
+       struct mms_attachment *attach;
+       void *ptr;
+ 
++      if (single_attachment == NULL)
++        break;
++
+       g_variant_get (single_attachment, "(sss)", &content_id, &mime_type, &file_path);
+       DBG ("Content ID: %s, MIME Type: %s, File Path: %s", content_id, mime_type, file_path);
+ 
+diff --git a/unit/test-mmsutil.c b/unit/test-mmsutil.c
+index 1bf4b23..67a2253 100644
+--- a/unit/test-mmsutil.c
++++ b/unit/test-mmsutil.c
+@@ -1146,6 +1146,27 @@ test_decode_from (gconstpointer data)
+   mms_message_free (msg);
+ }
+ 
++static void
++test_create_smil (void)
++{
++  GVariantBuilder builder;
++  g_autoptr(GVariant) attachments = NULL;
++  g_autofree char *smil = NULL;
++
++  g_variant_builder_init (&builder, G_VARIANT_TYPE ("a(sss)"));
++  g_variant_builder_add (&builder, "(sss)", "image.jpg", "image/jpeg", "/nonexistent/image.jpg");
++  g_variant_builder_add (&builder, "(sss)", "text.txt", "text/plain", "/nonexistent/text.txt");
++  g_variant_builder_add (&builder, "(sss)", "audio.amr", "audio/amr", "/nonexistent/audio.amr");
++  attachments = g_variant_ref_sink (g_variant_builder_end (&builder));
++
++  smil = mms_message_create_smil (attachments);
++
++  g_assert_nonnull (smil);
++  g_assert_nonnull (strstr (smil, "<img src=\"image.jpg\""));
++  g_assert_nonnull (strstr (smil, "<text src=\"text.txt\""));
++  g_assert_nonnull (strstr (smil, "<audio src=\"audio.amr\""));
++}
++
+ int
+ main (int    argc,
+       char **argv)
+@@ -1225,5 +1246,7 @@ main (int    argc,
+       g_test_add_data_func (name, &from_tests[i], test_decode_from);
+     }
+ 
++  g_test_add_func ("/mmsutil/Create SMIL", test_create_smil);
++
+   return g_test_run ();
+ }
+-- 
+2.53.0
+
