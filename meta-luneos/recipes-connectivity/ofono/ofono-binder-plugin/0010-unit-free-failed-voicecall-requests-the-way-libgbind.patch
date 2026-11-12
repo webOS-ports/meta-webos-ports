@@ -1,0 +1,89 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] unit: free failed voicecall requests the way libgbinder-radio
+ does
+
+The imitation radio_request_submit() cleared the destroy notify of a
+request it refused, to step around the callback data being unreffed
+twice. That is fixed now, so behave like the real thing, check that a
+refused swap, hangup and private chat each answer oFono once, and that
+nothing is freed twice (under ASan) or leaked.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ unit/unit_voicecall/unit_voicecall.c | 42 ++++++++++++++++++++++++----
+ 1 file changed, 36 insertions(+), 6 deletions(-)
+
+diff --git a/unit/unit_voicecall/unit_voicecall.c b/unit/unit_voicecall/unit_voicecall.c
+index bcfb7da..4a2fe03 100644
+--- a/unit/unit_voicecall/unit_voicecall.c
++++ b/unit/unit_voicecall/unit_voicecall.c
+@@ -249,12 +249,7 @@ radio_request_submit(
+     RadioRequest* req)
+ {
+     if (test.submit_fails) {
+-        /*
+-         * The real thing calls destroy for such a request too, which is one
+-         * unref too many for BinderVoiceCallCbData. That's a separate problem
+-         * from what's being tested here, so don't trip over it.
+-         */
+-        req->destroy = NULL;
++        /* Like the real thing, destroy is still called when it's freed */
+         return FALSE;
+     }
+     if (req->code == RADIO_REQ_GET_CURRENT_CALLS) {
+@@ -1333,12 +1328,44 @@ test_submit_failed(
+     test.submit_fails = FALSE;
+     g_assert(!test.timers);
+ 
++    /* oFono core is told, once, and the callback data is freed once */
++    g_assert_cmpuint(test.cb_failed, == , 1);
++    g_assert_cmpuint(test.cb_ok, == , 0);
++
+     test_state_changed();
+     g_assert_cmpuint(test.polls, == , 1);
+     test_answer_poll();
+     test_finish();
+ }
+ 
++static
++void
++test_submit_failed_hangup(
++    void)
++{
++    test_start_two_calls();
++    test.submit_fails = TRUE;
++    test.driver->release_specific(test.vc, 1, test_cb, NULL);
++    test.driver->hangup_all(test.vc, test_cb, NULL);
++    test.submit_fails = FALSE;
++    g_assert_cmpuint(test.cb_failed, == , 2);
++    g_assert_cmpuint(test.cb_ok, == , 0);
++    test_finish();
++}
++
++static
++void
++test_submit_failed_private_chat(
++    void)
++{
++    test_start_two_calls();
++    test.submit_fails = TRUE;
++    test.driver->private_chat(test.vc, 1, test_cb, NULL);
++    test.submit_fails = FALSE;
++    g_assert_cmpuint(test.cb_failed, == , 1);
++    test_finish();
++}
++
+ /*==========================================================================*
+  * hangup_all: several requests for one operation
+  *==========================================================================*/
+@@ -1680,6 +1707,9 @@ int main(int argc, char* argv[])
+     g_test_add_func(TEST_("mpty"), test_mpty);
+     g_test_add_func(TEST_("poll_in_flight"), test_poll_in_flight);
+     g_test_add_func(TEST_("submit_failed"), test_submit_failed);
++    g_test_add_func(TEST_("submit_failed_hangup"), test_submit_failed_hangup);
++    g_test_add_func(TEST_("submit_failed_private_chat"),
++        test_submit_failed_private_chat);
+     g_test_add_func(TEST_("hangup_all"), test_hangup_all);
+     g_test_add_func(TEST_("hangup_all_slow"), test_hangup_all_slow);
+     for (i = 0; i < G_N_ELEMENTS(test_ops); i++) {

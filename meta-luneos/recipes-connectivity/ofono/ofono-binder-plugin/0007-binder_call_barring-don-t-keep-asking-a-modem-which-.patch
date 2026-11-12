@@ -1,0 +1,196 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] binder_call_barring: don't keep asking a modem which refuses
+
+On the Mindphone (MT6739), every getFacilityLockForApp for a barring
+facility comes back as REQUEST_NOT_SUPPORTED, on both SIMs, within a
+few milliseconds: the RIL sends AT+ECUSD and the modem says
++CME ERROR: 4 without going to the network. oFono then caches nothing,
+so each GetProperties sends all 5 queries again, and they wait in the
+same queue as everything else that the settings page asks for.
+
+Remember the first REQUEST_NOT_SUPPORTED, and fail the queries from then
+on without bothering the radio, so that a modem like this gets one
+request rather than 5 per GetProperties. oFono is fine with that: its
+query callback only moves on to the next lock or sends the D-Bus reply,
+and the reply is the same as before, a successful one with everything
+"disabled". A timeout or any other error says nothing about what the
+modem can do and is not remembered, nor is REQUEST_NOT_SUPPORTED from a
+modem which has answered a query, because then it's one facility.
+
+The answer may depend on the SIM or on the state of the modem, so it's
+forgotten when the SIM application changes (removing the SIM removes the
+atom as well) and when the radio state changes, which is what turning
+flight mode off does, and after a barring has been set, because oFono
+reads them back and the modem has just shown that it can do it.
+
+Also replace the default bearer class 7 with 0 in the queries, as
+rilmodem and ril_call_barring.c do.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/binder_call_barring.c | 88 ++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 86 insertions(+), 2 deletions(-)
+
+diff --git a/src/binder_call_barring.c b/src/binder_call_barring.c
+index 6f328d5..20ae633 100644
+--- a/src/binder_call_barring.c
++++ b/src/binder_call_barring.c
+@@ -17,6 +17,7 @@
+ #include "binder_call_barring.h"
+ #include "binder_log.h"
+ #include "binder_modem.h"
++#include "binder_radio.h"
+ #include "binder_sim_card.h"
+ #include "binder_util.h"
+ 
+@@ -44,6 +45,11 @@ typedef struct binder_call_barring {
+     RadioRequestGroup* network_g;
+     char* log_prefix;
+     guint register_id;
++    BinderRadio* radio;
++    gulong card_app_event_id;
++    gulong radio_state_event_id;
++    gboolean query_answered;
++    gboolean not_supported;
+ } BinderCallBarring;
+ 
+ typedef struct binder_call_barring_callback_data {
+@@ -97,6 +103,45 @@ binder_call_barring_callback_data_free(
+     g_slice_free(BinderCallBarringCbData, cbd);
+ }
+ 
++/*
++ * Some modems refuse the barring queries without asking the network (on
++ * the Mindphone, the RIL gets +CME ERROR: 4 in a few milliseconds). oFono
++ * caches nothing in that case, so each GetProperties would send them all
++ * over again, and supplementary service requests queue in the RIL, for
++ * both SIMs. Once the modem has said that it doesn't do this, believe it.
++ * It's asked again when something changes that may change the answer.
++ */
++static
++void
++binder_call_barring_forget(
++    BinderCallBarring* self)
++{
++    if (self->not_supported) {
++        DBG_(self, "will ask the modem again");
++    }
++    self->not_supported = FALSE;
++    self->query_answered = FALSE;
++}
++
++static
++void
++binder_call_barring_card_app_changed(
++    BinderSimCard* card,
++    void* user_data)
++{
++    binder_call_barring_forget(user_data);
++}
++
++static
++void
++binder_call_barring_radio_state_changed(
++    BinderRadio* radio,
++    BINDER_RADIO_PROPERTY property,
++    void* user_data)
++{
++    binder_call_barring_forget(user_data);
++}
++
+ static
+ RadioRequest*
+ binder_call_barring_req_new(
+@@ -129,6 +174,7 @@ binder_call_barring_query_ok(
+     const BinderCallBarringCbData* cbd,
+     const GBinderReader* args)
+ {
++    BinderCallBarring* self = cbd->self;
+     GBinderReader reader;
+     gint32 response;
+ 
+@@ -149,7 +195,8 @@ binder_call_barring_query_ok(
+     if (gbinder_reader_read_int32(&reader, &response)) {
+         struct ofono_error err;
+ 
+-        DBG_(cbd->self, "Active services: %d", response);
++        DBG_(self, "Active services: %d", response);
++        self->query_answered = TRUE;
+         cbd->cb.query(binder_error_ok(&err), response, cbd->data);
+         return TRUE;
+     }
+@@ -174,6 +221,13 @@ binder_call_barring_query_cb(
+     } else if (error != RADIO_ERROR_NONE) {
+         ofono_warn("Call Barring query error %s",
+             binder_radio_error_string(error));
++
++        /* A modem which has answered does support this */
++        if (error == RADIO_ERROR_REQUEST_NOT_SUPPORTED &&
++            !cbd->self->query_answered) {
++            ofono_info("Call Barring not supported, not asking again");
++            cbd->self->not_supported = TRUE;
++        }
+     } else if (binder_call_barring_query_ok(cbd, args)) {
+         return;
+     }
+@@ -192,7 +246,26 @@ binder_call_barring_query(
+     BinderCallBarring* self = ofono_call_barring_get_data(b);
+     const BinderCallBarringApi* api = self->api;
+     GBinderWriter args;
+-    RadioRequest* req = binder_call_barring_req_new(self, self->sim_g,
++    RadioRequest* req;
++
++    /* oFono copes with the callback being called from here */
++    if (self->not_supported) {
++        struct ofono_error err;
++
++        DBG_(self, "lock: %s, not supported", lock);
++        cb(binder_error_failure(&err), 0, data);
++        return;
++    }
++
++    /*
++     * Modems don't take 7 as the default bearer class either. According
++     * to 22.030 Annex C, no service code means all tele and bearer services.
++     */
++    if (cls == BEARER_CLASS_DEFAULT) {
++        cls = RADIO_SERVICE_CLASS_NONE;
++    }
++
++    req = binder_call_barring_req_new(self, self->sim_g,
+         api->sim_get_facility_lock_for_app_req, &args,
+         binder_call_barring_query_cb, BINDER_CB(cb), data);
+ 
+@@ -241,6 +314,8 @@ binder_call_barring_set_cb(
+         ofono_error("Call Barring Set error %s",
+             binder_radio_error_string(error));
+     } else {
++        /* oFono reads the barrings back after setting one */
++        binder_call_barring_forget(cbd->self);
+         cb(binder_error_ok(&err), cbd->data);
+         return;
+     }
+@@ -397,6 +472,12 @@ binder_call_barring_probe(
+     self->sim_g = radio_request_group_new(sim_client);
+     self->network_g = radio_request_group_new(modem->clients.network_client);
+     self->log_prefix = binder_dup_prefix(modem->log_prefix);
++    self->radio = binder_radio_ref(modem->radio);
++    self->card_app_event_id = binder_sim_card_add_app_changed_handler(
++        self->card, binder_call_barring_card_app_changed, self);
++    self->radio_state_event_id = binder_radio_add_property_handler(
++        self->radio, BINDER_RADIO_PROPERTY_STATE,
++        binder_call_barring_radio_state_changed, self);
+     self->register_id = g_idle_add(binder_call_barring_register, self);
+ 
+     DBG_(self, "%s api", api->name);
+@@ -413,6 +494,9 @@ binder_call_barring_remove(
+ 
+     DBG_(self, "");
+     gutil_source_remove(self->register_id);
++    binder_radio_remove_handler(self->radio, self->radio_state_event_id);
++    binder_radio_unref(self->radio);
++    binder_sim_card_remove_handler(self->card, self->card_app_event_id);
+     binder_sim_card_unref(self->card);
+     radio_request_group_cancel(self->sim_g);
+     radio_request_group_unref(self->sim_g);
