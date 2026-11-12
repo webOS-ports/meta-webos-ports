@@ -1,0 +1,252 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [ofono-binder] Don't let a failed submit stall the
+ radio caps transaction
+
+libgbinder-radio never completes a request that it failed to submit.
+The radio capability switch counts the requests it waits for in
+tx_pending, but:
+
+- setDataAllowed(false) and deactivateDataCall were counted before
+  being submitted, and the result of radio_request_submit() ignored,
+  so a request that failed to submit was waited for forever;
+- a setRadioCapability request that failed to submit was only logged,
+  so the transaction carried on as if that modem had taken part, and
+  if none of them could be submitted, nothing was left to complete
+  and the transaction never moved on.
+
+Either way the transaction never ended. All the modems involved keep
+their request groups blocked for it, which holds up every other
+request to them, and the manager never checks the capabilities again.
+
+Count a request only once it has been submitted and fail the
+transaction when one can't be, then check for completion right after
+issuing the requests too, not only from the completion callbacks.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/mer-hybris/ofono-binder-plugin/pull/85]
+---
+ src/binder_radio_caps.c | 121 ++++++++++++++++++++++++++++------------
+ 1 file changed, 84 insertions(+), 37 deletions(-)
+
+diff --git a/src/binder_radio_caps.c b/src/binder_radio_caps.c
+index 362780c..36421d1 100644
+--- a/src/binder_radio_caps.c
++++ b/src/binder_radio_caps.c
+@@ -1334,7 +1334,9 @@ binder_radio_caps_manager_issue_requests(
+                 caps->tx_pending++;
+                 DBG_(caps, "tx_pending=%d", caps->tx_pending);
+             } else {
++                /* Won't be completed, the transaction has failed */
+                 ofono_error("failed to set radio caps");
++                self->tx_failed = TRUE;
+             }
+             radio_request_unref(req);
+         }
+@@ -1388,6 +1390,17 @@ binder_radio_caps_manager_transaction_done(
+         binder_radio_caps_manager_cancel_cb);
+ }
+ 
++static
++void
++binder_radio_caps_manager_abort_done(
++    BinderRadioCapsManager* self)
++{
++    if (!binder_radio_caps_manager_tx_pending(self)) {
++        DBG("transaction aborted");
++        binder_radio_caps_manager_transaction_done(self);
++    }
++}
++
+ static
+ void
+ binder_radio_caps_manager_abort_cb(
+@@ -1411,10 +1424,7 @@ binder_radio_caps_manager_abort_cb(
+     GASSERT(self->tx_pending > 0);
+     self->tx_pending--;
+     DBG_(self, "tx_pending=%d", self->tx_pending);
+-    if (!binder_radio_caps_manager_tx_pending(mgr)) {
+-        DBG("transaction aborted");
+-        binder_radio_caps_manager_transaction_done(mgr);
+-    }
++    binder_radio_caps_manager_abort_done(mgr);
+ }
+ 
+ static
+@@ -1450,6 +1460,9 @@ binder_radio_caps_manager_abort_transaction(
+     /* Notify the listeners */
+     g_signal_emit(self, binder_radio_caps_manager_signals
+         [CAPS_MANAGER_SIGNAL_ABORTED], 0);
++
++    /* In case none of the FINISH requests could be submitted */
++    binder_radio_caps_manager_abort_done(self);
+ }
+ 
+ static
+@@ -1463,6 +1476,20 @@ binder_radio_caps_manager_next_phase_result(
+     *status = result->status;
+ }
+ 
++static
++void
++binder_radio_caps_manager_next_phase_done(
++    BinderRadioCapsManager* self)
++{
++    if (!binder_radio_caps_manager_tx_pending(self)) {
++        if (self->tx_failed) {
++            binder_radio_caps_manager_abort_transaction(self);
++        } else {
++            binder_radio_caps_manager_next_phase(self);
++        }
++    }
++}
++
+ static
+ void
+ binder_radio_caps_manager_next_phase_cb(
+@@ -1513,13 +1540,7 @@ binder_radio_caps_manager_next_phase_cb(
+ 
+     self->tx_pending--;
+     DBG_(self, "tx_pending=%d", self->tx_pending);
+-    if (!binder_radio_caps_manager_tx_pending(mgr)) {
+-        if (mgr->tx_failed) {
+-            binder_radio_caps_manager_abort_transaction(mgr);
+-        } else {
+-            binder_radio_caps_manager_next_phase(mgr);
+-        }
+-    }
++    binder_radio_caps_manager_next_phase_done(mgr);
+ }
+ 
+ static
+@@ -1569,14 +1590,21 @@ binder_radio_caps_manager_next_phase(
+ 
+         binder_radio_caps_manager_issue_requests(self, phase,
+             binder_radio_caps_manager_next_phase_cb);
++
++        /*
++         * Nothing to wait for means that none of the requests could be
++         * submitted (or that no modem is left in the transaction).
++         */
++        if (!binder_radio_caps_manager_tx_pending(self)) {
++            binder_radio_caps_manager_abort_transaction(self);
++        }
+     }
+ }
+ 
+ static
+ void
+ binder_radio_caps_manager_data_off_done(
+-    BinderRadioCapsManager* self,
+-    BinderRadioCapsObject* caps)
++    BinderRadioCapsManager* self)
+ {
+     if (!binder_radio_caps_manager_tx_pending(self)) {
+         if (self->tx_failed) {
+@@ -1615,7 +1643,7 @@ binder_radio_caps_manager_data_disallowed(
+         self->tx_failed = TRUE;
+     }
+ 
+-    binder_radio_caps_manager_data_off_done(self, caps);
++    binder_radio_caps_manager_data_off_done(self);
+ }
+ 
+ static
+@@ -1628,13 +1656,38 @@ binder_radio_caps_manager_data_off(
+         FALSE, binder_radio_caps_manager_data_disallowed,
+         g_object_unref, g_object_ref(caps));
+ 
+-    caps->tx_pending++;
+-    DBG_(caps, "tx_pending=%d", caps->tx_pending);
+     radio_request_set_timeout(req, DATA_OFF_TIMEOUT_MS);
+-    radio_request_submit(req);
++    if (radio_request_submit(req)) {
++        caps->tx_pending++;
++        DBG_(caps, "tx_pending=%d", caps->tx_pending);
++    } else {
++        /* Won't be completed, the transaction can't start */
++        DBG_(caps, "failed to submit setDataAllowed");
++        self->tx_failed = TRUE;
++    }
+     radio_request_unref(req);
+ }
+ 
++static
++void
++binder_radio_caps_manager_deactivate_done(
++    BinderRadioCapsManager* self)
++{
++    if (!binder_radio_caps_manager_tx_pending(self)) {
++        if (self->tx_failed) {
++            DBG("failed to start the transaction");
++            binder_radio_caps_manager_recheck_later(self);
++            binder_radio_caps_manager_foreach(self,
++                binder_radio_caps_manager_cancel_cb);
++        } else {
++            binder_radio_caps_manager_foreach_tx(self,
++                binder_radio_caps_manager_data_off);
++            /* In case none of the requests could be submitted */
++            binder_radio_caps_manager_data_off_done(self);
++        }
++    }
++}
++
+ static
+ void
+ binder_radio_caps_manager_deactivate_data_call_done(
+@@ -1661,17 +1714,7 @@ binder_radio_caps_manager_deactivate_data_call_done(
+         binder_data_poll_call_state(caps->data);
+     }
+ 
+-    if (!binder_radio_caps_manager_tx_pending(self)) {
+-        if (self->tx_failed) {
+-            DBG("failed to start the transaction");
+-            binder_radio_caps_manager_recheck_later(self);
+-            binder_radio_caps_manager_foreach(self,
+-                binder_radio_caps_manager_cancel_cb);
+-        } else {
+-            binder_radio_caps_manager_foreach_tx(self,
+-                binder_radio_caps_manager_data_off);
+-        }
+-    }
++    binder_radio_caps_manager_deactivate_done(self);
+ }
+ 
+ static
+@@ -1684,11 +1727,16 @@ binder_radio_caps_deactivate_data_call(
+         cid, binder_radio_caps_manager_deactivate_data_call_done,
+         g_object_unref, g_object_ref(caps));
+ 
+-    caps->tx_pending++;
+-    DBG_(caps, "cid=%u, tx_pending=%d", cid, caps->tx_pending);
+     radio_request_set_blocking(req, TRUE);
+     radio_request_set_timeout(req, DEACTIVATE_TIMEOUT_MS);
+-    radio_request_submit(req);
++    if (radio_request_submit(req)) {
++        caps->tx_pending++;
++        DBG_(caps, "cid=%u, tx_pending=%d", cid, caps->tx_pending);
++    } else {
++        /* Won't be completed, the transaction can't start */
++        DBG_(caps, "failed to deactivate cid %u", cid);
++        caps->pub.mgr->tx_failed = TRUE;
++    }
+     radio_request_unref(req);
+ }
+ 
+@@ -1727,12 +1775,11 @@ binder_radio_caps_manager_deactivate_all(
+ {
+     binder_radio_caps_manager_foreach_tx(self,
+         binder_radio_caps_manager_deactivate_all_cb);
+-    if (!binder_radio_caps_manager_tx_pending(self)) {
+-        /* No data calls, submit setDataAllowed requests right away */
+-        binder_radio_caps_manager_foreach_tx(self,
+-            binder_radio_caps_manager_data_off);
+-        GASSERT(binder_radio_caps_manager_tx_pending(self));
+-    }
++    /*
++     * With no data calls (or none of the deactivate requests submitted)
++     * this goes on to setDataAllowed right away.
++     */
++    binder_radio_caps_manager_deactivate_done(self);
+ }
+ 
+ static

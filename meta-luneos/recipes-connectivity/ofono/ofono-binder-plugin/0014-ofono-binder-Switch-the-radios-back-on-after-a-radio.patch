@@ -1,0 +1,148 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [ofono-binder] Switch the radios back on after a radio
+ caps transaction
+
+Applying a new radio capability resets the modems, and some of them
+come back with the radio switched off. Seen on an MT6739 phone with
+IRadio 1.4: both slots reported RADIO_STATE_OFF during the APPLY
+phase and stayed off. Since BinderRadio only repeats a power request
+when the state changes while one is pending, nothing switched them
+back on. The slots stayed online with the radio off, which
+binder_radio_caps_manager_can_check() treats as not ready, so every
+later capability check was skipped too.
+
+binder_plugin has a handler for this case, but it's only registered
+when confirm_radio_power_on is set, and nothing sets it.
+
+When a transaction ends, completed or aborted, after unblocking the
+request groups, ask each radio for the state its slot wants with
+binder_radio_confirm_power_on(). That does nothing for the radios
+that are supposed to be off.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/mer-hybris/ofono-binder-plugin/pull/85]
+---
+ src/binder_radio_caps.c                | 21 +++++++++++++++++++++
+ unit/unit_radio_caps/unit_radio_caps.c | 21 +++++++++++++++++++++
+ 2 files changed, 42 insertions(+)
+
+diff --git a/src/binder_radio_caps.c b/src/binder_radio_caps.c
+index 82b4b78..93cd965 100644
+--- a/src/binder_radio_caps.c
++++ b/src/binder_radio_caps.c
+@@ -1379,6 +1379,15 @@ binder_radio_caps_manager_cancel_cb(
+     radio_request_group_unblock(caps->g);
+ }
+ 
++static
++void
++binder_radio_caps_manager_power_on_cb(
++    BinderRadioCapsManager* self,
++    BinderRadioCapsObject* caps)
++{
++    binder_radio_confirm_power_on(caps->radio);
++}
++
+ static
+ void
+ binder_radio_caps_manager_transaction_done(
+@@ -1388,6 +1397,18 @@ binder_radio_caps_manager_transaction_done(
+     binder_data_manager_assert_data_on(self->data_manager);
+     binder_radio_caps_manager_foreach(self,
+         binder_radio_caps_manager_cancel_cb);
++
++    /*
++     * Modems may switch the radio off while applying (or rolling back)
++     * a new capability, and nothing else is going to switch it back on:
++     * BinderRadio only repeats a power request when the modem misbehaves
++     * while the request is pending. Ask for the state that the slots
++     * want (which is a no-op for the ones that are supposed to be off).
++     * This is done after unblocking our request groups, otherwise the
++     * request would be queued behind our own block.
++     */
++    binder_radio_caps_manager_foreach(self,
++        binder_radio_caps_manager_power_on_cb);
+ }
+ 
+ static
+diff --git a/unit/unit_radio_caps/unit_radio_caps.c b/unit/unit_radio_caps/unit_radio_caps.c
+index 255d7b7..aeb3c58 100644
+--- a/unit/unit_radio_caps/unit_radio_caps.c
++++ b/unit/unit_radio_caps/unit_radio_caps.c
+@@ -72,6 +72,7 @@ static struct test_state {
+     int aborted;
+     int done;
+     int data_on;
++    int power_on;
+ } test;
+ 
+ typedef struct test_slot {
+@@ -530,6 +531,19 @@ binder_data_manager_assert_data_on(
+     test.data_on++;
+ }
+ 
++void
++binder_radio_confirm_power_on(
++    BinderRadio* radio)
++{
++    TestSlot* slot = G_CAST(radio, TestSlot, radio);
++    BinderRadioCapsObject* caps = binder_radio_caps_cast(slot->caps);
++
++    /* Otherwise setRadioPower would be queued behind our own block */
++    g_assert_cmpint(radio_request_group_block_status(caps->g), ==,
++        RADIO_BLOCK_NONE);
++    test.power_on++;
++}
++
+ BinderRadio*
+ binder_radio_ref(
+     BinderRadio* radio)
+@@ -941,10 +955,12 @@ test_start(
+     test_complete(TEST_REQ_SET_CAPS, RADIO_TX_STATUS_OK);
+     test_complete(TEST_REQ_SET_CAPS, RADIO_TX_STATUS_OK);
+     g_assert_cmpint(test.done, ==, 0);
++    g_assert_cmpint(test.power_on, ==, 0);
+     test_complete(TEST_REQ_SET_CAPS, RADIO_TX_STATUS_OK);
+     g_assert_cmpint(test.pending->len, ==, 0);
+     g_assert_cmpint(test.submitted[TEST_REQ_SET_CAPS], ==, 6);
+     g_assert_cmpint(test.done, ==, 1);
++    g_assert_cmpint(test.power_on, ==, 2);
+     g_assert_cmpint(test.aborted, ==, 0);
+     g_assert_cmpint(test.data_on, ==, 1);
+     test_assert_unblocked(&setup);
+@@ -975,6 +991,7 @@ test_data_off_failed(
+     g_assert_cmpint(test_pending_count(TEST_REQ_SET_CAPS), ==, 0);
+     g_assert_cmpint(test.aborted, ==, 1);
+     g_assert_cmpint(test.data_on, ==, 1);
++    g_assert_cmpint(test.power_on, ==, 0);
+     test_assert_unblocked(&setup);
+     test_setup_deinit(&setup);
+ }
+@@ -1023,6 +1040,7 @@ test_deactivate_failed(
+     test_setup_start(&setup);
+     g_assert_cmpint(test.pending->len, ==, 0);
+     g_assert_cmpint(test.submitted[TEST_REQ_DATA_ALLOWED], ==, 0);
++    g_assert_cmpint(test.power_on, ==, 0);
+     test_assert_unblocked(&setup);
+     test_setup_deinit(&setup);
+ }
+@@ -1051,9 +1069,11 @@ test_phase_failed(
+     g_assert_cmpint(test_pending_count(TEST_REQ_SET_CAPS), ==, 2);
+     g_assert_cmpint(test.data_on, ==, 0);
+ 
++    g_assert_cmpint(test.power_on, ==, 0);
+     test_complete(TEST_REQ_SET_CAPS, RADIO_TX_STATUS_OK);
+     g_assert_cmpint(test.data_on, ==, 1);
+     g_assert_cmpint(test.done, ==, 0);
++    g_assert_cmpint(test.power_on, ==, 2);
+     test_assert_unblocked(&setup);
+     test_setup_deinit(&setup);
+ }
+@@ -1110,6 +1130,7 @@ test_abort_failed(
+     g_assert_cmpint(test.pending->len, ==, 0);
+     g_assert_cmpint(test.aborted, ==, 1);
+     g_assert_cmpint(test.data_on, ==, 1);
++    g_assert_cmpint(test.power_on, ==, 2);
+     test_assert_unblocked(&setup);
+     test_setup_deinit(&setup);
+ }
