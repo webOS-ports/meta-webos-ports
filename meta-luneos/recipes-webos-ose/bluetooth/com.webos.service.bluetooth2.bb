@@ -44,15 +44,20 @@ WEBOS_BLUETOOTH_ENABLED_SERVICE_CLASSES = "GATT FTP OPP A2DP SPP HFP AVRCP PAN A
 #   "NoInputNoOutput"
 #   "KeyboardDisplay"
 #   "KeyboardOnly"
-# Use "NoInputNoOutput" as its default value (which ends up being used for the
-# emulator), which means that the pairing should happen without user intervention.
-WEBOS_BLUETOOTH_PAIRING_IO_CAPABILITY ??= "NoInputNoOutput"
+# LuneOS uses "DisplayYesNo": Settings' Bluetooth page (LuneOS.Bluetooth's
+# LuneOSBluetoothAgent) shows the passkey to compare and asks before a device
+# pairs. bluetoothd only takes it with bluez5's patch 0014 gone, which made
+# every agent NoInputNoOutput.
+WEBOS_BLUETOOTH_PAIRING_IO_CAPABILITY ??= "DisplayYesNo"
 
 # Built from the webOS-ports fork: webosose submissions/79 with the LuneOS
 # changes as commits, the two patches this recipe used to apply among them.
 # Plain SRCREV: submission tags are a webosose convention.
 PV = "1.0.0-79+git"
-SRCREV = "f0babdaba5e45458688429646f5da1e369c0c9de"
+# herrie/bluetooth2-migration until its pull request is merged:
+# /device/connect, /device/disconnect and Just Works prompts.
+SRCREV = "872d928bf92d7a5908f0f5119aae59d69211792e"
+WEBOS_GIT_PARAM_BRANCH = "herrie/bluetooth2-migration"
 PR = "r13"
 
 inherit webos_component
