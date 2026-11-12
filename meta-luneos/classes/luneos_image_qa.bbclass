@@ -54,15 +54,15 @@ python luneos_image_qa () {
         ww_file_allow=(d.getVar("LUNEOS_IMAGE_QA_WW_FILE_ALLOW") or "").split())
 
     if warnings:
-        bb.warn("luneos-image-qa: world-writable files in %s:\n%s"
+        bb.warn("luneos_image_qa: world-writable files in %s:\n%s"
                 % (d.getVar("PN"), webos.image_qa.format_report(warnings)))
     if errors:
-        bb.fatal("luneos-image-qa: unsafe permissions in %s:\n%s\n"
+        bb.fatal("luneos_image_qa: unsafe permissions in %s:\n%s\n"
                  "Fix the recipe that installs them; extend "
                  "LUNEOS_IMAGE_QA_SUID_ALLOW or LUNEOS_IMAGE_QA_WW_DIR_ALLOW "
                  "only for a file that really needs it."
                  % (d.getVar("PN"), webos.image_qa.format_report(errors)))
-    bb.note("luneos-image-qa: %d warnings, no errors" % len(warnings))
+    bb.note("luneos_image_qa: %d warnings, no errors" % len(warnings))
 }
 luneos_image_qa[vardeps] += "LUNEOS_IMAGE_QA_SUID_ALLOW LUNEOS_IMAGE_QA_WW_DIR_ALLOW \
     LUNEOS_IMAGE_QA_WW_FILE_ALLOW LUNEOS_IMAGE_QA_SYSTEM_DIRS"

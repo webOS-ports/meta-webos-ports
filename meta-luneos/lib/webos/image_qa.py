@@ -1,6 +1,6 @@
 # Filesystem permission checks for LuneOS image root filesystems.
 #
-# Used by luneos-image-qa.bbclass from ROOTFS_POSTPROCESS_COMMAND. do_rootfs
+# Used by luneos_image_qa.bbclass from ROOTFS_POSTPROCESS_COMMAND. do_rootfs
 # is a fakeroot task, so os.lstat() here goes through pseudo and returns the
 # owners and modes the image will really have, not those of the build user.
 #
