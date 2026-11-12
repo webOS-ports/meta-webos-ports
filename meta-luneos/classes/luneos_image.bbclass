@@ -27,7 +27,7 @@ luneos_debug_access_ssh_wifi() {
     install -d ${IMAGE_ROOTFS}${localstatedir}/luna
     touch ${IMAGE_ROOTFS}${localstatedir}/luna/ssh-wifi-enabled
 }
-ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.conditional('LUNEOS_DEBUG_ACCESS', '1', 'luneos_debug_access_ssh_wifi;', '', d)}"
+ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.conditional('LUNEOS_DEBUG_ACCESS', '1', 'luneos_debug_access_ssh_wifi', '', d)}"
 
 # Root's password over the local link only, as Sailfish OS does it. sshd is
 # key-only (PasswordAuthentication no; KbdInteractiveAuthentication stays no, so
@@ -76,7 +76,7 @@ python luneos_ssh_local_password() {
         with open(path, 'w') as f:
             f.write(text)
 }
-ROOTFS_POSTPROCESS_COMMAND += "luneos_ssh_local_password;"
+ROOTFS_POSTPROCESS_COMMAND += "luneos_ssh_local_password"
 
 # Root's SSH keys built into the image, for a developer's own builds:
 #     LUNEOS_SSH_AUTHORIZED_KEYS = "/home/me/.ssh/id_ed25519.pub /home/me/.ssh/work.pub"
@@ -99,7 +99,7 @@ python luneos_ssh_authorized_keys() {
         bb.fatal('LUNEOS_SSH_AUTHORIZED_KEYS: %s' % e)
     bb.note('LUNEOS_SSH_AUTHORIZED_KEYS: %d key(s) for root' % n)
 }
-ROOTFS_POSTPROCESS_COMMAND += "${@'luneos_ssh_authorized_keys;' if (d.getVar('LUNEOS_SSH_AUTHORIZED_KEYS') or '').split() else ''}"
+ROOTFS_POSTPROCESS_COMMAND += "${@'luneos_ssh_authorized_keys' if (d.getVar('LUNEOS_SSH_AUTHORIZED_KEYS') or '').split() else ''}"
 do_rootfs[file-checksums] += "${@' '.join('%s:True' % p for p in (d.getVar('LUNEOS_SSH_AUTHORIZED_KEYS') or '').split())}"
 
 # QA: no .ssh or authorized_keys in any home of the image that another user may
@@ -112,7 +112,7 @@ python luneos_ssh_modes_qa() {
     if problems:
         bb.fatal('SSH files open to others in the image:\n  ' + '\n  '.join(problems))
 }
-ROOTFS_POSTPROCESS_COMMAND += "luneos_ssh_modes_qa;"
+ROOTFS_POSTPROCESS_COMMAND += "luneos_ssh_modes_qa"
 
 # We're using devtmpfs so are not required to have a minimal populated /dev in our images
 USE_DEVFS = "1"
@@ -134,7 +134,7 @@ SMACK_LABELS_FILE = "${@bb.utils.contains('DISTRO_FEATURES', 'smack', '${WORKDIR
 do_rootfs[prefuncs] += "${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'do_fetch do_unpack', '', d)}"
 
 ROOTFS_POSTPROCESS_COMMAND += "\
-    ${@bb.utils.contains('DISTRO_FEATURES', 'smack', ' do_smack_labeling ; ', '', d)} \
+    ${@bb.utils.contains('DISTRO_FEATURES', 'smack', 'do_smack_labeling', '', d)} \
 "
 
 # Inherited after oe-core's rootfs-postcommands (which image.bbclass pulls in via
