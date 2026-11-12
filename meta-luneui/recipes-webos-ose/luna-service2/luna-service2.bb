@@ -15,12 +15,10 @@ VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 VIRTUAL-RUNTIME_bash ?= "bash"
 RDEPENDS:${PN} = "luna-service2-security-conf ${VIRTUAL-RUNTIME_cpushareholder} ${VIRTUAL-RUNTIME_bash}"
 
-SRCREV = "23cf2c7a68de98127e4a11ed90cc1cd1f02c6112"
-# Until merged: the hub does not log its reverse-call probe as a denial.
-WEBOS_GIT_PARAM_BRANCH = "herrie/hubd-quiet-reverse-probe"
+SRCREV = "801e836ce0e849d2b00a3f306be14453bcb3a405"
 
 PV = "3.21.2-48"
-PR = "r3"
+PR = "r4"
 
 EXTRA_OECMAKE += "${@ '-DWEBOS_DISTRO_PRERELEASE:STRING="devel"' \
                   if d.getVar('WEBOS_DISTRO_PRERELEASE') != '' else ''} \
