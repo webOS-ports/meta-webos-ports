@@ -1,0 +1,380 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [ofono-binder] Implement set_active_card_slot with
+ setSimSlotsMapping
+
+Where a second physical UICC (typically an eUICC) sits behind a single
+logical modem, nothing on it is reachable until that physical slot is
+mapped to the modem. ofono models this with SimManager's CardSlotCount
+and ActiveCardSlot, backed by the set_active_card_slot driver op, which
+this plugin never implemented.
+
+IRadioConfig.setSimSlotsMapping takes a map indexed by logical slot
+whose values are physical slots, so the current map is read back with
+getSimSlotsStatus at registration, and again before a switch if that
+first query lost a race with the modem coming up. Both the 1.0 and the
+1.2 (getSimSlotsStatusResponse_1_2) slot status layouts are accepted.
+The mapping request is retried twice, 3 s apart, because the first one
+after other modem activity tends to fail while the card settles.
+
+HIDL only. AIDL RadioConfig encodes the slot status differently and is
+untested, so there the slot count stays at 1 and ofono refuses changes.
+Needs an ofono whose sim driver has set_active_card_slot and
+ofono_sim_set_card_slot_count().
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/binder_sim.c | 298 ++++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 297 insertions(+), 1 deletion(-)
+
+diff --git a/src/binder_sim.c b/src/binder_sim.c
+index b206210..4c73452 100644
+--- a/src/binder_sim.c
++++ b/src/binder_sim.c
+@@ -26,6 +26,7 @@
+ #include <ofono/watch.h>
+ 
+ #include <radio_client.h>
++#include <radio_config.h>
+ #include <radio_request.h>
+ #include <radio_request_group.h>
+ #include <radio_network_types.h>
+@@ -85,6 +86,12 @@ typedef struct binder_sim {
+     BinderSimCard* card;
+     RadioRequestGroup* g;
+     RadioRequestGroup* network_g;
++    RadioConfig* radio_config;
++    RadioRequest* slots_status_req;
++    RadioRequest* slot_mapping_req;
++    struct binder_sim_slot_set* slot_set;
++    guint32* slot_map;   /* logical slot -> physical slot */
++    guint slot_map_len;
+     RadioRequest* query_pin_retries_req;
+     GList* pin_cbd_list;
+     int retries[OFONO_SIM_PASSWORD_INVALID];
+@@ -2455,6 +2462,285 @@ binder_sim_refresh_cb(
+     ofono_sim_refresh_full(self->sim);
+ }
+ 
++/*==========================================================================*
++ * Card slot mapping
++ *
++ * Where a second physical UICC (typically an eUICC) sits behind a single
++ * logical modem, nothing on it is reachable until that physical slot is
++ * mapped to the modem. ofono models this with SimManager's CardSlotCount
++ * and ActiveCardSlot, backed by the set_active_card_slot driver op.
++ *
++ * IRadioConfig.setSimSlotsMapping takes a map indexed by logical slot whose
++ * values are physical slots, so the current mapping is read back with
++ * getSimSlotsStatus before one entry is changed. HIDL only: AIDL
++ * RadioConfig encodes the slot status differently and is untested, so
++ * there the slot count stays at 1 and ofono refuses any change.
++ *==========================================================================*/
++
++#define BINDER_SIM_MAX_LOGICAL_SLOTS 8
++
++typedef struct binder_sim_slot_set {
++    guint index;
++    ofono_sim_set_active_card_slot_cb_t cb;
++    void* data;
++} BinderSimSlotSet;
++
++static
++void
++binder_sim_slot_set_finish(
++    BinderSim* self,
++    gboolean ok)
++{
++    BinderSimSlotSet* set = self->slot_set;
++
++    if (set) {
++        struct ofono_error err;
++
++        self->slot_set = NULL;
++        if (ok) {
++            set->cb(binder_error_ok(&err), set->data);
++        } else {
++            set->cb(binder_error_failure(&err), set->data);
++        }
++        g_slice_free(BinderSimSlotSet, set);
++    }
++}
++
++static
++gboolean
++binder_sim_parse_slots_status(
++    BinderSim* self,
++    RADIO_CONFIG_RESP resp,
++    const GBinderReader* args)
++{
++    GBinderReader reader;
++    const guint8* vec;
++    gsize count = 0, elemsize = 0, i;
++    guint nlogical = 0;
++    guint32* map;
++
++    /*
++     * config@1.2 answers getSimSlotsStatus with getSimSlotsStatusResponse_1_2,
++     * whose SimSlotStatus starts with the 1.0 structure and adds the EID.
++     */
++    if (resp != RADIO_CONFIG_RESP_GET_SIM_SLOTS_STATUS &&
++        resp != RADIO_CONFIG_RESP_GET_SIM_SLOTS_STATUS_1_2) {
++        DBG_(self, "unexpected slot status response %d", resp);
++        return FALSE;
++    }
++
++    gbinder_reader_copy(&reader, args);
++    vec = gbinder_reader_read_hidl_vec(&reader, &count, &elemsize);
++    if (!vec || !count || elemsize < sizeof(RadioSimSlotStatus)) {
++        DBG_(self, "could not parse slot status");
++        return FALSE;
++    }
++
++    /* Each active physical slot is mapped to exactly one logical slot */
++    for (i = 0; i < count; i++) {
++        RadioSimSlotStatus slot;
++
++        memcpy(&slot, vec + i * elemsize, sizeof(slot));
++        if (slot.slotState == RADIO_SLOT_STATE_ACTIVE) {
++            if (slot.logicalSlotId >= BINDER_SIM_MAX_LOGICAL_SLOTS) {
++                ofono_warn("Invalid logical slot %u", slot.logicalSlotId);
++                return FALSE;
++            }
++            nlogical = MAX(nlogical, slot.logicalSlotId + 1);
++        }
++    }
++
++    map = nlogical ? g_new0(guint32, nlogical) : NULL;
++    for (i = 0; i < count; i++) {
++        RadioSimSlotStatus slot;
++
++        memcpy(&slot, vec + i * elemsize, sizeof(slot));
++        if (slot.slotState == RADIO_SLOT_STATE_ACTIVE &&
++            slot.logicalSlotId < nlogical) {
++            map[slot.logicalSlotId] = (guint32) i;
++            if (slot.logicalSlotId == self->card->slot) {
++                DBG_(self, "logical slot %u <- physical slot %u",
++                    self->card->slot, (guint) i);
++                /* ofono numbers card slots from 1 */
++                ofono_sim_set_active_card_slot(self->sim, (guint) i + 1);
++            }
++        }
++    }
++
++    g_free(self->slot_map);
++    self->slot_map = map;
++    self->slot_map_len = nlogical;
++
++    DBG_(self, "%u physical slot(s), %u logical", (guint) count, nlogical);
++    ofono_sim_set_card_slot_count(self->sim, (guint) count);
++    return self->card->slot < self->slot_map_len;
++}
++
++static
++void
++binder_sim_slot_mapping_cb(
++    RadioRequest* req,
++    RADIO_TX_STATUS status,
++    RADIO_CONFIG_RESP resp,
++    RADIO_ERROR error,
++    const GBinderReader* args,
++    gpointer user_data);
++
++static
++gboolean
++binder_sim_send_slot_mapping(
++    BinderSim* self)
++{
++    const guint len = self->slot_map_len;
++    guint32* map = g_memdup(self->slot_map, len * sizeof(guint32));
++    GBinderWriter writer;
++    RadioRequest* req;
++    guint i;
++
++    map[self->card->slot] = self->slot_set->index;
++    for (i = 0; i < len; i++) {
++        DBG_(self, "logical slot %u -> physical slot %u", i, map[i]);
++    }
++
++    req = radio_config_request_new(self->radio_config,
++        RADIO_CONFIG_REQ_SET_SIM_SLOTS_MAPPING, &writer,
++        binder_sim_slot_mapping_cb, NULL, self);
++    gbinder_writer_add_cleanup(&writer, g_free, map);
++    gbinder_writer_append_hidl_vec(&writer, map, len, sizeof(guint32));
++    radio_request_set_timeout(req, SIM_IO_TIMEOUT_SECS * 1000);
++
++    /*
++     * The first attempt after the modem has been doing anything else tends
++     * to fail, and an identical request a few seconds later succeeds - the
++     * card is still settling from the previous mapping.
++     */
++    radio_request_set_retry(req, 3000, 2);
++
++    radio_request_drop(self->slot_mapping_req);
++    self->slot_mapping_req = radio_request_try_submit(req);
++    return self->slot_mapping_req != NULL;
++}
++
++static
++void
++binder_sim_slots_status_cb(
++    RadioRequest* req,
++    RADIO_TX_STATUS status,
++    RADIO_CONFIG_RESP resp,
++    RADIO_ERROR error,
++    const GBinderReader* args,
++    gpointer user_data)
++{
++    BinderSim* self = user_data;
++    gboolean ok = FALSE;
++
++    GASSERT(self->slots_status_req == req);
++    radio_request_unref(self->slots_status_req);
++    self->slots_status_req = NULL;
++
++    if (status != RADIO_TX_STATUS_OK || error != RADIO_ERROR_NONE) {
++        DBG_(self, "no slot status (status %d, error %s)", status,
++            binder_radio_error_string(error));
++    } else {
++        ok = binder_sim_parse_slots_status(self, resp, args);
++    }
++
++    /* A switch may have been waiting for the map */
++    if (self->slot_set && !self->slot_mapping_req) {
++        if (!ok || !binder_sim_send_slot_mapping(self)) {
++            ofono_error("No slot mapping available");
++            binder_sim_slot_set_finish(self, FALSE);
++        }
++    }
++}
++
++static
++gboolean
++binder_sim_query_slots_status(
++    BinderSim* self)
++{
++    if (!self->radio_config ||
++        radio_config_interface_type(self->radio_config) !=
++            RADIO_INTERFACE_TYPE_HIDL) {
++        return FALSE;
++    }
++    if (!self->slots_status_req) {
++        RadioRequest* req = radio_config_request_new(self->radio_config,
++            RADIO_CONFIG_REQ_GET_SIM_SLOTS_STATUS, NULL,
++            binder_sim_slots_status_cb, NULL, self);
++
++        radio_request_set_timeout(req, SIM_IO_TIMEOUT_SECS * 1000);
++        self->slots_status_req = radio_request_try_submit(req);
++    }
++    return self->slots_status_req != NULL;
++}
++
++static
++void
++binder_sim_slot_mapping_cb(
++    RadioRequest* req,
++    RADIO_TX_STATUS status,
++    RADIO_CONFIG_RESP resp,
++    RADIO_ERROR error,
++    const GBinderReader* args,
++    gpointer user_data)
++{
++    BinderSim* self = user_data;
++    const gboolean ok = status == RADIO_TX_STATUS_OK &&
++        error == RADIO_ERROR_NONE;
++
++    GASSERT(self->slot_mapping_req == req);
++    radio_request_unref(self->slot_mapping_req);
++    self->slot_mapping_req = NULL;
++
++    DBG_(self, "status %d error %s", status, binder_radio_error_string(error));
++    if (ok) {
++        /* Pick up the new mapping */
++        binder_sim_query_slots_status(self);
++    }
++    binder_sim_slot_set_finish(self, ok);
++}
++
++static
++void
++binder_sim_set_active_card_slot(
++    struct ofono_sim* sim,
++    unsigned int index,
++    ofono_sim_set_active_card_slot_cb_t cb,
++    void* data)
++{
++    BinderSim* self = binder_sim_get_data(sim);
++    BinderSimSlotSet* set;
++
++    if (self->slot_set) {
++        struct ofono_error err;
++
++        ofono_error("Slot switch already in progress");
++        cb(binder_error_failure(&err), data);
++        return;
++    }
++
++    set = g_slice_new0(BinderSimSlotSet);
++    set->index = index;
++    set->cb = cb;
++    set->data = data;
++    self->slot_set = set;
++
++    if (self->card->slot < self->slot_map_len && !self->slots_status_req) {
++        if (!binder_sim_send_slot_mapping(self)) {
++            binder_sim_slot_set_finish(self, FALSE);
++        }
++    } else if (!binder_sim_query_slots_status(self)) {
++        /*
++         * The map is normally read at registration, but that query can lose
++         * a race with the modem coming up. Without it every switch would
++         * fail, so fetch it now and switch from the response.
++         */
++        ofono_error("No slot mapping available");
++        binder_sim_slot_set_finish(self, FALSE);
++    }
++}
++
+ static
+ gboolean
+ binder_sim_register(
+@@ -2468,6 +2754,7 @@ binder_sim_register(
+     self->idle_id = 0;
+ 
+     ofono_sim_register(self->sim);
++    binder_sim_query_slots_status(self);
+ 
+     /* Register for change notifications */
+     self->card_event_id[SIM_CARD_STATUS_EVENT] =
+@@ -2509,6 +2796,7 @@ binder_sim_probe(
+     self->card = binder_sim_card_ref(modem->sim_card);
+     self->g = radio_request_group_new(sim_client);
+     self->network_g = radio_request_group_new(modem->clients.network_client);
++    self->radio_config = radio_config_new();
+     self->watch = ofono_watch_new(binder_modem_get_path(modem));
+     self->sim = sim;
+     self->api = api;
+@@ -2535,6 +2823,13 @@ static void binder_sim_remove(struct ofono_sim *sim)
+     radio_request_group_unref(self->g);
+     radio_request_group_cancel(self->network_g);
+     radio_request_group_unref(self->network_g);
++    radio_request_drop(self->slots_status_req);
++    radio_request_drop(self->slot_mapping_req);
++    radio_config_unref(self->radio_config);
++    if (self->slot_set) {
++        g_slice_free(BinderSimSlotSet, self->slot_set);
++    }
++    g_free(self->slot_map);
+ 
+     gutil_source_remove(self->list_apps_id);
+     gutil_source_remove(self->idle_id);
+@@ -2885,7 +3180,8 @@ static const struct ofono_sim_driver binder_sim_driver = {
+     .session_read_binary    = binder_sim_session_read_binary,
+     .session_read_record    = binder_sim_session_read_record,
+     .session_read_info      = binder_sim_session_read_info,
+-    .logical_access         = binder_sim_logical_access
++    .logical_access         = binder_sim_logical_access,
++    .set_active_card_slot   = binder_sim_set_active_card_slot
+ };
+ 
+ void

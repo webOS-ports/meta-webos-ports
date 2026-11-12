@@ -1,0 +1,86 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [ofono-binder] Return SW1 SW2 with logical channel APDU
+ responses
+
+logical_access returned only the response data and turned any status
+other than 90 00 into an ofono error. The AT driver sets the opposite
+convention: at_logical_access() hands back the whole +CGLA response,
+status word included. An LPA has to see the status word to know what
+happened, so append SW1 SW2 and report a non-9000 status as an ordinary
+response, because at the APDU layer it is one. ofono's own sim-auth
+parsers read the response from the start and are not affected by the
+two trailing bytes.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/binder_sim.c | 41 ++++++++++++++++++++++++++++++-----------
+ 1 file changed, 30 insertions(+), 11 deletions(-)
+
+diff --git a/src/binder_sim.c b/src/binder_sim.c
+index 9ec109d..b206210 100644
+--- a/src/binder_sim.c
++++ b/src/binder_sim.c
+@@ -2203,6 +2203,34 @@ binder_sim_close_channel(
+     radio_request_unref(req);
+ }
+ 
++/*
++ * ofono's logical_access contract, as set by the AT driver, is that the
++ * caller gets the raw APDU response including SW1 SW2: at_logical_access()
++ * hands back whatever +CGLA returned, status word and all. An LPA (SGP.22)
++ * has to see 90 00 / 6x xx to know what happened, so append the status word
++ * and report a non-9000 status as an ordinary response, not an error -
++ * at the APDU layer it is one.
++ */
++static
++void
++binder_sim_logical_access_complete(
++    ofono_sim_logical_access_cb_t cb,
++    const BinderSimIoResponse* res,
++    void* data)
++{
++    struct ofono_error err;
++    const guint len = res->data_len;
++    guchar* buf = g_malloc(len + 2);
++
++    if (len) {
++        memcpy(buf, res->data, len);
++    }
++    buf[len] = (guchar) res->sw1;
++    buf[len + 1] = (guchar) res->sw2;
++    cb(binder_error_ok(&err), buf, len + 2, data);
++    g_free(buf);
++}
++
+ static
+ void
+ binder_sim_logical_access_get_results_cb(
+@@ -2226,12 +2254,7 @@ binder_sim_logical_access_get_results_cb(
+         BinderSimIoResponse* res = binder_sim_io_response_new(self, args);
+ 
+         if (res) {
+-            if (binder_sim_io_response_ok(res)) {
+-                cb(binder_error_ok(&err), res->data, res->data_len, cbd->data);
+-            } else {
+-                cb(binder_error_sim(&err, res->sw1, res->sw2), NULL, 0,
+-                    cbd->data);
+-            }
++            binder_sim_logical_access_complete(cb, res, cbd->data);
+             binder_sim_io_response_free(res);
+             return;
+         } else {
+@@ -2313,12 +2336,8 @@ binder_sim_logical_access_cb(
+                 binder_sim_logical_access_transmit(cbd,
+                     CMD_GET_RESPONSE, 0, 0, res->sw2, NULL,
+                     binder_sim_logical_access_get_results_cb);
+-            } else if (binder_sim_io_response_ok(res)) {
+-                cb(binder_error_ok(&err), res->data, res->data_len,
+-                    cbd->data);
+             } else {
+-                cb(binder_error_sim(&err, res->sw1, res->sw2), NULL, 0,
+-                    cbd->data);
++                binder_sim_logical_access_complete(cb, res, cbd->data);
+             }
+             binder_sim_io_response_free(res);
+             return;
