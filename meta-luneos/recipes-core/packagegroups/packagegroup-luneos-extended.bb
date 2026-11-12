@@ -397,7 +397,7 @@ ESIM_RDEPENDS = " \
 #
 # The service that sits in front of it, com.webos.service.camera, is NOT here:
 # it is machine-independent and ships from packagegroup-webos-extended, for the
-# WebRTC camera that com.webos.app.videocall uses. Its droid HAL and notifier
+# WebRTC camera behind getUserMedia. Its droid HAL and notifier
 # plugins link nothing but
 # GStreamer and reach gst-droid through gst_element_factory_make("droidcamsrc"),
 # so the same package serves the v4l2 path on mainline machines.
