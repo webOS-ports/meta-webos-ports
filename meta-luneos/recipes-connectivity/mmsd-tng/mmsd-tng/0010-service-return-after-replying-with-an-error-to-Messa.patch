@@ -1,0 +1,101 @@
+From eaf63ff9c5a3f39d148c0f79ae925379a3b74e0f Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 13:37:06 +0100
+Subject: [PATCH] service: return after replying with an error to
+ Message.Delete/MarkRead
+
+handle_method_call_message() replies with an error and then carries on
+as if the call had succeeded:
+
+ - Delete of a message that is not in the table dereferences the NULL
+   message; when unregistering fails it still removes the store and
+   replies a second time;
+ - MarkRead of a message that is not in the table dereferences NULL;
+   when its state is missing it closes the key file and then strcmp()s
+   the NULL state;
+ - MarkRead of a message in a state that cannot be marked read (a
+   notification that has not been downloaded, say) closes - and so
+   frees - the key file, then sets "read" in it and closes it again.
+
+Every one of these also replies to the invocation a second time, after
+the first reply has released it.
+
+Return after each error reply, and check that the message's meta data
+could be opened before using it.
+
+Found by clang's static analyzer (core.NullDereference, NonNullParamChecker).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/service.c | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/src/service.c b/src/service.c
+index 738052a..08ee0a3 100644
+--- a/src/service.c
++++ b/src/service.c
+@@ -687,15 +687,21 @@ handle_method_call_message (GDBusConnection       *connection,
+ 
+       mms = g_hash_table_lookup (service->messages, path);
+       if (mms == NULL)
++        {
+         g_dbus_method_invocation_return_dbus_error (invocation,
+                                                     MMS_MESSAGE_INTERFACE,
+                                                     "Cannot find the MMS to delete!");
++          return;
++        }
+ 
+       uuid = g_strdup (mms->uuid);
+       if (mms_message_unregister (service, path, mms->message_registration_id) < 0)
++        {
+         g_dbus_method_invocation_return_dbus_error (invocation,
+                                                     MMS_MESSAGE_INTERFACE,
+                                                     "There was an error deleting the MMS!");
++          return;
++        }
+       mms_store_remove (service->identity, uuid);
+ 
+       DBG ("Successfully Deleted Message!");
+@@ -713,11 +719,21 @@ handle_method_call_message (GDBusConnection       *connection,
+ 
+       mms = g_hash_table_lookup (service->messages, path);
+       if (mms == NULL)
++        {
+         g_dbus_method_invocation_return_dbus_error (invocation,
+                                                     MMS_MESSAGE_INTERFACE,
+                                                     "Cannot find this MMS!");
++          return;
++        }
+ 
+       meta = mms_store_meta_open (service->identity, mms->uuid);
++      if (meta == NULL)
++        {
++          g_dbus_method_invocation_return_dbus_error (invocation,
++                                                      MMS_MESSAGE_INTERFACE,
++                                                      "Cannot open this MMS!");
++          return;
++        }
+ 
+       state = g_key_file_get_string (meta, "info", "state", NULL);
+       if (state == NULL)
+@@ -726,6 +742,7 @@ handle_method_call_message (GDBusConnection       *connection,
+           g_dbus_method_invocation_return_dbus_error (invocation,
+                                                       MMS_MESSAGE_INTERFACE,
+                                                       "Cannot find this MMS. Was it Deleted?");
++          return;
+         }
+ 
+       if (strcmp (state, "received") != 0 && strcmp (state, "sent") != 0 && strcmp (state, "delivered") != 0)
+@@ -734,6 +751,7 @@ handle_method_call_message (GDBusConnection       *connection,
+           g_dbus_method_invocation_return_dbus_error (invocation,
+                                                       MMS_MESSAGE_INTERFACE,
+                                                       "This MMS cannot be marked read!");
++          return;
+         }
+ 
+       g_key_file_set_boolean (meta, "info", "read", TRUE);
+-- 
+2.53.0
+

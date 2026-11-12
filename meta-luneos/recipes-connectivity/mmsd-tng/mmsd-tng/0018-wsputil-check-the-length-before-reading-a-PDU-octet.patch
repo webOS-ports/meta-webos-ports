@@ -1,0 +1,209 @@
+From 186edd8e5a6f4218a52e5370fab89a738cfef560 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 14:09:10 +0100
+Subject: [PATCH] wsputil: check the length before reading a PDU octet
+
+wsp_decode_integer() and wsp_decode_field() read the first octet of
+their input without checking there is one. The header iterator read
+one octet past the end when the headers end in a code page shift, and
+the parameter iterator read the value of a typed parameter when the
+parameters end right after its token. All of these are reads past the
+end of a PDU that comes from a WAP push or from the MMSC.
+
+wsp_decode_field() checked a Length-quote length with
+"pdu + len > end". On a 32-bit system a length close to 4 GiB wraps
+the pointer and the check passes, so a field longer than the whole PDU
+was accepted. Compare the length with the octets that are left instead.
+
+The Padding and Sec parameter values were read from the octet after
+the value.
+
+Add tests that decode these inputs from heap buffers of exactly their
+length.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/wsputil.c       | 43 +++++++++++++++++++++-----------
+ unit/test-wsputil.c | 60 +++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 89 insertions(+), 14 deletions(-)
+
+diff --git a/src/wsputil.c b/src/wsputil.c
+index d3c3ddc..6d729c1 100644
+--- a/src/wsputil.c
++++ b/src/wsputil.c
+@@ -398,6 +398,9 @@ wsp_decode_integer (const unsigned char *pdu,
+   unsigned int i;
+   unsigned int count;
+ 
++  if (len == 0)
++    return FALSE;
++
+   if (pdu[0] & 0x80)
+     {
+       var = pdu[0] & 0x7f;
+@@ -443,12 +446,15 @@ wsp_decode_field (const unsigned char *pdu,
+   enum wsp_value_type value;
+   unsigned int consumed;
+ 
++  if (max == 0)
++    return FALSE;
++
+   if (*pdu <= 30)
+     {
+       len = *pdu;
+       pdu++;
+ 
+-      if (pdu + len > end)
++      if (len > (unsigned int) (end - pdu))
+         return FALSE;
+ 
+       value = WSP_VALUE_TYPE_LONG;
+@@ -471,7 +477,7 @@ wsp_decode_field (const unsigned char *pdu,
+ 
+       pdu += consumed;
+ 
+-      if (pdu + len > end)
++      if (len > (unsigned int) (end - pdu))
+         return FALSE;
+ 
+       value = WSP_VALUE_TYPE_LONG;
+@@ -823,7 +829,7 @@ wsp_header_iter_next (struct wsp_header_iter *iter)
+    * Well-known-field-name = Short-integer
+    * Application-specific-value = Text-string
+    */
+-  while (*pdu == 127 || (*pdu >= 1 && *pdu <= 31))
++  while (pdu < end && (*pdu == 127 || (*pdu >= 1 && *pdu <= 31)))
+     {
+       if (iter->flags & WSP_HEADER_ITER_FLAG_REJECT_CP)
+         return FALSE;
+@@ -1106,6 +1112,10 @@ wsp_parameter_iter_next (struct wsp_parameter_iter *pi,
+     {
+       pdu += consumed;
+ 
++      /* Every typed parameter has a value of at least one octet */
++      if (pdu >= end)
++        return FALSE;
++
+       switch (token)
+         {
+         case WSP_PARAMETER_TYPE_LEVEL:
+@@ -1190,20 +1200,25 @@ wsp_parameter_iter_next (struct wsp_parameter_iter *pi,
+ 
+         case WSP_PARAMETER_TYPE_PADDING:
+         case WSP_PARAMETER_TYPE_SEC:
+-          if ((*pdu & 0x80) == 0)
+-            return FALSE;
++          {
++            unsigned int i;
+ 
+-          pdu += 1;
+-          pi->pos = pdu - pi->pdu;
++            if ((*pdu & 0x80) == 0)
++              return FALSE;
+ 
+-          if (out)
+-            {
+-              out->type = token;
+-              out->value = WSP_PARAMETER_VALUE_INT;
+-              out->integer = *pdu & 0x7f;
+-            }
++            i = *pdu & 0x7f;
++            pdu += 1;
++            pi->pos = pdu - pi->pdu;
+ 
+-          return TRUE;
++            if (out)
++              {
++                out->type = token;
++                out->value = WSP_PARAMETER_VALUE_INT;
++                out->integer = i;
++              }
++
++            return TRUE;
++          }
+ 
+         case WSP_PARAMETER_TYPE_CREATION_DATE:
+         case WSP_PARAMETER_TYPE_MODIFICATION_DATE:
+diff --git a/unit/test-wsputil.c b/unit/test-wsputil.c
+index 2786b73..ba12f76 100644
+--- a/unit/test-wsputil.c
++++ b/unit/test-wsputil.c
+@@ -494,6 +494,62 @@ test_decode_quoted_string_unterminated (void)
+   g_assert_null (wsp_decode_quoted_string (pdu, sizeof (cid), NULL));
+ }
+ 
++static void
++test_decode_short_input (void)
++{
++  static const guint8 shift[] = { 0x01 };
++  static const guint8 shift127[] = { 0x7f };
++  /* Length-quote with a uintvar length far beyond the buffer */
++  static const guint8 big_field[] = { 0x1f, 0x8f, 0xff, 0xff, 0xff, 0x7f, 0x41 };
++  g_autofree guint8 *pdu1 = exact_copy (shift, sizeof (shift));
++  g_autofree guint8 *pdu2 = exact_copy (shift127, sizeof (shift127));
++  g_autofree guint8 *pdu3 = exact_copy (big_field, sizeof (big_field));
++  struct wsp_header_iter iter;
++  enum wsp_value_type type;
++  const void *val;
++  unsigned int v, consumed;
++
++  /* Nothing left to decode */
++  g_assert_false (wsp_decode_integer (NULL, 0, &v, &consumed));
++  g_assert_false (wsp_decode_field (NULL, 0, &type, &val, &v, &consumed));
++
++  /* A code page shift at the end of the headers */
++  wsp_header_iter_init (&iter, pdu1, sizeof (shift), 0);
++  g_assert_false (wsp_header_iter_next (&iter));
++
++  wsp_header_iter_init (&iter, pdu2, sizeof (shift127), 0);
++  g_assert_false (wsp_header_iter_next (&iter));
++
++  g_assert_false (wsp_decode_field (pdu3, sizeof (big_field), &type, &val,
++                                    &v, &consumed));
++}
++
++static void
++test_parameter_iter_bounds (void)
++{
++  /* Padding = 5, followed by an octet outside the parameters */
++  static const guint8 padding[] = { 0x88, 0x85, 0x80 };
++  /* A Type and a Level parameter token without their value */
++  static const guint8 type_only[] = { 0x83 };
++  static const guint8 level_only[] = { 0x82 };
++  g_autofree guint8 *pdu1 = exact_copy (type_only, sizeof (type_only));
++  g_autofree guint8 *pdu2 = exact_copy (level_only, sizeof (level_only));
++  struct wsp_parameter_iter pi;
++  struct wsp_parameter param;
++
++  wsp_parameter_iter_init (&pi, padding, 2);
++  g_assert_true (wsp_parameter_iter_next (&pi, &param));
++  g_assert_cmpint (param.type, ==, WSP_PARAMETER_TYPE_PADDING);
++  g_assert_cmpuint (param.integer, ==, 5);
++  g_assert_cmpuint (pi.pos, ==, 2);
++
++  wsp_parameter_iter_init (&pi, pdu1, sizeof (type_only));
++  g_assert_false (wsp_parameter_iter_next (&pi, &param));
++
++  wsp_parameter_iter_init (&pi, pdu2, sizeof (level_only));
++  g_assert_false (wsp_parameter_iter_next (&pi, &param));
++}
++
+ int
+ main (int    argc,
+       char **argv)
+@@ -525,6 +581,10 @@ main (int    argc,
+                    test_decode_text_filter);
+   g_test_add_func ("/wsputil/Decode unterminated Quoted-string",
+                    test_decode_quoted_string_unterminated);
++  g_test_add_func ("/wsputil/Decode short input",
++                   test_decode_short_input);
++  g_test_add_func ("/wsputil/Parameter iter bounds",
++                   test_parameter_iter_bounds);
+ 
+   return g_test_run ();
+ }
+-- 
+2.53.0
+

@@ -1,0 +1,301 @@
+From 7587121a4081fdef612ae41bab4920ec4e913bae Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 13:15:52 +0100
+Subject: [PATCH] service: try every address the MMSC resolves to
+
+resolve_host_ares() and resolve_host_systemd() keep only the first
+address of the answer, so a request is always sent to that one address,
+and a retry resolves the name again and gets the same address back.
+When it is unreachable the request fails every attempt, even though the
+name has others that work.
+
+That is the normal case on some bearers: which address family reaches
+the MMSC depends on the bearer, not on the order the resolver returns
+them in. mmsd4ofono logged it on US Mobile/T-Mobile with an IPv6-only
+MMS PDN, where the three synthesized IPv6 addresses each timed out and
+only the fourth, IPv4, address answered (through the CLAT).
+
+Return every address from both resolvers, and when a request fails to
+reach the server, retry it on the next address before counting it as a
+failed attempt. Only once all addresses have failed does the attempt
+count, so MAX_ATTEMPTS still bounds the number of rounds.
+
+resolve_host_systemd() also no longer reads element 0 of an answer
+without checking it has one, and it checks that the address length
+matches the family before inet_ntop() reads it.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/service.c | 135 +++++++++++++++++++++++++++++++++-----------------
+ 1 file changed, 90 insertions(+), 45 deletions(-)
+
+diff --git a/src/service.c b/src/service.c
+index 46212d1..24c35cb 100644
+--- a/src/service.c
++++ b/src/service.c
+@@ -151,6 +151,9 @@ struct mms_request
+   int fd;
+   guint16 status;
+   guint16 attempt;
++  /* Which of the addresses the host resolved to this attempt uses */
++  guint address_index;
++  guint n_addresses;
+   struct mms_service *service;
+   gulong soupmessage_network_event_signal_id;
+   mms_request_result_cb_t result_cb;
+@@ -1227,23 +1230,23 @@ send_message_get_args (GVariant           *parameters,
+   return TRUE;
+ }
+ 
+-static gchar *
++/*
++ * The lookups below return every address the name resolves to, in the
++ * order the resolver gives them. Which of them is reachable depends on
++ * the bearer: an IPv6-only MMS bearer may reach the IPv4 addresses only
++ * through a CLAT, and some bearers have no route to the carrier's NAT64
++ * prefix. Callers try them in turn.
++ */
++static GStrv
+ resolve_host_systemd (const char         *host,
+                       struct mms_service *service)
+ {
+-  gchar *host_ip = NULL;
+   g_autoptr(GError) error = NULL;
+   g_autoptr(GVariant) result = NULL;
+   g_autoptr(GVariant) addresses = NULL;
+-  g_autoptr(GVariant) first_address = NULL;
+-  g_autoptr(GVariant) first_address_bytes = NULL;
+-  GVariantIter iter;
+-  guchar addr_byte;
+-  int first_address_family;
+-
+-  unsigned char buf[sizeof(struct in6_addr)];
+-  size_t i = 0;
+-  char str[INET6_ADDRSTRLEN] = { '\0' };
++  g_autoptr(GStrvBuilder) builder = NULL;
++  GVariantIter addr_iter;
++  GVariant *address;
+ 
+   DBG ("%s", __func__);
+ 
+@@ -1263,28 +1266,36 @@ resolve_host_systemd (const char         *host,
+       return NULL;
+     }
+ 
++  builder = g_strv_builder_new ();
+   addresses = g_variant_get_child_value (result, 0);
+-  first_address = g_variant_get_child_value (addresses, 0);
+-
+-  g_variant_get_child (first_address, 1, "i", &first_address_family);
++  g_variant_iter_init (&addr_iter, addresses);
+ 
+-  first_address_bytes = g_variant_get_child_value (first_address, 2);
+-
+-  // iterate over GVariant byte array to convert to char array
+-  g_variant_iter_init (&iter, first_address_bytes);
+-  while (g_variant_iter_next (&iter, "y", &addr_byte) && (i < sizeof(struct in6_addr)))
++  /* a(iiay): interface index, address family, address bytes */
++  while ((address = g_variant_iter_next_value (&addr_iter)))
+     {
+-      buf[i] = addr_byte;
+-      i++;
+-    }
+-
+-  inet_ntop (first_address_family, buf, str, INET6_ADDRSTRLEN);
++      g_autoptr(GVariant) bytes = NULL;
++      char str[INET6_ADDRSTRLEN] = { '\0' };
++      const guchar *data;
++      gsize len;
++      int family;
++
++      g_variant_get_child (address, 1, "i", &family);
++      bytes = g_variant_get_child_value (address, 2);
++      g_variant_unref (address);
++
++      data = g_variant_get_fixed_array (bytes, &len, sizeof (guchar));
++      if (!((family == AF_INET && len == sizeof (struct in_addr)) ||
++            (family == AF_INET6 && len == sizeof (struct in6_addr))))
++        continue;
+ 
+-  host_ip = g_strdup ((const gchar *) &str);
++      if (inet_ntop (family, data, str, sizeof (str)) == NULL)
++        continue;
+ 
+-  DBG ("systemd-resolved host ip: %s", host_ip);
++      DBG ("systemd-resolved host ip: %s", str);
++      g_strv_builder_add (builder, str);
++    }
+ 
+-  return host_ip;
++  return g_strv_builder_end (builder);
+ }
+ 
+ /* Callback that is called when DNS query is finished */
+@@ -1294,14 +1305,14 @@ resolve_callback (void                  *arg,
+                   int                    timeouts,
+                   struct  ares_addrinfo *result)
+ {
+-  char **host_ip = (char **)arg;
++  GStrvBuilder *builder = arg;
+ 
+   DBG ("Result: %s, timeouts: %d", ares_strerror(status), timeouts);
+ 
+   if (result) {
+     struct ares_addrinfo_node *node;
+     for (node = result->nodes; node != NULL; node = node->ai_next) {
+-      char        addr_buf[64] = "";
++      char        addr_buf[INET6_ADDRSTRLEN] = "";
+       const void *ptr          = NULL;
+ 
+       if (node->ai_family == AF_INET) {
+@@ -1318,10 +1329,8 @@ resolve_callback (void                  *arg,
+ 
+       ares_inet_ntop(node->ai_family, ptr, addr_buf, sizeof(addr_buf));
+       if (*addr_buf) {
+-        /* If you reached here, you found an ip. Don't look for anymore. */
+         DBG ("Addr: %s", addr_buf);
+-        *host_ip = g_strdup (addr_buf);
+-        break;
++        g_strv_builder_add (builder, addr_buf);
+       }
+     }
+   }
+@@ -1330,7 +1339,7 @@ resolve_callback (void                  *arg,
+ }
+ 
+ /* Shamelessly taken from https://c-ares.org/docs.html#example */
+-static gchar *
++static GStrv
+ resolve_host_ares (const char         *host,
+                    struct mms_service *service)
+ {
+@@ -1339,7 +1348,8 @@ resolve_host_ares (const char         *host,
+   struct ares_options         options;
+   int                         optmask = 0;
+   struct ares_addrinfo_hints  hints;
+-  gchar                      *host_ip = NULL;
++  g_autoptr(GStrvBuilder)     builder = g_strv_builder_new ();
++  GStrv                       host_ips = NULL;
+   g_autofree gchar           *nsall_csv = NULL;
+ 
+   DBG ("%s", __func__);
+@@ -1400,32 +1410,42 @@ resolve_host_ares (const char         *host,
+   hints.ai_family = AF_UNSPEC;
+   hints.ai_flags  = ARES_AI_CANONNAME;
+   ares_getaddrinfo (channel, host, NULL, &hints, resolve_callback,
+-                    (void *)&host_ip);
++                    builder);
+ 
+   /* Wait until no more requests are left to be processed */
+   ares_queue_wait_empty (channel, -1);
+ 
+-  if (host_ip == NULL)
++  host_ips = g_strv_builder_end (builder);
++  if (host_ips[0] == NULL)
+     {
+       g_warning ("Failed to resolve '%s'", host);
+-      goto ares_out;
++      g_clear_pointer (&host_ips, g_strfreev);
+     }
+ 
+  ares_out:
+   ares_destroy (channel);
+   ares_library_cleanup();
+-  return host_ip;
++  return host_ips;
+ }
+ 
++/*
++ * Returns request_uri with its host replaced by the index'th address it
++ * resolves to (wrapping around), and sets *n_addresses to how many there
++ * are, so a caller can move on to the next address when one cannot be
++ * reached.
++ */
+ static gchar *
+ resolve_host (struct mms_service *service,
+-              const gchar        *request_uri)
++              const gchar        *request_uri,
++              guint               index,
++              guint              *n_addresses)
+ {
+   g_autoptr(GUri) uri = NULL;
+   g_autoptr(GUri) resolved_uri = NULL;
+-  g_autofree gchar *host_ip = NULL;
++  g_auto(GStrv) host_ips = NULL;
+   gchar *new_uri = NULL;
+   const gchar *host = NULL;
++  guint n_ips;
+ 
+   if (service->proxy_active == TRUE)
+     {
+@@ -1447,12 +1467,18 @@ resolve_host (struct mms_service *service,
+   host = g_uri_get_host (uri);
+ 
+   if (systemd_resolved_proxy != NULL && !service->force_c_ares)
+-    host_ip = resolve_host_systemd (host, service);
++    host_ips = resolve_host_systemd (host, service);
+   else
+-    host_ip = resolve_host_ares (host, service);
++    host_ips = resolve_host_ares (host, service);
+ 
+-  if (host_ip != NULL)
++  n_ips = host_ips ? g_strv_length (host_ips) : 0;
++  if (n_addresses)
++    *n_addresses = n_ips;
++  if (n_ips > 0)
+     {
++      const gchar *host_ip = host_ips[index % n_ips];
++
++      DBG ("Using address %u of %u: %s", index % n_ips + 1, n_ips, host_ip);
+       resolved_uri = soup_uri_copy (uri, SOUP_URI_HOST, host_ip, SOUP_URI_NONE);
+       new_uri = g_uri_to_string (resolved_uri);
+     }
+@@ -3672,6 +3698,24 @@ on_message_done (SoupSession  *session,
+       g_warning ("Fail to get data (http status = %03u)", request->status);
+       if (mms_requeue_request (request) == TRUE)
+         {
++          /*
++           * The MMSC (or proxy) could not be reached at this address.
++           * Try the next one it resolved to before counting this as a
++           * failed attempt: which address family works depends on the
++           * bearer, and the reachable one may not be first.
++           */
++          if (error != NULL &&
++              !g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED) &&
++              request->address_index + 1 < request->n_addresses)
++            {
++              request->address_index++;
++              request->attempt--;
++              DBG ("Trying address %u of %u", request->address_index + 1,
++                   request->n_addresses);
++            }
++          else
++            request->address_index = 0;
++
+           DBG ("On attempt %d", request->attempt);
+           if (request->attempt >= MAX_ATTEMPTS)
+             {
+@@ -3829,7 +3873,8 @@ create_new_web_message (struct mms_request *request,
+   const char *host = NULL;
+   int port;
+ 
+-  uri = resolve_host (request->service, location);
++  uri = resolve_host (request->service, location, request->address_index,
++                     &request->n_addresses);
+   if (uri == NULL)
+     {
+       g_warning ("Failed to resolve DNS");
+@@ -4414,7 +4459,7 @@ mms_service_bearer_notify (struct mms_service *service,
+       if (!g_hostname_is_ip_address (tokens[0]))
+         {
+           DBG ("Hostname is not an IP address!");
+-          new_uri = resolve_host (service, uri);
++          new_uri = resolve_host (service, uri, 0, NULL);
+           DBG ("Proxy URL resolved: %s", new_uri);
+         }
+       else
+-- 
+2.53.0
+

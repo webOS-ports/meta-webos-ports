@@ -1,0 +1,126 @@
+From f7b7d1476cb0af770ec7e11c8c10d9a4d33f0934 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 14:10:14 +0100
+Subject: [PATCH] wsputil: check multipart part lengths separately
+
+wsp_multipart_iter_next() checked a part with
+"pdu + headers_len + body_len > end". Both lengths are uintvars from
+the PDU, and on a 32-bit system a large DataLen wraps the pointer, so a
+part far longer than the PDU was accepted. mmsutil.c turns the part
+into an attachment with that offset and length, and service.c reads
+that range of the stored message.
+
+The part's Content-Type was decoded with the rest of the PDU as its
+limit instead of HeadersLen. A Content-Type longer than HeadersLen made
+"headers_len - consumed" wrap, and the part's header iterator then ran
+past the end of the PDU.
+
+Check HeadersLen and DataLen against the octets that are left, one at
+a time, and decode the Content-Type inside HeadersLen. The wrap test
+only fails without the fix on a 32-bit target.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/wsputil.c       | 10 ++++++---
+ unit/test-wsputil.c | 53 +++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 60 insertions(+), 3 deletions(-)
+
+diff --git a/src/wsputil.c b/src/wsputil.c
+index e7316b3..78f4208 100644
+--- a/src/wsputil.c
++++ b/src/wsputil.c
+@@ -1023,11 +1023,15 @@ wsp_multipart_iter_next (struct wsp_multipart_iter *mi)
+ 
+   pdu += consumed;
+ 
+-  if (pdu + headers_len + body_len > end)
++  /* Check each length on its own, so that their sum cannot wrap */
++  if (headers_len > (unsigned int) (end - pdu))
+     return FALSE;
+ 
+-  /* Consume the Content-Type value */
+-  if (wsp_decode_field (pdu, end - pdu,
++  if (body_len > (unsigned int) (end - pdu) - headers_len)
++    return FALSE;
++
++  /* Consume the Content-Type value, which is part of the headers */
++  if (wsp_decode_field (pdu, headers_len,
+                         NULL, NULL, NULL, &consumed) == FALSE)
+     return FALSE;
+ 
+diff --git a/unit/test-wsputil.c b/unit/test-wsputil.c
+index fd40503..70a9468 100644
+--- a/unit/test-wsputil.c
++++ b/unit/test-wsputil.c
+@@ -577,6 +577,57 @@ test_decode_content_type_bounds (void)
+                                            &consumed, &param_len));
+ }
+ 
++static gboolean
++multipart_first_part (const guint8 *data,
++                      gsize         len)
++{
++  g_autofree guint8 *pdu = exact_copy (data, len);
++  struct wsp_header_iter hi;
++  struct wsp_multipart_iter mi;
++  const guint8 *headers, *body;
++
++  wsp_header_iter_init (&hi, pdu, len,
++                        WSP_HEADER_ITER_FLAG_DETECT_MMS_MULTIPART);
++  g_assert_false (wsp_header_iter_next (&hi));
++  g_assert_true (wsp_header_iter_is_multipart (&hi));
++  g_assert_true (wsp_multipart_iter_init (&mi, &hi, NULL, NULL));
++
++  if (!wsp_multipart_iter_next (&mi))
++    return FALSE;
++
++  /* Whatever was accepted must lie inside the buffer */
++  headers = mi.headers;
++  body = mi.body;
++  g_assert_true (headers >= pdu && mi.headers_len <= (gsize) (pdu + len - headers));
++  g_assert_true (body >= pdu && mi.body_len <= (gsize) (pdu + len - body));
++
++  return TRUE;
++}
++
++static void
++test_multipart_iter_bounds (void)
++{
++  /*
++   * Content-Type multipart/mixed, 1 part, HeadersLen 1 and DataLen
++   * 0xffffffff, so that HeadersLen + DataLen wraps to 0.
++   */
++  static const guint8 wrap[] = {
++    0x84, 0xa3, 0x01, 0x01, 0x8f, 0xff, 0xff, 0xff, 0x7f, 0x83
++  };
++  /* HeadersLen 1, but the part's Content-Type is 4 octets long */
++  static const guint8 ct_overrun[] = {
++    0x84, 0xa3, 0x01, 0x01, 0x00, 'a', 'b', 0x00
++  };
++  /* A well-formed part: text/plain, body "hi" */
++  static const guint8 good[] = {
++    0x84, 0xa3, 0x01, 0x01, 0x02, 0x83, 'h', 'i'
++  };
++
++  g_assert_false (multipart_first_part (wrap, sizeof (wrap)));
++  g_assert_false (multipart_first_part (ct_overrun, sizeof (ct_overrun)));
++  g_assert_true (multipart_first_part (good, sizeof (good)));
++}
++
+ int
+ main (int    argc,
+       char **argv)
+@@ -614,6 +665,8 @@ main (int    argc,
+                    test_parameter_iter_bounds);
+   g_test_add_func ("/wsputil/Decode Content-Type bounds",
+                    test_decode_content_type_bounds);
++  g_test_add_func ("/wsputil/Multipart iter bounds",
++                   test_multipart_iter_bounds);
+ 
+   return g_test_run ();
+ }
+-- 
+2.53.0
+

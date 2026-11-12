@@ -1,0 +1,258 @@
+From ca2400d4e8f701546e3c56c478e504effd5227af Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 13:26:50 +0100
+Subject: [PATCH] mmsutil: decode the From header within its length
+
+extract_from() reads the From-value without checking it against the
+length of the header:
+
+ - an empty From-value makes it read p[0] past the header;
+ - after the Address-present-token it reads p[0] again without checking
+   that anything is left;
+ - a Short-length Encoded-string-value is taken at its word: the length
+   is not checked against what remains, the Char-set is assumed to be one
+   octet, and a length of 0 wraps val_len around before it is passed to
+   wsp_decode_text();
+ - for Length-quote Length it decodes the uintvar starting at the
+   Length-quote octet itself, so the length is always read as 31 and the
+   text starts inside the Length.
+
+Each of these makes it read past the end of the header, and the PDU,
+when the From header is last.
+
+Decode the Value-length properly, check it against the octets left, and
+decode the Char-set and text with decode_encoded_string_with_mib_enum(),
+as extract_encoded_text() does, so a From in a charset other than UTF-8
+is converted rather than passed through. remove_address_type_suffix()
+only duplicated its argument and has no other caller, so it goes.
+
+Unit tests decode M-Notification.ind PDUs whose From header ends the
+buffer, for each form of the From-value. Before this change the four
+malformed ones read past the buffer, and the Length-quote form fails to
+decode.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/mmsutil.c       | 74 +++++++++++++++++++++--------------------
+ unit/test-mmsutil.c | 80 +++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 119 insertions(+), 35 deletions(-)
+
+diff --git a/src/mmsutil.c b/src/mmsutil.c
+index 74a547e..7111be7 100644
+--- a/src/mmsutil.c
++++ b/src/mmsutil.c
+@@ -247,19 +247,6 @@ extract_text (struct wsp_header_iter *iter,
+   return TRUE;
+ }
+ 
+-static char *
+-remove_address_type_suffix (const char *addr,
+-                            size_t      len)
+-{
+-  return g_strdup (addr);
+-/*	#define MMS_ADDR_SUFFIX_PUBLIC_LAND_MOBILE_NUMBER "/TYPE=PLMN"
+- *      if(g_str_has_suffix(addr, MMS_ADDR_SUFFIX_PUBLIC_LAND_MOBILE_NUMBER)) {
+- *              return g_strndup(addr, len - strlen(MMS_ADDR_SUFFIX_PUBLIC_LAND_MOBILE_NUMBER));
+- *      } else {
+- *              return g_strdup(addr);
+- *      }*/
+-}
+-
+ static char *
+ decode_encoded_string_with_mib_enum (const unsigned char *p,
+                                      unsigned int         l)
+@@ -491,9 +478,7 @@ extract_from (struct wsp_header_iter *iter,
+   char **out = user;
+   const unsigned char *p;
+   unsigned int l;
+-  const char *text;
+-  unsigned int val_len;
+-  unsigned int str_len;
++  char *text;
+ 
+   if (wsp_header_iter_get_val_type (iter) != WSP_VALUE_TYPE_LONG)
+     {
+@@ -511,6 +496,12 @@ extract_from (struct wsp_header_iter *iter,
+   /* Length-quote = val 31 */
+   /* Length = Uintvar-integer */
+ 
++  if (l == 0)
++    {
++      DBG ("empty From-value");
++      return FALSE;
++    }
++
+   if (p[0] != 128 && p[0] != 129)
+     {
+       DBG ("not 128 or 129");
+@@ -524,36 +515,49 @@ extract_from (struct wsp_header_iter *iter,
+     }
+   p += 1; l -= 1;       /* token has been handled */
+ 
+-  val_len = l;
+-  if (p[0] < 31)         /*short-length */
++  if (l == 0)
+     {
+-      val_len = p[0];
+-      p += 2;
+-      val_len -= 1;           /* count encoding against val_len */
++      DBG ("Address-present-token without an address");
++      return FALSE;
+     }
+-  else if (p[0] == 31)         /* length quote then long length */
++
++  if (p[0] <= 31)
+     {
+-      unsigned int consumed = 0;
+-      gboolean ok = wsp_decode_uintvar (p, l, &val_len, &consumed);
+-      if (!ok)
+-        return FALSE;
+-      p += consumed;
+-      val_len -= 1;           /* count encoding against val_len */
+-    }
+-  str_len = val_len - 1;       /* NUL at the end is not counted by strlen() */
++      /* Value-length Char-set Text-string */
++      unsigned int val_len;
++      unsigned int consumed;
++
++      if (p[0] == 31)
++        {
++          if (wsp_decode_uintvar (p + 1, l - 1, &val_len, &consumed) == FALSE)
++            return FALSE;
+ 
+-  //DBG("trying to decode text of length %u: %*s", str_len, str_len, p);
+-  text = wsp_decode_text (p, val_len, NULL);
+-  //DBG("text=\"%s\"", text);
++          consumed += 1;
++        }
++      else {
++          val_len = p[0];
++          consumed = 1;
++        }
++
++      if (val_len == 0 || val_len > l - consumed)
++        {
++          DBG ("Value-length %u does not fit in %u octets", val_len, l - consumed);
++          return FALSE;
++        }
++
++      text = decode_encoded_string_with_mib_enum (p + consumed, val_len);
++    }
++  else
++    text = wsp_decode_text_dup (p, l);
+ 
+   if (text == NULL)
+     {
+-      DBG ("could not decode text of length %u: %*s", str_len, str_len, p);
++      DBG ("could not decode text of length %u: %.*s", l, (int) l, p);
+       return FALSE;
+     }
+ 
+   DBG ("Successfully decoded text!");
+-  *out = remove_address_type_suffix (text, str_len);
++  *out = text;
+ 
+   return TRUE;
+ }
+diff --git a/unit/test-mmsutil.c b/unit/test-mmsutil.c
+index d9d3ed3..1bf4b23 100644
+--- a/unit/test-mmsutil.c
++++ b/unit/test-mmsutil.c
+@@ -1072,6 +1072,80 @@ test_encode_mms (gconstpointer data)
+   g_assert (ret == TRUE);
+ }
+ 
++/*
++ * An M-Notification.ind whose From header is the last one, so that it
++ * ends the buffer: decoding it from a heap copy of exactly that length
++ * makes AddressSanitizer or valgrind catch a read past the header.
++ */
++static const guint8 ni_prefix[] = {
++  0x8c, 0x82,                         /* X-Mms-Message-Type: m-notification-ind */
++  0x98, '1', 0x00,                    /* X-Mms-Transaction-ID: 1 */
++  0x8d, 0x92,                         /* X-Mms-MMS-Version: 1.2 */
++  0x8a, 0x80,                         /* X-Mms-Message-Class: Personal */
++  0x8e, 0x01, 0x64,                   /* X-Mms-Message-Size: 100 */
++  0x88, 0x03, 0x81, 0x01, 0x3c,       /* X-Mms-Expiry: +60s */
++  0x83, 'h', 't', 't', 'p', ':', '/', '/', 'x', '/', 'y', 0x00,
++  0x89,                               /* From: */
++};
++
++struct from_test {
++  const guint8 *value;
++  gsize len;
++  gboolean decodes;
++  const char *from;
++};
++
++#define FROM_NUMBER '+', '1', '5', '5', '5', '1', '2', '3', '4', '5', '6', 0x00
++
++/* Address-present-token Text-string */
++static const guint8 from_text[] = { 0x0d, 0x80, FROM_NUMBER };
++/* Address-present-token Value-length Char-set(UTF-8) Text-string */
++static const guint8 from_utf8[] = { 0x0f, 0x80, 0x0d, 0xea, FROM_NUMBER };
++/* as above, with the Value-length as Length-quote Length */
++static const guint8 from_utf8_quote[] = { 0x10, 0x80, 0x1f, 0x0d, 0xea, FROM_NUMBER };
++/* Insert-address-token */
++static const guint8 from_insert[] = { 0x01, 0x81 };
++/* an empty From-value */
++static const guint8 from_empty[] = { 0x00 };
++/* Address-present-token and nothing else */
++static const guint8 from_token_only[] = { 0x01, 0x80 };
++/* an Encoded-string-value with a Value-length of 0 */
++static const guint8 from_zero_len[] = { 0x02, 0x80, 0x00 };
++/* an Encoded-string-value longer than the From-value */
++static const guint8 from_too_long[] = { 0x03, 0x80, 0x1e, 0xea };
++
++static const struct from_test from_tests[] = {
++  { from_text, sizeof (from_text), TRUE, "+1555123456" },
++  { from_utf8, sizeof (from_utf8), TRUE, "+1555123456" },
++  { from_utf8_quote, sizeof (from_utf8_quote), TRUE, "+1555123456" },
++  { from_insert, sizeof (from_insert), TRUE, NULL },
++  { from_empty, sizeof (from_empty), FALSE, NULL },
++  { from_token_only, sizeof (from_token_only), FALSE, NULL },
++  { from_zero_len, sizeof (from_zero_len), FALSE, NULL },
++  { from_too_long, sizeof (from_too_long), FALSE, NULL },
++};
++
++static void
++test_decode_from (gconstpointer data)
++{
++  const struct from_test *test = data;
++  gsize len = sizeof (ni_prefix) + test->len;
++  g_autofree guint8 *pdu = g_malloc (len);
++  struct mms_message *msg = g_new0 (struct mms_message, 1);
++  gboolean ret;
++
++  memcpy (pdu, ni_prefix, sizeof (ni_prefix));
++  memcpy (pdu + sizeof (ni_prefix), test->value, test->len);
++
++  ret = mms_message_decode (pdu, len, msg);
++
++  g_assert_cmpint (ret, ==, test->decodes);
++  if (ret)
++    g_assert_cmpstr (msg->ni.from, ==, test->from);
++
++  mms_message_free (msg);
++}
++
+ int
+ main (int    argc,
+       char **argv)
+@@ -1145,5 +1219,11 @@ main (int    argc,
+   g_test_add_data_func ("/mmsutil/Encode MMS M-SendReq 2",
+                         &mms_m_send_req_test_2, test_encode_mms);
+ 
++  for (gsize i = 0; i < G_N_ELEMENTS (from_tests); i++)
++    {
++      g_autofree char *name = g_strdup_printf ("/mmsutil/Decode From header %" G_GSIZE_FORMAT, i + 1);
++      g_test_add_data_func (name, &from_tests[i], test_decode_from);
++    }
++
+   return g_test_run ();
+ }
+-- 
+2.53.0
+

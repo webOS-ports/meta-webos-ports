@@ -3,11 +3,11 @@ SECTION = "webos/services"
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
 
-DEPENDS = "luna-service2 json-c glib-2.0 luna-prefs glib-2.0-native python3-packaging-native"
-RRECOMMENDS:${PN} += "${VIRTUAL-RUNTIME_ofono} mmsd"
+DEPENDS = "luna-service2 json-c glib-2.0 luna-prefs glib-2.0-native python3-packaging-native gdk-pixbuf"
+RRECOMMENDS:${PN} += "${VIRTUAL-RUNTIME_ofono} mmsd-tng"
 
 PV = "0.1.0-1+git"
-SRCREV = "b0d345eed9d1c774f4e7e4cfe0ef6078a3614093"
+SRCREV = "d87cdf3bb230bc2cc8806c53e199936f6b8ebd07"
 
 inherit webos_ports_ose_repo
 inherit webos_filesystem_paths

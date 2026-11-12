@@ -1,0 +1,88 @@
+From 6797d0434ff8e5fd3d53fccdd00a1556e318d933 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 14:12:23 +0100
+Subject: [PATCH] mmsutil: don't leak a repeated Content-ID
+
+attachment_parse_headers() stored every Content-ID header of a part in
+the same pointer, so each one after the first leaked the string before
+it, for every such message mmsd decodes.
+
+Keep the first Content-ID, as mms_parse_headers() keeps the first of a
+repeated message header, and add a test.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/mmsutil.c       |  4 ++++
+ unit/test-mmsutil.c | 32 ++++++++++++++++++++++++++++++++
+ 2 files changed, 36 insertions(+)
+
+diff --git a/src/mmsutil.c b/src/mmsutil.c
+index 9ec40ed..b5e4a1c 100644
+--- a/src/mmsutil.c
++++ b/src/mmsutil.c
+@@ -1122,6 +1122,10 @@ attachment_parse_headers (struct wsp_header_iter *iter,
+       switch (h)
+         {
+         case MMS_PART_HEADER_CONTENT_ID:
++          /* Keep the first, as mms_parse_headers() does */
++          if (part->content_id != NULL)
++            break;
++
+           if (extract_content_id (iter, &part->content_id)
+               == FALSE)
+             return FALSE;
+diff --git a/unit/test-mmsutil.c b/unit/test-mmsutil.c
+index 6e450b3..60993eb 100644
+--- a/unit/test-mmsutil.c
++++ b/unit/test-mmsutil.c
+@@ -1167,6 +1167,36 @@ test_create_smil (void)
+   g_assert_nonnull (strstr (smil, "<audio src=\"audio.amr\""));
+ }
+ 
++/*
++ * M-Retrieve.conf with one text/plain part that carries two Content-ID
++ * headers, <a> and <b>.
++ */
++static const guint8 two_content_ids[] = {
++  0x8c, 0x84, 0x98, 0x31, 0x00, 0x8d, 0x90, 0x85,
++  0x01, 0x01, 0x84, 0xa3, 0x01, 0x0d, 0x02, 0x83,
++  0xc0, 0x22, 0x3c, 0x61, 0x3e, 0x00, 0xc0, 0x22,
++  0x3c, 0x62, 0x3e, 0x00, 0x68, 0x69
++};
++
++static void
++test_decode_two_content_ids (void)
++{
++  g_autofree guint8 *pdu = g_memdup2 (two_content_ids, sizeof (two_content_ids));
++  struct mms_message *msg = g_new0 (struct mms_message, 1);
++  struct mms_attachment *part;
++
++  g_assert_true (mms_message_decode (pdu, sizeof (two_content_ids), msg));
++  g_assert_nonnull (msg->attachments);
++
++  part = msg->attachments->data;
++  g_assert_cmpstr (part->content_type, ==, "text/plain");
++  g_assert_cmpstr (part->content_id, ==, "<a>");
++  g_assert_cmpuint (part->length, ==, 2);
++
++  /* LeakSanitizer reports the second Content-ID if it leaks */
++  mms_message_free (msg);
++}
++
+ /*
+  * A Send.req whose Content-Type is not a "Content-Type:" text header
+  * makes the Content-Type encoder fail, so mms_encode_headers() leaves
+@@ -1278,6 +1308,8 @@ main (int    argc,
+ 
+   g_test_add_func ("/mmsutil/Encode bad Content-Type",
+                    test_encode_bad_content_type);
++  g_test_add_func ("/mmsutil/Decode two Content-IDs",
++                   test_decode_two_content_ids);
+ 
+   return g_test_run ();
+ }
+-- 
+2.53.0
+
