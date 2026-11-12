@@ -14,7 +14,7 @@ webos_enable_devmode() {
     touch ${IMAGE_ROOTFS}/.writable_image
 }
 
-ROOTFS_POSTPROCESS_COMMAND += "webos_enable_devmode;"
+ROOTFS_POSTPROCESS_COMMAND += "webos_enable_devmode"
 
 # journald ships Storage=auto, which keeps the journal in RAM unless
 # /var/log/journal already exists - so on a device that never reaches a usable
@@ -48,7 +48,7 @@ webos_enable_persistent_journal() {
     install -d ${IMAGE_ROOTFS}/var/log/journal
 }
 
-ROOTFS_POSTPROCESS_COMMAND += "webos_enable_persistent_journal;"
+ROOTFS_POSTPROCESS_COMMAND += "webos_enable_persistent_journal"
 
 MESA_PKGS = " \
     libegl-mesa \
