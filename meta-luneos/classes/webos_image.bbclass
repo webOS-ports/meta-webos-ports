@@ -41,7 +41,7 @@ IMAGE_INSTALL ?= "${WEBOS_IMAGE_BASE_INSTALL}"
 IMAGE_CLASSES += "webos_ls2_conf_validate"
 
 # Add ${webos_sysconfdir}/build/image-name during image construction that contains the image name
-ROOTFS_POSTPROCESS_COMMAND += "rootfs_set_image_name ; clean_python_installation ; verify_acg ; "
+ROOTFS_POSTPROCESS_COMMAND += "rootfs_set_image_name clean_python_installation verify_acg"
 
 # Can be used to echo image name to ${webos_sysconfdir}/build/image-name
 rootfs_set_image_name () {
