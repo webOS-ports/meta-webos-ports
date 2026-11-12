@@ -1,0 +1,107 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 07:49:47 +0100
+Subject: [PATCH] [gbinder-radio] Push the queue when a waiting group stops
+ waiting
+
+While a request group waits to become the owner, requests outside of
+it aren't submitted. When the group called radio_request_group_unblock()
+before it got there, it was removed from the owner queue, but nothing
+submitted the requests that had been held back for it. They stayed in
+the queue until something else pushed it (a response, a timeout), or
+timed out themselves.
+
+Push the queue (and update the timer) after taking a group out of the
+owner queue.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/mer-hybris/libgbinder-radio/pull/40]
+---
+ src/radio_base.c               |  7 +++++-
+ unit/unit_client/unit_client.c | 44 ++++++++++++++++++++++++++++++++++
+ 2 files changed, 50 insertions(+), 1 deletion(-)
+
+diff --git a/src/radio_base.c b/src/radio_base.c
+index 090eee8..9af0252 100644
+--- a/src/radio_base.c
++++ b/src/radio_base.c
+@@ -811,8 +811,13 @@ radio_base_unblock(
+         if (radio_base_submit_queued_requests(self) || !priv->owner) {
+             radio_base_reset_timeout(self);
+         }
+-    } else {
++    } else if (g_slist_find(priv->owner_queue, group)) {
++        /*
++         * The requests that couldn't be submitted because this group
++         * was waiting to become the owner may be submittable now.
++         */
+         priv->owner_queue = g_slist_remove(priv->owner_queue, group);
++        radio_base_submit_requests(self);
+     }
+ }
+ 
+diff --git a/unit/unit_client/unit_client.c b/unit/unit_client/unit_client.c
+index a5888dc..64c6ec3 100644
+--- a/unit/unit_client/unit_client.c
++++ b/unit/unit_client/unit_client.c
+@@ -1872,6 +1872,49 @@ test_block_fail_queue(
+     test_simple_cleanup(&test);
+ }
+ 
++/*==========================================================================*
++ * block_cancel
++ *
++ * A group waiting to become the owner gives up. The requests that had
++ * to wait for it are submitted right away.
++ *==========================================================================*/
++
++static
++void
++test_block_cancel(
++    void)
++{
++    TestSimple test;
++    RadioClient* client = test_simple_init(&test);
++    RadioRequestGroup* group = radio_request_group_new(client);
++    RadioRequest* req1 = radio_request_new(client, IGNORE_REQ, NULL,
++        NULL, NULL, NULL);
++    RadioRequest* req2 = radio_request_new(client, IGNORE_REQ, NULL,
++        NULL, NULL, NULL);
++
++    test_common_connected(&test.common);
++    g_assert(radio_request_submit(req1));
++    g_assert_cmpint(req1->state, == ,RADIO_REQUEST_STATE_PENDING);
++    g_assert_cmpint(radio_request_group_block(group), ==,
++        RADIO_BLOCK_QUEUED);
++
++    /* Has to wait for the group */
++    g_assert(radio_request_submit(req2));
++    g_assert_cmpint(req2->state, == ,RADIO_REQUEST_STATE_QUEUED);
++
++    /* Not anymore */
++    radio_request_group_unblock(group);
++    g_assert_cmpint(radio_request_group_block_status(group), ==,
++        RADIO_BLOCK_NONE);
++    g_assert_cmpint(req2->state, == ,RADIO_REQUEST_STATE_PENDING);
++
++    /* Cleanup */
++    radio_request_drop(req1);
++    radio_request_drop(req2);
++    radio_request_group_unref(group);
++    test_simple_cleanup(&test);
++}
++
+ /*==========================================================================*
+  * block_retry
+  *==========================================================================*/
+@@ -2607,6 +2650,7 @@ int main(int argc, char* argv[])
+     g_test_add_func(TEST_("block/2"), test_block2);
+     g_test_add_func(TEST_("block/timeout"), test_block_timeout);
+     g_test_add_func(TEST_("block/retry"), test_block_retry);
++    g_test_add_func(TEST_("block/cancel"), test_block_cancel);
+     g_test_add_data_func(TEST_("block/fail_queue/1"),
+         GINT_TO_POINTER(1), test_block_fail_queue);
+     g_test_add_data_func(TEST_("block/fail_queue/2"),
+-- 
+2.53.0
+
