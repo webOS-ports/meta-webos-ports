@@ -3,8 +3,9 @@ SECTION = "webos/apps"
 LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-3.0-only;md5=c79ff39f19dfec6d293b95dea7b07891"
 
+PE = "2"
 PV = "0.3.0-7+git"
-SRCREV = "e61a296631c00e4c785e333987a031fe5c19d3ed"
+SRCREV = "bbe5b0192fa23e452ce089355549f0d44ad820d6"
 
 DEPENDS += "qtbase qtdeclarative qtdeclarative-native"
 

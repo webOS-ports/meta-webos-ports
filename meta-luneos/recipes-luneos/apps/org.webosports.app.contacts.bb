@@ -11,7 +11,7 @@ inherit webos_application
 inherit webos_app
 
 PV = "0.0.1+git"
-SRCREV = "ba8f4819606820dbe381ed8e0259ddc7c258094b"
+SRCREV = "dd19509dc60c05ca8422d01a266ce96910a88622"
 
 # For compatibility reasons we have to name the app internally as the old palm contacts
 # app. Maybe possible to switch that later.

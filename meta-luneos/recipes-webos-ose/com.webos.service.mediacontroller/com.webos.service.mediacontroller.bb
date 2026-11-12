@@ -12,11 +12,11 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib"
 
-SRCREV = "23947e3f9c7d3b05548baa2247ce021f0986393d"
+SRCREV = "b5af8223a0e9c7c6b2868f87a6a655a93434c51b"
 
 PV = "1.0.0-41"
 
-PR = "r10"
+PR = "r11"
 
 inherit webos_component
 inherit webos_cmake

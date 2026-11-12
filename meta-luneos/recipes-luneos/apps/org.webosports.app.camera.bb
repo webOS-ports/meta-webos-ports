@@ -6,8 +6,9 @@ LIC_FILES_CHKSUM = " \
 "
 
 PV = "0.0.2-1+git"
+PE = "1"
 PR = "r1"
-SRCREV = "1eb1f978d3ecf444e5f4e75c4889dc8db7d86466"
+SRCREV = "a858b812ef0155902125f83a902b426ab8deb2ef"
 
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native qtmultimedia libexif"
 

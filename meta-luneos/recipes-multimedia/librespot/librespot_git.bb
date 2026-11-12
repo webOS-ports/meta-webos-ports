@@ -6,12 +6,12 @@ HOMEPAGE = "https://github.com/librespot-org/librespot"
 LICENSE = "MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=98b2b0c9a6081259c441045ca68b640f"
 
-# 16 commits past the v0.8.0 tag (d36f9f19) on dev, and no release since. This is the exact commit
-# the legacy webOS port of the daemon ran, unmodified; it also carries fixes v0.8.0 lacks, among
-# them falling back to the next CDN URL on a non-206 reply and "--volume-ctrl fixed" working.
+# dev, 38 commits past the v0.8.0 tag (d36f9f19), and no release since. It carries fixes v0.8.0
+# lacks, among them falling back to the next CDN URL on a non-206 reply, "--volume-ctrl fixed"
+# working, dealer messages that carry plain JSON, and bounded handshake packets.
 PV = "0.8.0+git"
 SRC_URI = "git://github.com/librespot-org/librespot.git;protocol=https;branch=dev;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}"
-SRCREV = "9c7d75615fc093bdcbdb29adbce3fed38c531852"
+SRCREV = "99b6088bf3ea028f90192676ac1a337fa4b2ed12"
 
 S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}"
 
