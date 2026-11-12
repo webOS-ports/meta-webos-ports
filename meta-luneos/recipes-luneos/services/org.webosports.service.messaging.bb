@@ -8,8 +8,9 @@ inherit allarch
 inherit webos_system_bus
 inherit webos_filesystem_paths
 
+PE = "4"
 PV = "0.1.0+git"
-SRCREV = "ce455ee486c27fe58fd411939fe933fc0f1292ba"
+SRCREV = "997bd45f99fdc550ec15be93fb43b0de70cb094a"
 
 WEBOS_REPO_NAME = "org.webosports.messaging"
 

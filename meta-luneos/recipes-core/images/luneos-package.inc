@@ -23,7 +23,7 @@ inherit webos_ports_repo kernel-artifact-names deploy nopackages
 LK2ND_BOOT_IMAGE_OFFSET ?= "1M"
 
 PV = "1.0.3+git"
-SRCREV = "b47cd015593ecd0127c681646976339303df8c1b"
+SRCREV = "d5a78e050dd43f62d70c8bf254cbaa2eba880c5a"
 
 WEBOS_REPO_NAME = "android-update-package"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
