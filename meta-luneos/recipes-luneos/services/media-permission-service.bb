@@ -2,7 +2,7 @@ SUMMARY = "Node.js service to ask for permission to media indexer database."
 SECTION = "webos/services"
 # The Node 22 rewrite is GPL-3.0-or-later (LICENSE.txt); what it takes from
 # mojoservice and Foundations stays Apache-2.0 (LICENSE.Apache-2.0).
-LICENSE = "GPL-3.0-or-later & Apache-2.0"
+LICENSE = "Apache-2.0 AND GPL-3.0-or-later"
 LIC_FILES_CHKSUM = "file://LICENSE.txt;md5=1ebbd3e34237af26da5dc08a4e440464 \
                     file://LICENSE.Apache-2.0;md5=3b83ef96387f14655fc854ddc3c6bd57 \
 "

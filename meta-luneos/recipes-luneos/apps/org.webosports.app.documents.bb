@@ -2,7 +2,7 @@ SUMMARY = "Documents: reads Word, OpenDocument, Excel, PowerPoint, CSV, text and
 SECTION = "webos/apps"
 # The app is GPL-3.0-only. It bundles docx-preview and SheetJS (Apache-2.0)
 # and JSZip (MIT, of its MIT/GPLv3 choice); see the app's NOTICE.
-LICENSE = "GPL-3.0-only & Apache-2.0 & MIT"
+LICENSE = "Apache-2.0 AND GPL-3.0-only AND MIT"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=db37b6ead2dec60580595736ff983452 \
                     file://lib/docx-preview/LICENSE;md5=f20203bc1a46617a965cb84980b55e15 \
                     file://lib/sheetjs/LICENSE;md5=7c69b1572be9cb62ed3c29722d422430 \

@@ -7,7 +7,7 @@ or Qt). Services load it with lok_init() to convert documents and, later, \
 to render and edit them."
 HOMEPAGE = "https://www.libreoffice.org"
 SECTION = "office"
-LICENSE = "MPL-2.0 & LGPL-3.0-or-later & GPL-3.0-or-later"
+LICENSE = "GPL-3.0-or-later AND LGPL-3.0-or-later AND MPL-2.0"
 LIC_FILES_CHKSUM = " \
     file://COPYING;md5=d32239bcb673463ab874e80d47fae504 \
     file://COPYING.LGPL;md5=6a6a8e020838b23406c81b19c1d46df6 \

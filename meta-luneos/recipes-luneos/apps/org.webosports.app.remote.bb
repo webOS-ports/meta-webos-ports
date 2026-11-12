@@ -3,7 +3,7 @@
 SUMMARY = "Universal remote for devices with an infrared transmitter"
 SECTION = "webos/apps"
 # The app is GPL-3.0-only; the code database it ships is Flipper-IRDB, CC0-1.0
-LICENSE = "GPL-3.0-only & CC0-1.0"
+LICENSE = "CC0-1.0 AND GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-3.0-only;md5=c79ff39f19dfec6d293b95dea7b07891 \
                     file://${COMMON_LICENSE_DIR}/CC0-1.0;md5=0ceb3372c9595f0a8067e55da801e4a1"
 PV = "1.0.0+git"

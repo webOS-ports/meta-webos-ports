@@ -6,7 +6,7 @@ SECTION = "webos/services"
 # GPL-3.0-or-later, each with its own COPYING; the files kept from the old
 # services stay Apache-2.0, DateJS (calendar.reminders) and the JSON schema
 # validator (accounts) MIT.
-LICENSE = "Apache-2.0 & GPL-3.0-or-later & MIT"
+LICENSE = "Apache-2.0 AND GPL-3.0-or-later AND MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10 \
                     file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302 \
                     file://com.palm.service.contacts.linker/COPYING;md5=1ebbd3e34237af26da5dc08a4e440464 \

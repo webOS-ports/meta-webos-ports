@@ -3,7 +3,7 @@ SECTION = "webos/services"
 # The Node 22 rewrite is GPL-3.0-or-later (COPYING); the shell scripts,
 # activities and files/sysbus stay Apache-2.0 (LICENSES/Apache-2.0.txt).
 # Both are at the top of the repository, S its service/ directory.
-LICENSE = "GPL-3.0-or-later & Apache-2.0"
+LICENSE = "Apache-2.0 AND GPL-3.0-or-later"
 LIC_FILES_CHKSUM = "file://../COPYING;md5=1ebbd3e34237af26da5dc08a4e440464 \
                     file://../LICENSES/Apache-2.0.txt;md5=e3fc50a88d0a364313df4b21ef20c29e \
 "

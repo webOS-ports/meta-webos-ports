@@ -2,7 +2,7 @@
 SECTION = "webos/apps"
 # The app is MIT; its Node 22 service is GPL-3.0-or-later (node-service/COPYING),
 # with the MIT notice of the old service it is derived from (node-service/MIT-NOTICE).
-LICENSE = "MIT & GPL-3.0-or-later"
+LICENSE = "GPL-3.0-or-later AND MIT"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/MIT;md5=0835ade698e0bcf8506ecda2f7b4f302 \
                     file://node-service/COPYING;md5=1ebbd3e34237af26da5dc08a4e440464 \
                     file://node-service/MIT-NOTICE;md5=075417482d99b137ea8491931b161376 \
