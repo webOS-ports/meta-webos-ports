@@ -1,12 +1,13 @@
 SUMMARY = "webOS on-screen keyboard based on the Ubuntu Touch keyboard"
 HOMEPAGE = "https://launchpad.net/ubuntu-keyboard"
-LICENSE = "LGPL-3.0-only & BSD-3-Clause & Apache-2.0 & CC-BY-3.0 & CC-BY-2.0"
+LICENSE = "LGPL-3.0-only & BSD-3-Clause & Apache-2.0 & CC-BY-3.0 & CC-BY-2.0 & Unicode-3.0"
 LIC_FILES_CHKSUM = " \
     file://COPYING;md5=6a6a8e020838b23406c81b19c1d46df6 \
     file://COPYING.BSD;md5=9b2310382ed07cfdae9c4953c8d29078 \
     file://COPYING.Apache-2.0;beginline=37;endline=212;md5=0c4ad33a0fa7b32f42fd54ed3710d7eb \
     file://COPYING.CC-BY;md5=c14dd4d440694f070fc6520d9c9a65eb \
     file://plugins/CORPORA.md;md5=a6c8dc2742b00f66707c53ed5c95bb34 \
+    file://data/pre/README.md;beginline=16;endline=18;md5=0a2beda967c8ffe730a4393d309ddf2b \
 "
 
 inherit qt6-qmake
@@ -24,15 +25,16 @@ RDEPENDS:${PN} += "maliit-framework-webos qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS:${PN} += "hunspell-dictionaries"
 
 
-SRCREV = "f8453b96e552c1e8cde94407468268acdb7a03f5"
+SRCREV = "e4d37e786d333f9ac2d4e3c1ba53ea7ff2710241"
+PE = "1"
 PV = "0.99.2+git"
-PR = "r33"
+PR = "r34"
 
 # We own webos-keyboard, so fixes belong in its actual source history, not
 # as patches carried here - unlike presage or imemanager, which are genuinely
 # upstream/third-party. 0001-0003 (hunspell API compat, hardware keyboard
 # input, Qt6Core5Compat linking) and the db8-backed user dictionary are all
-# real commits on herrie/dict-backup now; this SRCREV is the tip of that.
+# real commits now (herrie/dict-backup, merged into master).
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 # a lot of cases like:
