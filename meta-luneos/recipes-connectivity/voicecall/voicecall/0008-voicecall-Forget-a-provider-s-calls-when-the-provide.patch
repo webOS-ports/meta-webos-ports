@@ -1,0 +1,829 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 07:07:25 +0100
+Subject: [PATCH] [voicecall] Forget a provider's calls when the provider goes
+ away.
+
+removeProvider() dropped the provider but kept its calls. Providers
+delete their handlers themselves, without telling the manager once it no
+longer listens: the ofono factory deletes the provider and its calls
+when a modem goes away mid-call (ofono or the RIL restarting), and the
+telepathy provider removes itself when its account goes offline. The
+manager, the active call and the MCE plugin were then left with dangling
+handler pointers. Reading the activeVoiceCall D-Bus property crashed,
+and no later call ever became active, since the stale pointer kept the
+slot taken. A telepathy account coming back announced its surviving
+calls a second time, so plugins counted them twice and the D-Bus service
+adapted them twice, sending every call signal twice.
+
+Remove a provider's calls along with it, ignore calls that are already
+registered, and adapt each handler for D-Bus once. Hold the active call
+in a QPointer, and the MCE plugin's handlers as well.
+
+The active call was also only ever the first call added, and none after
+it ended, even with another call still up: DTMF went to a held call
+after answering a waiting one, and to nothing after the first of two
+calls ended. Recompute it whenever calls come, go or change state:
+the connected call, else one being set up, else one ringing, else a held
+one, keeping the current choice on a tie. Re-register /calls/active when
+it moves from one call to another, as registerObject() refuses a path
+that is still taken.
+
+MCE also kept reporting an emergency call after it had ended; only
+count calls that are still up.
+
+Add a unit test of the manager's call bookkeeping against a fake
+provider.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ plugins/mce/src/mceplugin.cpp            |  14 +-
+ rpm/voicecall-qt5.spec                   |   1 +
+ src/dbus/voicecallmanagerdbusservice.cpp |  11 +-
+ src/voicecallmanager.cpp                 | 102 +++++++--
+ src/voicecallmanager.h                   |   4 +
+ tests/fakes/fake_voicecall.h             | 155 ++++++++++++++
+ tests/manager.pro                        |  26 +++
+ tests/tests.pro                          |   3 +-
+ tests/tests.xml                          |   9 +
+ tests/tst_voicecallmanager.cpp           | 257 +++++++++++++++++++++++
+ 10 files changed, 561 insertions(+), 21 deletions(-)
+ create mode 100644 tests/fakes/fake_voicecall.h
+ create mode 100644 tests/manager.pro
+ create mode 100644 tests/tst_voicecallmanager.cpp
+
+diff --git a/plugins/mce/src/mceplugin.cpp b/plugins/mce/src/mceplugin.cpp
+index 7172969..eac9e0d 100644
+--- a/plugins/mce/src/mceplugin.cpp
++++ b/plugins/mce/src/mceplugin.cpp
+@@ -28,6 +28,7 @@
+ 
+ #include <QtDBus>
+ #include <QtPlugin>
++#include <QPointer>
+ 
+ #define MCE_SERVICE "com.nokia.mce"
+ #define MCE_PATH    "/com/nokia/mce/request"
+@@ -47,7 +48,8 @@ public:
+ 
+     VoiceCallManagerInterface *manager;
+ 
+-    QHash<QString, AbstractVoiceCallHandler*> calls;
++    // QPointer: providers delete their handlers themselves.
++    QHash<QString, QPointer<AbstractVoiceCallHandler> > calls;
+ };
+ 
+ McePlugin::McePlugin(QObject *parent)
+@@ -138,8 +140,6 @@ void McePlugin::onVoiceCallsChanged()
+                 d->calls.insert(call->handlerId(), call);
+             }
+ 
+-            isEmergency |= call->isEmergency();
+-
+             switch(call->status())
+             {
+             case AbstractVoiceCallHandler::STATUS_NULL:
+@@ -151,6 +151,7 @@ void McePlugin::onVoiceCallsChanged()
+             case AbstractVoiceCallHandler::STATUS_INCOMING:
+                 DEBUG_T("RINGING");
+                 state = "ringing";
++                isEmergency |= call->isEmergency();
+                 continue;
+ 
+             case AbstractVoiceCallHandler::STATUS_DIALING:
+@@ -161,6 +162,9 @@ void McePlugin::onVoiceCallsChanged()
+                 DEBUG_T("ACTIVE");
+                 if (state != "ringing")
+                     state = "active";
++                // Only calls that are still up: an emergency call that has
++                // just ended must not keep MCE in emergency mode.
++                isEmergency |= call->isEmergency();
+                 continue;
+             }
+         }
+@@ -170,11 +174,13 @@ void McePlugin::onVoiceCallsChanged()
+             if (handlerIds.contains(callId))
+                 continue;
+ 
++            // May already be gone: Qt drops its connections then.
+             AbstractVoiceCallHandler *call = d->calls.value(callId);
+ 
+             DEBUG_T("Deregistering call handler from internal dictionary.");
+ 
+-            QObject::disconnect(call, SIGNAL(statusChanged(VoiceCallStatus)), this, SLOT(onVoiceCallsChanged()));
++            if (call)
++                QObject::disconnect(call, SIGNAL(statusChanged(VoiceCallStatus)), this, SLOT(onVoiceCallsChanged()));
+ 
+             d->calls.remove(callId);
+         }
+diff --git a/rpm/voicecall-qt5.spec b/rpm/voicecall-qt5.spec
+index c55558e..ada6aea 100644
+--- a/rpm/voicecall-qt5.spec
++++ b/rpm/voicecall-qt5.spec
+@@ -166,3 +166,4 @@ fi
+ %files tests
+ /opt/tests/voicecall/filter
+ /opt/tests/voicecall/cellbroadcast
++/opt/tests/voicecall/manager
+diff --git a/src/dbus/voicecallmanagerdbusservice.cpp b/src/dbus/voicecallmanagerdbusservice.cpp
+index 8d80a75..7e0dbe5 100644
+--- a/src/dbus/voicecallmanagerdbusservice.cpp
++++ b/src/dbus/voicecallmanagerdbusservice.cpp
+@@ -124,7 +124,11 @@ void VoiceCallManagerDBusService::onVoiceCallAdded(AbstractVoiceCallHandler *han
+ {
+     TRACE
+ 
+-    new VoiceCallHandlerDBusAdapter(handler);
++    // A provider that goes away and comes back (a telepathy account going
++    // offline and online again) announces its surviving calls again. Adapt
++    // each handler once, or every D-Bus signal of the call is sent twice.
++    if (!handler->findChild<VoiceCallHandlerDBusAdapter *>(QString(), Qt::FindDirectChildrenOnly))
++        new VoiceCallHandlerDBusAdapter(handler);
+ 
+     if (!QDBusConnection::sessionBus().registerObject("/calls/" + handler->handlerId(), handler)) {
+         WARNING_T("Failed to register DBus object: %s", qPrintable(QDBusConnection::sessionBus().lastError().message()));
+@@ -143,10 +147,11 @@ void VoiceCallManagerDBusService::onActiveVoiceCallChanged()
+     TRACE
+     Q_D(VoiceCallManagerDBusService);
+ 
++    // registerObject() refuses a path that is still registered, and the
++    // active call can change from one call to another.
++    QDBusConnection::sessionBus().unregisterObject("/calls/active");
+     if (d->manager->activeVoiceCall()) {
+         DEBUG_T("VoiceCallManagerDBusService:: registering active voice call interface.");
+         QDBusConnection::sessionBus().registerObject("/calls/active", d->manager->activeVoiceCall());
+-    } else {
+-        QDBusConnection::sessionBus().unregisterObject("/calls/active");
+     }
+ }
+diff --git a/src/voicecallmanager.cpp b/src/voicecallmanager.cpp
+index 4ca5abe..cc366aa 100644
+--- a/src/voicecallmanager.cpp
++++ b/src/voicecallmanager.cpp
+@@ -22,6 +22,7 @@
+ #include "voicecallmanager.h"
+ 
+ #include <QHash>
++#include <QPointer>
+ #include <QUuid>
+ #include <QSettings>
+ 
+@@ -39,7 +40,7 @@ class VoiceCallManagerPrivate
+ 
+ public:
+     VoiceCallManagerPrivate(VoiceCallManager *q)
+-        : q_ptr(q), activeVoiceCall(NULL),
++        : q_ptr(q),
+           audioMode("earpiece"), isAudioRouted(false), isMicrophoneMuted(false), isSpeakerMuted(false)
+     {/* ... */}
+ 
+@@ -48,8 +49,12 @@ public:
+     QHash<QString, AbstractVoiceCallProvider*> providers;
+ 
+     QHash<QString, AbstractVoiceCallHandler*> voiceCalls;
++    // Handler ids in the order the calls were added, to break ties when
++    // picking the active call.
++    QStringList callOrder;
+ 
+-    AbstractVoiceCallHandler *activeVoiceCall;
++    // A QPointer, as providers delete their handlers themselves.
++    QPointer<AbstractVoiceCallHandler> activeVoiceCall;
+ 
+ #ifdef WITH_NEMO_DEVICELOCK
+     NemoDeviceLock::DeviceLock deviceLock;
+@@ -153,6 +158,14 @@ void VoiceCallManager::removeProvider(AbstractVoiceCallProvider *provider)
+                         this,
+                         SLOT(setError(QString)));
+ 
++    // The provider's calls go with it: providers delete their handlers
++    // without announcing it once they are no longer registered, so keeping
++    // them would leave dangling pointers here and in every plugin.
++    foreach (AbstractVoiceCallHandler *handler, d->voiceCalls.values()) {
++        if (handler->provider() == provider)
++            forgetVoiceCall(handler);
++    }
++
+     d->providers.remove(provider->providerId());
+     emit this->providersChanged();
+     emit this->providerRemoved(provider->providerId());
+@@ -349,6 +362,10 @@ void VoiceCallManager::onVoiceCallAdded(AbstractVoiceCallHandler *handler)
+     TRACE
+     Q_D(VoiceCallManager);
+ 
++    // Already registered: a provider re-announcing its calls.
++    if (d->voiceCalls.contains(handler->handlerId()))
++        return;
++
+ #ifdef WITH_NEMO_DEVICELOCK
+     if (!handler->isEmergency()
+             && d->deviceLock.state() == NemoDeviceLock::DeviceLock::ManagerLockout) {
+@@ -367,34 +384,93 @@ void VoiceCallManager::onVoiceCallAdded(AbstractVoiceCallHandler *handler)
+ 
+     //AudioCallPolicyProxy *pHandler = new AudioCallPolicyProxy(handler, this);
+     d->voiceCalls.insert(handler->handlerId(), handler);
++    d->callOrder.append(handler->handlerId());
++    QObject::connect(handler, &AbstractVoiceCallHandler::statusChanged,
++                     this, &VoiceCallManager::updateActiveVoiceCall);
+ 
+     emit this->voiceCallAdded(handler);
+     emit this->voiceCallsChanged();
+ 
+-    if (!d->activeVoiceCall) {
+-        d->activeVoiceCall = handler;
+-        emit this->activeVoiceCallChanged();
++    updateActiveVoiceCall();
++}
++
++// The call that DTMF, the audio routing and the UI act on: the connected
++// call if there is one, else one being set up, else one ringing, else a held
++// one. The current choice is kept while no better call exists, and ties go
++// to the call that was added first.
++static int activeCallRank(AbstractVoiceCallHandler::VoiceCallStatus status)
++{
++    switch (status) {
++    case AbstractVoiceCallHandler::STATUS_ACTIVE:
++        return 5;
++    case AbstractVoiceCallHandler::STATUS_DIALING:
++    case AbstractVoiceCallHandler::STATUS_ALERTING:
++        return 4;
++    case AbstractVoiceCallHandler::STATUS_INCOMING:
++    case AbstractVoiceCallHandler::STATUS_WAITING:
++        return 3;
++    case AbstractVoiceCallHandler::STATUS_HELD:
++        return 2;
++    default:
++        return 1;
+     }
+ }
+ 
+-void VoiceCallManager::onVoiceCallRemoved(const QString &handlerId)
++void VoiceCallManager::updateActiveVoiceCall()
+ {
+     TRACE
+     Q_D(VoiceCallManager);
+-    AbstractVoiceCallHandler *handler = d->voiceCalls.value(handlerId);
+-    if (!handler) {
+-        DEBUG_T("VCM: attempt to remove unregistered handler: %s", qPrintable(handlerId));
+-        return;
++    AbstractVoiceCallHandler *current = d->activeVoiceCall.data();
++    AbstractVoiceCallHandler *best = NULL;
++    int bestRank = 0;
++
++    if (current && d->voiceCalls.contains(current->handlerId())) {
++        best = current;
++        bestRank = activeCallRank(best->status());
++    }
++
++    foreach (const QString &handlerId, d->callOrder) {
++        AbstractVoiceCallHandler *handler = d->voiceCalls.value(handlerId);
++        const int rank = handler ? activeCallRank(handler->status()) : 0;
++        if (rank > bestRank) {
++            best = handler;
++            bestRank = rank;
++        }
+     }
++
++    if (best != current) {
++        d->activeVoiceCall = best;
++        emit this->activeVoiceCallChanged();
++    }
++}
++
++void VoiceCallManager::forgetVoiceCall(AbstractVoiceCallHandler *handler)
++{
++    TRACE
++    Q_D(VoiceCallManager);
++    const QString handlerId = handler->handlerId();
++
++    QObject::disconnect(handler, &AbstractVoiceCallHandler::statusChanged,
++                        this, &VoiceCallManager::updateActiveVoiceCall);
+     d->voiceCalls.remove(handlerId);
++    d->callOrder.removeAll(handlerId);
+ 
+     emit this->voiceCallRemoved(handlerId);
+     emit this->voiceCallsChanged();
+ 
+-    if (d->activeVoiceCall && d->activeVoiceCall->handlerId() == handlerId) {
+-        d->activeVoiceCall = NULL;
+-        emit this->activeVoiceCallChanged();
++    updateActiveVoiceCall();
++}
++
++void VoiceCallManager::onVoiceCallRemoved(const QString &handlerId)
++{
++    TRACE
++    Q_D(VoiceCallManager);
++    AbstractVoiceCallHandler *handler = d->voiceCalls.value(handlerId);
++    if (!handler) {
++        DEBUG_T("VCM: attempt to remove unregistered handler: %s", qPrintable(handlerId));
++        return;
+     }
++    forgetVoiceCall(handler);
+ 
+     QSettings settings;
+     settings.beginGroup(QLatin1String("Voice Counters"));
+diff --git a/src/voicecallmanager.h b/src/voicecallmanager.h
+index b181ec7..92ce166 100644
+--- a/src/voicecallmanager.h
++++ b/src/voicecallmanager.h
+@@ -83,6 +83,10 @@ public Q_SLOTS:
+ protected Q_SLOTS:
+     void onVoiceCallAdded(AbstractVoiceCallHandler *handler);
+     void onVoiceCallRemoved(const QString &handlerId);
++    void updateActiveVoiceCall();
++
++private:
++    void forgetVoiceCall(AbstractVoiceCallHandler *handler);
+ 
+ private:
+     class VoiceCallManagerPrivate *d_ptr;
+diff --git a/tests/fakes/fake_voicecall.h b/tests/fakes/fake_voicecall.h
+new file mode 100644
+index 0000000..f00c56a
+--- /dev/null
++++ b/tests/fakes/fake_voicecall.h
+@@ -0,0 +1,155 @@
++/*
++ * This file is a part of the Voice Call Manager project
++ *
++ * Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ */
++#ifndef FAKE_VOICECALL_H
++#define FAKE_VOICECALL_H
++
++/*
++ * In-memory provider and call handler for tests of the manager and its
++ * plugins. The test drives them directly: addCall()/removeCall() emit what a
++ * real provider emits, setStatus() what a real call emits, and the handler
++ * records the requests made of it.
++ */
++
++#include <abstractvoicecallhandler.h>
++#include <abstractvoicecallprovider.h>
++
++#include <QList>
++#include <QStringList>
++
++class FakeVoiceCallHandler : public AbstractVoiceCallHandler
++{
++    Q_OBJECT
++
++public:
++    FakeVoiceCallHandler(const QString &id, AbstractVoiceCallProvider *provider,
++                         bool incoming = false, VoiceCallStatus status = STATUS_NULL)
++        : AbstractVoiceCallHandler(provider)
++        , m_id(id)
++        , m_provider(provider)
++        , m_incoming(incoming)
++        , m_status(status)
++    {
++    }
++
++    AbstractVoiceCallProvider *provider() const override { return m_provider; }
++    QString handlerId() const override { return m_id; }
++    QString lineId() const override { return m_lineId; }
++    QString subscriberId() const override { return QString(); }
++    QDateTime startedAt() const override { return QDateTime(); }
++    int duration() const override { return m_duration; }
++    bool isIncoming() const override { return m_incoming; }
++    bool isMultiparty() const override { return false; }
++    bool isEmergency() const override { return m_emergency; }
++    bool isForwarded() const override { return false; }
++    bool isRemoteHeld() const override { return false; }
++    QString parentHandlerId() const override { return QString(); }
++    QList<AbstractVoiceCallHandler *> childCalls() const override
++    {
++        return QList<AbstractVoiceCallHandler *>();
++    }
++    VoiceCallStatus status() const override { return m_status; }
++
++    void setStatus(VoiceCallStatus status)
++    {
++        m_status = status;
++        emit statusChanged(status);
++    }
++    void setDuration(int seconds) { m_duration = seconds; }
++    void setEmergency(bool emergency) { m_emergency = emergency; }
++    void setLineId(const QString &lineId) { m_lineId = lineId; }
++
++    // Requests made of this call, e.g. "hangup", "filter:0", "dtmf:1"
++    QStringList requests;
++
++public Q_SLOTS:
++    void answer() override { requests << QStringLiteral("answer"); }
++    void hangup() override { requests << QStringLiteral("hangup"); }
++    void hold(bool on) override { requests << QStringLiteral("hold:%1").arg(on); }
++    void deflect(const QString &target) override { requests << QStringLiteral("deflect:") + target; }
++    void sendDtmf(const QString &tones) override { requests << QStringLiteral("dtmf:") + tones; }
++    void merge(const QString &callHandle) override { requests << QStringLiteral("merge:") + callHandle; }
++    void split() override { requests << QStringLiteral("split"); }
++    void filter(VoiceCallFilterAction action) override
++    {
++        requests << QStringLiteral("filter:%1").arg(int(action));
++    }
++
++private:
++    QString m_id;
++    AbstractVoiceCallProvider *m_provider;
++    bool m_incoming;
++    VoiceCallStatus m_status;
++    int m_duration = 0;
++    bool m_emergency = false;
++    QString m_lineId;
++};
++
++class FakeVoiceCallProvider : public AbstractVoiceCallProvider
++{
++    Q_OBJECT
++
++public:
++    explicit FakeVoiceCallProvider(const QString &id, QObject *parent = 0)
++        : AbstractVoiceCallProvider(parent), m_id(id)
++    {
++    }
++
++    QString providerId() const override { return m_id; }
++    QString providerType() const override { return QStringLiteral("fake"); }
++    QList<AbstractVoiceCallHandler *> voiceCalls() const override { return m_calls; }
++    QString errorString() const override { return QString(); }
++
++    // A call the provider already has, not announced (as before appendProvider)
++    FakeVoiceCallHandler *createCall(const QString &id, bool incoming = false,
++                                     AbstractVoiceCallHandler::VoiceCallStatus status
++                                     = AbstractVoiceCallHandler::STATUS_NULL)
++    {
++        FakeVoiceCallHandler *handler = new FakeVoiceCallHandler(id, this, incoming, status);
++        m_calls.append(handler);
++        return handler;
++    }
++
++    // A new call, announced as a real provider does
++    FakeVoiceCallHandler *addCall(const QString &id, bool incoming = false,
++                                  AbstractVoiceCallHandler::VoiceCallStatus status
++                                  = AbstractVoiceCallHandler::STATUS_NULL)
++    {
++        FakeVoiceCallHandler *handler = createCall(id, incoming, status);
++        emit voiceCallAdded(handler);
++        emit voiceCallsChanged();
++        return handler;
++    }
++
++    // The call ended: announced, then deleted later as real providers do
++    void removeCall(FakeVoiceCallHandler *handler)
++    {
++        m_calls.removeAll(handler);
++        emit voiceCallRemoved(handler->handlerId());
++        emit voiceCallsChanged();
++        handler->deleteLater();
++    }
++
++public Q_SLOTS:
++    bool dial(const QString &msisdn) override
++    {
++        dialled << msisdn;
++        return true;
++    }
++
++public:
++    QStringList dialled;
++
++private:
++    QString m_id;
++    QList<AbstractVoiceCallHandler *> m_calls;
++};
++
++#endif // FAKE_VOICECALL_H
+diff --git a/tests/manager.pro b/tests/manager.pro
+new file mode 100644
+index 0000000..e5317a3
+--- /dev/null
++++ b/tests/manager.pro
+@@ -0,0 +1,26 @@
++TEMPLATE = app
++TARGET = tst_voicecallmanager
++QT += core testlib
++QT -= gui
++
++OBJECTS_DIR = $$OUT_PWD/.obj/manager
++MOC_DIR = $$OUT_PWD/.moc/manager
++
++INCLUDEPATH += fakes ../src ../lib/src
++
++HEADERS += \
++    fakes/fake_voicecall.h \
++    ../lib/src/abstractvoicecallhandler.h \
++    ../lib/src/abstractvoicecallprovider.h \
++    ../lib/src/voicecallmanagerinterface.h \
++    ../src/voicecallmanager.h
++
++SOURCES += \
++    tst_voicecallmanager.cpp \
++    ../lib/src/abstractvoicecallhandler.cpp \
++    ../lib/src/common.cpp \
++    ../src/voicecallmanager.cpp
++
++target.path = /opt/tests/voicecall/manager
++
++INSTALLS += target
+diff --git a/tests/tests.pro b/tests/tests.pro
+index 92ee797..6d6b84f 100644
+--- a/tests/tests.pro
++++ b/tests/tests.pro
+@@ -2,8 +2,9 @@ TEMPLATE = subdirs
+ 
+ store.file = store.pro
+ controller.file = controller.pro
++manager.file = manager.pro
+ 
+-SUBDIRS += store controller
++SUBDIRS += store controller manager
+ 
+ tests_xml.path = /opt/tests/voicecall/cellbroadcast
+ tests_xml.files = tests.xml
+diff --git a/tests/tests.xml b/tests/tests.xml
+index 4275b8e..f0464d9 100644
+--- a/tests/tests.xml
++++ b/tests/tests.xml
+@@ -12,4 +12,13 @@
+       </case>
+     </set>
+   </suite>
++  <suite name="voicecall-manager-tests" domain="mw">
++    <description>Voicecall manager automatic tests</description>
++    <set name="unit-tests" feature="Voice Call Manager">
++      <description>Call bookkeeping of the voice call manager</description>
++      <case manual="false" name="manager">
++        <step>/opt/tests/voicecall/manager/tst_voicecallmanager</step>
++      </case>
++    </set>
++  </suite>
+ </testdefinition>
+diff --git a/tests/tst_voicecallmanager.cpp b/tests/tst_voicecallmanager.cpp
+new file mode 100644
+index 0000000..bd7bc93
+--- /dev/null
++++ b/tests/tst_voicecallmanager.cpp
+@@ -0,0 +1,257 @@
++/*
++ * This file is a part of the Voice Call Manager project
++ *
++ * Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ */
++#include "voicecallmanager.h"
++
++#include "fake_voicecall.h"
++
++#include <QPointer>
++#include <QSettings>
++#include <QSignalSpy>
++#include <QStandardPaths>
++#include <QTemporaryDir>
++#include <QtTest>
++
++typedef AbstractVoiceCallHandler H;
++
++class tst_VoiceCallManager : public QObject
++{
++    Q_OBJECT
++
++private Q_SLOTS:
++    void initTestCase();
++    void init();
++
++    void appendProviderAnnouncesExistingCalls();
++    void removeProviderForgetsItsCalls();
++    void reappendedProviderIsNotDoubleCounted();
++    void duplicateAnnouncementIgnored();
++    void activeCallFollowsStatus();
++    void activeCallReplacedWhenRemoved();
++    void incomingCallReleasedWithoutFilter();
++    void incomingCallHeldForFilter();
++    void durationCounters();
++
++private:
++    QTemporaryDir m_home;
++};
++
++void tst_VoiceCallManager::initTestCase()
++{
++    // Keep the call counters (QSettings) out of the user's configuration,
++    // and in a directory that can be written: Qt 5.6 reads back what it
++    // failed to write as nothing (a runner without a home directory).
++    QVERIFY(m_home.isValid());
++    qputenv("HOME", QFile::encodeName(m_home.path()));
++    qunsetenv("XDG_CONFIG_HOME");
++    QStandardPaths::setTestModeEnabled(true);
++    QCoreApplication::setOrganizationName(QStringLiteral("voicecall-tests"));
++    QCoreApplication::setApplicationName(QStringLiteral("tst_voicecallmanager"));
++}
++
++void tst_VoiceCallManager::init()
++{
++    QSettings().clear();
++}
++
++void tst_VoiceCallManager::appendProviderAnnouncesExistingCalls()
++{
++    VoiceCallManager manager;
++    FakeVoiceCallProvider provider(QStringLiteral("p1"));
++    provider.createCall(QStringLiteral("a"), false, H::STATUS_ACTIVE);
++    provider.createCall(QStringLiteral("b"), false, H::STATUS_HELD);
++
++    QSignalSpy added(&manager, SIGNAL(voiceCallAdded(AbstractVoiceCallHandler*)));
++    manager.appendProvider(&provider);
++
++    QCOMPARE(added.count(), 2);
++    QCOMPARE(manager.voiceCallCount(), 2);
++    QVERIFY(manager.activeVoiceCall());
++    QCOMPARE(manager.activeVoiceCall()->handlerId(), QStringLiteral("a"));
++}
++
++// A provider that disappears mid-call (modem removed, telepathy account
++// offline) used to leave its calls, and the active call, behind as dangling
++// pointers once it deleted them.
++void tst_VoiceCallManager::removeProviderForgetsItsCalls()
++{
++    VoiceCallManager manager;
++    FakeVoiceCallProvider other(QStringLiteral("other"));
++    manager.appendProvider(&other);
++    FakeVoiceCallHandler *survivor = other.addCall(QStringLiteral("s"), false, H::STATUS_HELD);
++
++    QPointer<FakeVoiceCallProvider> provider = new FakeVoiceCallProvider(QStringLiteral("p1"));
++    manager.appendProvider(provider);
++    provider->addCall(QStringLiteral("a"), false, H::STATUS_ACTIVE);
++    provider->addCall(QStringLiteral("b"), true, H::STATUS_WAITING);
++    QCOMPARE(manager.activeVoiceCall()->handlerId(), QStringLiteral("a"));
++
++    QSignalSpy removed(&manager, SIGNAL(voiceCallRemoved(QString)));
++    QSignalSpy activeChanged(&manager, SIGNAL(activeVoiceCallChanged()));
++    manager.removeProvider(provider);
++
++    QCOMPARE(removed.count(), 2);
++    QStringList removedIds;
++    removedIds << removed.at(0).at(0).toString() << removed.at(1).at(0).toString();
++    removedIds.sort();
++    QCOMPARE(removedIds, QStringList() << QStringLiteral("a") << QStringLiteral("b"));
++    QVERIFY(activeChanged.count() >= 1);
++    QCOMPARE(manager.activeVoiceCall(), static_cast<AbstractVoiceCallHandler *>(survivor));
++
++    // The provider then deletes itself and its calls, as the ofono factory
++    // does. Nothing in the manager may refer to them any more.
++    delete provider.data();
++    QCOMPARE(manager.activeVoiceCall(), static_cast<AbstractVoiceCallHandler *>(survivor));
++    survivor->setStatus(H::STATUS_ACTIVE);
++    QCOMPARE(manager.voiceCallCount(), 1);
++}
++
++// A telepathy account going offline and online again removes and re-appends
++// its provider while calls survive. They must be announced once each time.
++void tst_VoiceCallManager::reappendedProviderIsNotDoubleCounted()
++{
++    VoiceCallManager manager;
++    FakeVoiceCallProvider provider(QStringLiteral("p1"));
++    manager.appendProvider(&provider);
++    provider.addCall(QStringLiteral("a"), false, H::STATUS_ACTIVE);
++
++    manager.removeProvider(&provider);
++    QVERIFY(!manager.activeVoiceCall());
++
++    QSignalSpy added(&manager, SIGNAL(voiceCallAdded(AbstractVoiceCallHandler*)));
++    manager.appendProvider(&provider);
++    QCOMPARE(added.count(), 1);
++    QCOMPARE(manager.activeVoiceCall()->handlerId(), QStringLiteral("a"));
++}
++
++void tst_VoiceCallManager::duplicateAnnouncementIgnored()
++{
++    VoiceCallManager manager;
++    FakeVoiceCallProvider provider(QStringLiteral("p1"));
++    manager.appendProvider(&provider);
++    FakeVoiceCallHandler *call = provider.addCall(QStringLiteral("a"), true);
++
++    QSignalSpy added(&manager, SIGNAL(voiceCallAdded(AbstractVoiceCallHandler*)));
++    emit provider.voiceCallAdded(call);
++    QCOMPARE(added.count(), 0);
++    // ... and the call was released to ring only once
++    QCOMPARE(call->requests, QStringList() << QStringLiteral("filter:0"));
++}
++
++void tst_VoiceCallManager::activeCallFollowsStatus()
++{
++    VoiceCallManager manager;
++    FakeVoiceCallProvider provider(QStringLiteral("p1"));
++    manager.appendProvider(&provider);
++    FakeVoiceCallHandler *a = provider.addCall(QStringLiteral("a"), false, H::STATUS_ACTIVE);
++    FakeVoiceCallHandler *b = provider.addCall(QStringLiteral("b"), true, H::STATUS_WAITING);
++    QCOMPARE(manager.activeVoiceCall(), static_cast<H *>(a));
++
++    // Answering the waiting call puts the first one on hold
++    QSignalSpy activeChanged(&manager, SIGNAL(activeVoiceCallChanged()));
++    a->setStatus(H::STATUS_HELD);
++    b->setStatus(H::STATUS_ACTIVE);
++    QCOMPARE(manager.activeVoiceCall(), static_cast<H *>(b));
++    QVERIFY(activeChanged.count() >= 1);
++
++    // Swapping back
++    activeChanged.clear();
++    b->setStatus(H::STATUS_HELD);
++    a->setStatus(H::STATUS_ACTIVE);
++    QCOMPARE(manager.activeVoiceCall(), static_cast<H *>(a));
++
++    // Equal rank: the current choice is kept
++    activeChanged.clear();
++    b->setStatus(H::STATUS_ACTIVE);
++    QCOMPARE(manager.activeVoiceCall(), static_cast<H *>(a));
++    QCOMPARE(activeChanged.count(), 0);
++}
++
++void tst_VoiceCallManager::activeCallReplacedWhenRemoved()
++{
++    VoiceCallManager manager;
++    FakeVoiceCallProvider provider(QStringLiteral("p1"));
++    manager.appendProvider(&provider);
++    FakeVoiceCallHandler *a = provider.addCall(QStringLiteral("a"), false, H::STATUS_ACTIVE);
++    FakeVoiceCallHandler *b = provider.addCall(QStringLiteral("b"), false, H::STATUS_HELD);
++
++    // The remaining held call takes over, rather than none at all
++    provider.removeCall(a);
++    QCOMPARE(manager.activeVoiceCall(), static_cast<H *>(b));
++
++    provider.removeCall(b);
++    QVERIFY(!manager.activeVoiceCall());
++    QCoreApplication::sendPostedEvents(Q_NULLPTR, QEvent::DeferredDelete);
++    QVERIFY(!manager.activeVoiceCall());
++}
++
++void tst_VoiceCallManager::incomingCallReleasedWithoutFilter()
++{
++    VoiceCallManager manager;
++    FakeVoiceCallProvider provider(QStringLiteral("p1"));
++    manager.appendProvider(&provider);
++
++    FakeVoiceCallHandler *incoming = provider.addCall(QStringLiteral("in"), true);
++    FakeVoiceCallHandler *outgoing = provider.addCall(QStringLiteral("out"), false);
++    QCOMPARE(incoming->requests, QStringList() << QStringLiteral("filter:0"));
++    QVERIFY(outgoing->requests.isEmpty());
++}
++
++void tst_VoiceCallManager::incomingCallHeldForFilter()
++{
++    VoiceCallManager manager;
++    manager.setCallFiltering(true);
++    FakeVoiceCallProvider provider(QStringLiteral("p1"));
++    manager.appendProvider(&provider);
++
++    FakeVoiceCallHandler *incoming = provider.addCall(QStringLiteral("in"), true);
++    QVERIFY(incoming->requests.isEmpty());
++}
++
++void tst_VoiceCallManager::durationCounters()
++{
++    VoiceCallManager manager;
++    FakeVoiceCallProvider provider(QStringLiteral("p1"));
++    manager.appendProvider(&provider);
++
++    FakeVoiceCallHandler *in = provider.addCall(QStringLiteral("in"), true, H::STATUS_ACTIVE);
++    FakeVoiceCallHandler *out = provider.addCall(QStringLiteral("out"), false, H::STATUS_ACTIVE);
++    in->setDuration(12);
++    out->setDuration(30);
++
++    QSignalSpy incomingChanged(&manager, SIGNAL(totalIncomingCallDurationChanged()));
++    provider.removeCall(in);
++    provider.removeCall(out);
++    QCOMPARE(incomingChanged.count(), 1);
++    QCOMPARE(manager.totalIncomingCallDuration(), 12);
++    QCOMPARE(manager.totalOutgoingCallDuration(), 30);
++
++    // Removing a call that isn't registered changes nothing
++    emit provider.voiceCallRemoved(QStringLiteral("unknown"));
++    QCOMPARE(manager.totalIncomingCallDuration(), 12);
++
++    manager.resetCallDurationCounters();
++    QCOMPARE(manager.totalIncomingCallDuration(), 0);
++    QCOMPARE(manager.totalOutgoingCallDuration(), 0);
++}
++
++QTEST_GUILESS_MAIN(tst_VoiceCallManager)
++
++#include "tst_voicecallmanager.moc"

@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 12 Nov 2026 07:54:56 +0100
+Subject: [PATCH] [tests] Leave the D-Bus test out of the TSan run.
+
+QtDBus does its socket work in its own thread inside the system Qt,
+which is not built with TSan and passes data on under futex-based
+QMutex that TSan cannot see, so TSan reports Qt copying the messages
+handed to it. Suppressing that would take a pattern (memcpy, or any
+frame in libQt5Core) that hides real races too. None of voicecall's code
+runs on that thread, and the test still runs under ASan, UBSan and
+valgrind.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ tests/hardening/README |  3 +++
+ tests/hardening/run    | 10 ++++++++++
+ 2 files changed, 13 insertions(+)
+
+diff --git a/tests/hardening/README b/tests/hardening/README
+index 5369126..aa91767 100644
+--- a/tests/hardening/README
++++ b/tests/hardening/README
+@@ -16,6 +16,9 @@ checker and runs every tst_* binary with:
+   asan       AddressSanitizer + UndefinedBehaviorSanitizer, any report
+              is fatal, leaks included
+   tsan       ThreadSanitizer, with ASLR off as TSan needs
++             (not tst_dbusservice: QtDBus does its work in a thread
++             of the uninstrumented system Qt, and TSan reports the
++             data that Qt hands over to it)
+   valgrind   memcheck; fails on any error or definite leak
+ 
+ Pass -c once per C++ compiler to build the sanitizer runs with (GCC and
+diff --git a/tests/hardening/run b/tests/hardening/run
+index 6ab058f..2ff0a38 100755
+--- a/tests/hardening/run
++++ b/tests/hardening/run
+@@ -87,6 +87,10 @@ check() {
+     } > "$log" 2>&1 || rc=1
+     if [ $rc = 0 ]; then
+         for t in $(find "$build" -type f -name 'tst_*' -perm -u+x | sort); do
++            case " ${SKIP:-} " in *" $(basename "$t") "*)
++                echo "--- $(basename "$t") not run: $SKIP_WHY" >> "$log"
++                continue;;
++            esac
+             count=$((count + 1))
+             echo "--- $(basename "$t")" >> "$log"
+             # shellcheck disable=SC2086
+@@ -117,6 +121,12 @@ for c in "${CHECKS[@]}"; do
+         done;;
+     tsan)
+         for cc in "${COMPILERS[@]}"; do
++            # QtDBus works in a thread of its own inside the system Qt,
++            # which has no TSan instrumentation and hands data over under
++            # futex-based QMutex that TSan cannot see, so it reports Qt's
++            # own message copying. None of voicecall's code runs on that
++            # thread; the D-Bus test still runs under ASan and valgrind.
++            SKIP="tst_dbusservice" SKIP_WHY="QtDBus' own thread is not instrumented" \
+             check "tsan-$(cc_name "$cc")" "$cc" "$TSAN_FLAGS" \
+                 "setarch $(uname -m) -R $RUNNER" TSAN_OPTIONS=halt_on_error=1
+         done;;
+-- 
+2.53.0
+

@@ -1,0 +1,739 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 07:20:49 +0100
+Subject: [PATCH] [telepathy] Fix farstream callback lifetimes, DTMF and
+ unhandled requests.
+
+Farstream:
+- The start-sending, stop-sending and src-pad-added handlers on each
+  TfContent got the FarstreamChannel as user data and were never
+  disconnected; only the TfChannel's were. Reference the contents and
+  disconnect their handlers when they are removed and in the destructor.
+- onStartSending() returned bool to a signal that returns gboolean, so
+  the marshaller read an int whose upper bits weren't set.
+- src-pad-added for video, or with audio output that failed to set up,
+  passed a NULL bin to GStreamer.
+- A NULL self was dereferenced in the very checks meant to catch it.
+- Pad and peer references were leaked in onStopSending(),
+  onSrcPadAddedContent() and removeBin(), and the destructor cleared
+  mSHClosed instead of each handler id.
+
+Channels:
+- A conference that was invalidated cleared its children's parent ids
+  but kept them in childCalls. Children deleted first could then no
+  longer remove themselves, and the conference's destructor wrote to
+  them after they were freed. Clear the list.
+- DTMF sent tones.toInt(): "123" was sent as event 123, lower case
+  letters were dropped, and the D-Bus timeout was set to 0. Map single
+  keys to their event, and send longer strings with MultipleTones.
+- CallChannelHandler created a new Hold or DTMF interface proxy on every
+  hold() and sendDtmf(), kept until the call ended. Use the channel's.
+
+Provider:
+- handleChannels() never answered the channel dispatcher for accounts
+  that aren't registered, which then waited for the D-Bus timeout.
+- createConference() for SIP connected to a null request and returned
+  true. Fail with an error like the other unsupported cases.
+- The plugin's destructor dereferenced the client registrar even if
+  initialize() never ran.
+
+Add a unit test of the DTMF key mapping.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ .../telepathy/src/callchannelhandler.cpp      | 41 ++++----
+ plugins/providers/telepathy/src/dtmf.h        | 38 ++++++++
+ .../telepathy/src/farstreamchannel.cpp        | 95 +++++++++++++------
+ .../telepathy/src/farstreamchannel.h          |  6 +-
+ plugins/providers/telepathy/src/src.pro       |  3 +-
+ .../telepathy/src/streamchannelhandler.cpp    | 36 +++----
+ .../telepathy/src/telepathyprovider.cpp       |  7 +-
+ .../telepathy/src/telepathyproviderplugin.cpp |  7 +-
+ rpm/voicecall-qt5.spec                        |  1 +
+ tests/dtmf.pro                                | 16 ++++
+ tests/tests.pro                               |  3 +-
+ tests/tests.xml                               |  3 +
+ tests/tst_dtmf.cpp                            | 55 +++++++++++
+ 13 files changed, 244 insertions(+), 67 deletions(-)
+ create mode 100644 plugins/providers/telepathy/src/dtmf.h
+ create mode 100644 tests/dtmf.pro
+ create mode 100644 tests/tst_dtmf.cpp
+
+diff --git a/plugins/providers/telepathy/src/callchannelhandler.cpp b/plugins/providers/telepathy/src/callchannelhandler.cpp
+index 0c2a173..f8f081b 100644
+--- a/plugins/providers/telepathy/src/callchannelhandler.cpp
++++ b/plugins/providers/telepathy/src/callchannelhandler.cpp
+@@ -23,6 +23,7 @@
+ 
+ #include "farstreamchannel.h"
+ #include "telepathyprovider.h"
++#include "dtmf.h"
+ 
+ #include <TelepathyQt/Channel>
+ #include <TelepathyQt/PendingReady>
+@@ -63,7 +64,7 @@ class CallChannelHandlerPrivate
+ public:
+     CallChannelHandlerPrivate(CallChannelHandler *q, const QString &id, Tp::CallChannelPtr c, const QDateTime &s, TelepathyProvider *p)
+         : q_ptr(q), handlerId(id), provider(p), startedAt(s), status(AbstractVoiceCallHandler::STATUS_NULL),
+-          channel(c), fsChannel(NULL), duration(0), durationTimerId(-1), isEmergency(false),
++          channel(c), fsChannel(NULL), duration(0), connectedAt(0), durationTimerId(-1), isEmergency(false),
+           isForwarded(false), isIncoming(false), isRemoteHeld(false)
+     { /* ... */ }
+ 
+@@ -233,8 +234,14 @@ void CallChannelHandler::hold(bool on)
+ {
+     TRACE
+     Q_D(CallChannelHandler);
+-    Tp::Client::ChannelInterfaceHoldInterface *holdIface = new Tp::Client::ChannelInterfaceHoldInterface(d->channel.data(), this);
+-    holdIface->RequestHold(on);
++    // The channel owns its interface proxies; creating one per call piled
++    // them up for the lifetime of the call.
++    Tp::Client::ChannelInterfaceHoldInterface *holdIface
++        = d->channel->optionalInterface<Tp::Client::ChannelInterfaceHoldInterface>();
++    if (holdIface)
++        holdIface->RequestHold(on);
++    else
++        WARNING_T("Cannot hold, no interface");
+ }
+ 
+ //FIXME: Don't know what telepathy API provides this.
+@@ -249,22 +256,22 @@ void CallChannelHandler::sendDtmf(const QString &tones)
+ {
+     TRACE
+     Q_D(CallChannelHandler);
+-    Tp::Client::ChannelInterfaceDTMFInterface *dtmfIface = new Tp::Client::ChannelInterfaceDTMFInterface(d->channel.data(), this);
+-
+-    bool ok = true;
+-    unsigned int toneId = tones.toInt(&ok);
+-
+-    if (!ok) {
+-        if (tones == "*") toneId = 10;
+-        else if (tones == "#") toneId = 11;
+-        else if (tones == "A") toneId = 12;
+-        else if (tones == "B") toneId = 13;
+-        else if (tones == "C") toneId = 14;
+-        else if (tones == "D") toneId = 15;
+-        else return;
++    Tp::Client::ChannelInterfaceDTMFInterface *dtmfIface
++        = d->channel->optionalInterface<Tp::Client::ChannelInterfaceDTMFInterface>();
++    if (!dtmfIface) {
++        WARNING_T("Cannot send DTMF, no interface");
++        return;
+     }
+ 
+-    dtmfIface->StartTone(1, toneId, 0);
++    // A single key, as the keypad sends, is one event; "123".toInt() used
++    // to be sent as event 123, and lower case keys were dropped.
++    if (tones.length() == 1) {
++        const int event = Dtmf::event(tones.at(0));
++        if (event >= 0)
++            dtmfIface->StartTone(1, uchar(event));
++    } else if (!tones.isEmpty()) {
++        dtmfIface->MultipleTones(tones);
++    }
+ }
+ 
+ void CallChannelHandler::onCallChannelChannelReady(Tp::PendingOperation *op)
+diff --git a/plugins/providers/telepathy/src/dtmf.h b/plugins/providers/telepathy/src/dtmf.h
+new file mode 100644
+index 0000000..aeaa97b
+--- /dev/null
++++ b/plugins/providers/telepathy/src/dtmf.h
+@@ -0,0 +1,38 @@
++/*
++ * This file is a part of the Voice Call Manager project
++ *
++ * Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ */
++#ifndef DTMF_H
++#define DTMF_H
++
++#include <QChar>
++
++namespace Dtmf {
++
++// The Telepathy DTMF event (0-9, * = 10, # = 11, A-D = 12-15) of a keypad
++// character, or -1.
++inline int event(QChar key)
++{
++    const ushort c = key.unicode();
++    if (c >= '0' && c <= '9')
++        return c - '0';
++    if (c == '*')
++        return 10;
++    if (c == '#')
++        return 11;
++    if (c >= 'A' && c <= 'D')
++        return 12 + (c - 'A');
++    if (c >= 'a' && c <= 'd')
++        return 12 + (c - 'a');
++    return -1;
++}
++
++}
++
++#endif // DTMF_H
+diff --git a/plugins/providers/telepathy/src/farstreamchannel.cpp b/plugins/providers/telepathy/src/farstreamchannel.cpp
+index b1af4ec..6e29533 100644
+--- a/plugins/providers/telepathy/src/farstreamchannel.cpp
++++ b/plugins/providers/telepathy/src/farstreamchannel.cpp
+@@ -88,6 +88,14 @@ FarstreamChannel::~FarstreamChannel()
+ {
+     LIFETIME_TRACER();
+ 
++    // The contents' handlers get this object as user data; no callback may
++    // reach it once it is gone.
++    foreach (TfContent *content, mContents) {
++        g_signal_handlers_disconnect_by_data(content, this);
++        g_object_unref(content);
++    }
++    mContents.clear();
++
+     deinitAudioOutput();
+     deinitAudioInput();
+     deinitGstreamer();
+@@ -99,19 +107,19 @@ FarstreamChannel::~FarstreamChannel()
+         }
+         if (g_signal_handler_is_connected(mTfChannel, mSHFsConferenceAdded)) {
+             g_signal_handler_disconnect(mTfChannel, mSHFsConferenceAdded);
+-            mSHClosed = 0;
++            mSHFsConferenceAdded = 0;
+         }
+         if (g_signal_handler_is_connected(mTfChannel, mSHFsConferenceRemoved)) {
+             g_signal_handler_disconnect(mTfChannel, mSHFsConferenceRemoved);
+-            mSHClosed = 0;
++            mSHFsConferenceRemoved = 0;
+         }
+         if (g_signal_handler_is_connected(mTfChannel, mSHContentAdded)) {
+             g_signal_handler_disconnect(mTfChannel, mSHContentAdded);
+-            mSHClosed = 0;
++            mSHContentAdded = 0;
+         }
+         if (g_signal_handler_is_connected(mTfChannel, mSHContentRemoved)) {
+             g_signal_handler_disconnect(mTfChannel, mSHContentRemoved);
+-            mSHClosed = 0;
++            mSHContentRemoved = 0;
+         }
+         g_object_unref(mTfChannel);
+         mTfChannel = 0;
+@@ -902,7 +910,10 @@ void FarstreamChannel::onContentAdded(TfChannel *tfc, TfContent * content, Farst
+     * as the #TfContent::start-sending and #TfContent::stop-sending signals.
+     */
+ 
+-    if (!self || !self->mGstPipeline) {
++    if (!self)
++        return;
++
++    if (!self->mGstPipeline) {
+         self->setError("GStreamer pipeline not setup");
+         return;
+     }
+@@ -918,6 +929,7 @@ void FarstreamChannel::onContentAdded(TfChannel *tfc, TfContent * content, Farst
+                      G_CALLBACK(&FarstreamChannel::onStopSending), self);
+     g_signal_connect(content, "src-pad-added",
+                      G_CALLBACK(&FarstreamChannel::onSrcPadAddedContent), self);
++    self->mContents.append(static_cast<TfContent *>(g_object_ref(content)));
+ 
+     guint media_type;
+     g_object_get(content, "media-type", &media_type, NULL);
+@@ -994,11 +1006,14 @@ void FarstreamChannel::removeBin(GstElement *bin, bool isSink)
+         }
+     } else {
+         bool resUnlink = GST_PAD_IS_SRC (pad) ? gst_pad_unlink (pad, peer) : gst_pad_unlink(peer, pad);
++        gst_object_unref(peer);
+         if (!resUnlink) {
++            gst_object_unref(pad);
+             setError("GStreamer could not unlink output bin pad");
+             return;
+         }
+     }
++    gst_object_unref(pad);
+ 
+     TRACE();
+     gboolean res = gst_bin_remove(GST_BIN(mGstPipeline), bin);
+@@ -1012,18 +1027,18 @@ void FarstreamChannel::removeBin(GstElement *bin, bool isSink)
+ void FarstreamChannel::onContentRemoved(TfChannel *tfc, TfContent * content, FarstreamChannel *self)
+ {
+     Q_UNUSED(tfc);
+-    Q_UNUSED(content);
+-    Q_UNUSED(self);
+ 
+     LIFETIME_TRACER();
+ 
+-    if (!self || !self->mGstPipeline) {
+-        self->setError("GStreamer pipeline not setup");
++    if (!self || !content)
+         return;
+-    }
+ 
+-    if (!content) {
+-        self->setError("Invalid content received");
++    g_signal_handlers_disconnect_by_data(content, self);
++    if (self->mContents.removeAll(content))
++        g_object_unref(content);
++
++    if (!self->mGstPipeline) {
++        self->setError("GStreamer pipeline not setup");
+         return;
+     }
+ 
+@@ -1042,26 +1057,29 @@ void FarstreamChannel::onContentRemoved(TfChannel *tfc, TfContent * content, Far
+     }
+ }
+ 
+-bool FarstreamChannel::onStartSending(TfContent *content, FarstreamChannel *self)
++gboolean FarstreamChannel::onStartSending(TfContent *content, FarstreamChannel *self)
+ {
+     LIFETIME_TRACER();
+ 
+-    if (!self || !self->mGstPipeline) {
++    if (!self)
++        return FALSE;
++
++    if (!self->mGstPipeline) {
+         self->setError("GStreamer pipeline not setup");
+-        return false;
++        return FALSE;
+     }
+ 
+     if (!content) {
+         self->setError("Invalid content received");
+-        return false;
++        return FALSE;
+     }
+ 
+     guint media_type;
+-    GstPad *sink;
++    GstPad *sink = 0;
+     g_object_get(content, "media-type", &media_type, "sink-pad", &sink, NULL);
+     if (!sink) {
+         self->setError("GStreamer cannot get sink pad from content");
+-        return false;
++        return FALSE;
+     }
+     qDebug() << "FarstreamChannel::onStartSending: content=" << content << " type=" << media_type << "(" << get_media_type_string(media_type) << ")";
+ 
+@@ -1075,18 +1093,21 @@ bool FarstreamChannel::onStartSending(TfContent *content, FarstreamChannel *self
+     } else if (media_type == TP_MEDIA_STREAM_TYPE_VIDEO) {
+     } else {
+         Q_ASSERT(false);
+-        return false;
++        gst_object_unref(sink);
++        return FALSE;
+     }
+ 
+     if (!sourceElement) {
++        gst_object_unref(sink);
+         self->setError("GStreamer source element not found");
+-        return false;
++        return FALSE;
+     }
+ 
+     GstPad *pad = gst_element_get_static_pad(sourceElement, "src");
+     if (!pad) {
++        gst_object_unref(sink);
+         self->setError("GStreamer get source element source pad failed");
+-        return false;
++        return FALSE;
+     }
+ 
+     GstPadLinkReturn resLink = gst_pad_link(pad, sink);
+@@ -1094,27 +1115,30 @@ bool FarstreamChannel::onStartSending(TfContent *content, FarstreamChannel *self
+     gst_object_unref(sink);
+     if (resLink != GST_PAD_LINK_OK && resLink != GST_PAD_LINK_WAS_LINKED) {
+         self->setError("GStreamer could not link input source pad to sink");
+-        return false;
++        return FALSE;
+     }
+ 
+     gst_element_set_locked_state(sourceElement, FALSE);
+ 
+     if (!gst_element_sync_state_with_parent(sourceElement)) {
+         self->setError("GStreamer input state could not be synced with parent");
+-        return false;
++        return FALSE;
+     }
+ 
+     //GST_DEBUG_BIN_TO_DOT_FILE_WITH_TS(GST_BIN(self->mGstPipeline), GST_DEBUG_GRAPH_SHOW_ALL, "impipeline1");
+ 
+-    return true;
++    return TRUE;
+ }
+ 
+ void FarstreamChannel::onStopSending(TfContent *content, FarstreamChannel *self)
+ {
+     LIFETIME_TRACER();
+ 
++    if (!self || !content)
++        return;
++
+     guint media_type;
+-    GstPad *sink;
++    GstPad *sink = 0;
+     g_object_get(content, "media-type", &media_type, "sink-pad", &sink, NULL);
+     if (!sink) {
+         self->setError("GStreamer cannot get sink pad from content");
+@@ -1129,6 +1153,7 @@ void FarstreamChannel::onStopSending(TfContent *content, FarstreamChannel *self)
+         if (!self->mGstAudioInput) {
+             qDebug() << "Audio input is not initialized";
+             Q_ASSERT(false);
++            gst_object_unref(sink);
+             return;
+         }
+         sourceElement = self->mGstAudioInput;
+@@ -1139,6 +1164,7 @@ void FarstreamChannel::onStopSending(TfContent *content, FarstreamChannel *self)
+ 
+     TRACE();
+     if (!sourceElement) {
++        gst_object_unref(sink);
+         self->setError("GStreamer source element not found");
+         return;
+     }
+@@ -1147,6 +1173,7 @@ void FarstreamChannel::onStopSending(TfContent *content, FarstreamChannel *self)
+ 
+     TRACE();
+     if (gst_element_set_state(sourceElement, GST_STATE_NULL) == GST_STATE_CHANGE_FAILURE) {
++        gst_object_unref(sink);
+         self->setError("Failed to stop bin");
+         return;
+     }
+@@ -1154,12 +1181,15 @@ void FarstreamChannel::onStopSending(TfContent *content, FarstreamChannel *self)
+     TRACE();
+     GstPad *pad = gst_element_get_static_pad(sourceElement, "src");
+     if (!pad) {
++        gst_object_unref(sink);
+         self->setError("GStreamer get source element source pad failed");
+         return;
+     }
+ 
+     TRACE();
+     bool resUnlink = gst_pad_unlink(pad, sink);
++    gst_object_unref(pad);
++    gst_object_unref(sink);
+     if (!resUnlink) {
+         self->setError("GStreamer could not unlink input source pad from sink");
+         return;
+@@ -1170,13 +1200,15 @@ void FarstreamChannel::onStopSending(TfContent *content, FarstreamChannel *self)
+ 
+ void FarstreamChannel::onSrcPadAddedContent(TfContent *content, uint handle, FsStream *stream, GstPad *src, FsCodec *codec, FarstreamChannel *self)
+ {
+-    Q_UNUSED(content);
+     Q_UNUSED(handle);
+     Q_UNUSED(codec);
+     Q_ASSERT(stream);
+ 
+     LIFETIME_TRACER();
+ 
++    if (!self || !content)
++        return;
++
+     guint media_type;
+     g_object_get(content, "media-type", &media_type, NULL);
+ 
+@@ -1195,6 +1227,10 @@ void FarstreamChannel::onSrcPadAddedContent(TfContent *content, uint handle, FsS
+         Q_ASSERT(false);
+     }
+ 
++    // No output for this media type (video), or audio output failed to set up
++    if (!bin)
++        return;
++
+     // Add sink bin the first time we get incoming data
+     if (!gst_object_has_ancestor(GST_OBJECT(bin), GST_OBJECT(self->mGstPipeline))) {
+         self->addBin(bin);
+@@ -1211,10 +1247,15 @@ void FarstreamChannel::onSrcPadAddedContent(TfContent *content, uint handle, FsS
+     if (gst_pad_is_linked(pad)) {
+         gst_element_set_locked_state(bin, TRUE);
+         gst_element_set_state (bin, GST_STATE_READY);
+-        gst_pad_unlink (gst_pad_get_peer(pad), pad);
++        GstPad *peer = gst_pad_get_peer(pad);
++        if (peer) {
++            gst_pad_unlink (peer, pad);
++            gst_object_unref(peer);
++        }
+     }
+ 
+     GstPadLinkReturn resLink = gst_pad_link(src, pad);
++    gst_object_unref(pad);
+     if (resLink != GST_PAD_LINK_OK && resLink != GST_PAD_LINK_WAS_LINKED) {
+         //tf_content_error(content, TP_MEDIA_STREAM_ERROR_MEDIA_ERROR, "Could not link sink");
+         self->setError("GStreamer could not link sink pad to source");
+diff --git a/plugins/providers/telepathy/src/farstreamchannel.h b/plugins/providers/telepathy/src/farstreamchannel.h
+index ac59029..9b904e3 100644
+--- a/plugins/providers/telepathy/src/farstreamchannel.h
++++ b/plugins/providers/telepathy/src/farstreamchannel.h
+@@ -69,6 +69,9 @@ private:
+     gulong mSHFsConferenceRemoved;
+     gulong mSHContentAdded;
+     gulong mSHContentRemoved;
++    // Contents we connected to, referenced until removed or destroyed so
++    // their handlers can be disconnected before this object goes away.
++    QList<TfContent *> mContents;
+ 
+     void setState(Tp::MediaStreamState state);
+     void setError(const QString &errorMessage);
+@@ -92,7 +95,8 @@ private:
+     static void onFsConferenceRemoved(TfChannel *tfc, FsConference * conf, FarstreamChannel *self);
+     static void onContentAdded(TfChannel *tfc, TfContent * content, FarstreamChannel *self);
+     static void onContentRemoved(TfChannel *tfc, TfContent * content, FarstreamChannel *self);
+-    static bool onStartSending(TfContent *tfc, FarstreamChannel *self);
++    // A gboolean, not bool: the signal's marshaller reads a full int
++    static gboolean onStartSending(TfContent *tfc, FarstreamChannel *self);
+     static void onStopSending(TfContent *tfc, FarstreamChannel *self);
+     static void onSrcPadAddedContent(TfContent *content, uint handle, FsStream *stream, GstPad *src, FsCodec *codec, FarstreamChannel *self);
+ 
+diff --git a/plugins/providers/telepathy/src/src.pro b/plugins/providers/telepathy/src/src.pro
+index de2ef04..82388ca 100644
+--- a/plugins/providers/telepathy/src/src.pro
++++ b/plugins/providers/telepathy/src/src.pro
+@@ -16,7 +16,8 @@ HEADERS += \
+     farstreamchannel.h \
+     callchannelhandler.h \
+     streamchannelhandler.h \
+-    basechannelhandler.h
++    basechannelhandler.h \
++    dtmf.h
+ 
+ SOURCES += \
+     telepathyproviderplugin.cpp \
+diff --git a/plugins/providers/telepathy/src/streamchannelhandler.cpp b/plugins/providers/telepathy/src/streamchannelhandler.cpp
+index 9525b3a..aec7eee 100644
+--- a/plugins/providers/telepathy/src/streamchannelhandler.cpp
++++ b/plugins/providers/telepathy/src/streamchannelhandler.cpp
+@@ -22,6 +22,7 @@
+ #include "streamchannelhandler.h"
+ 
+ #include "telepathyprovider.h"
++#include "dtmf.h"
+ 
+ #include <TelepathyQt/Channel>
+ 
+@@ -62,7 +63,7 @@ class StreamChannelHandlerPrivate
+ public:
+     StreamChannelHandlerPrivate(StreamChannelHandler *q, const QString &id, Tp::StreamedMediaChannelPtr c, const QDateTime &s, TelepathyProvider *p)
+         : q_ptr(q), pendingHangup(NULL), handlerId(id), provider(p), startedAt(s), status(AbstractVoiceCallHandler::STATUS_NULL),
+-          channel(c), duration(0), durationTimerId(-1), isEmergency(false),
++          channel(c), duration(0), connectedAt(0), durationTimerId(-1), isEmergency(false),
+           isForwarded(false), isIncoming(false), isRemoteHeld(false)
+     { /* ... */ }
+ 
+@@ -312,26 +313,21 @@ void StreamChannelHandler::sendDtmf(const QString &tones)
+     TRACE
+     Q_D(StreamChannelHandler);
+ 
+-    bool ok = true;
+-    unsigned int toneId = tones.toInt(&ok);
+-
+-    if (!ok) {
+-        if (tones == "*") toneId = 10;
+-        else if (tones == "#") toneId = 11;
+-        else if (tones == "A") toneId = 12;
+-        else if (tones == "B") toneId = 13;
+-        else if (tones == "C") toneId = 14;
+-        else if (tones == "D") toneId = 15;
+-        else return;
+-    }
+-
+     Tp::Client::ChannelInterfaceDTMFInterface *dtmfIface
+         = d->channel->optionalInterface<Tp::Client::ChannelInterfaceDTMFInterface>();
+-    if (dtmfIface) {
+-        dtmfIface->StartTone(1, toneId, 0);
+-        //dtmfIface->MultipleTones(tones);
+-    } else {
++    if (!dtmfIface) {
+         WARNING_T("Cannot send DTMF, no interface");
++        return;
++    }
++
++    // A single key, as the keypad sends, is one event; "123".toInt() used
++    // to be sent as event 123, and lower case keys were dropped.
++    if (tones.length() == 1) {
++        const int event = Dtmf::event(tones.at(0));
++        if (event >= 0)
++            dtmfIface->StartTone(1, uchar(event));
++    } else if (!tones.isEmpty()) {
++        dtmfIface->MultipleTones(tones);
+     }
+ }
+ 
+@@ -508,6 +504,10 @@ void StreamChannelHandler::onStreamedMediaChannelInvalidated(Tp::DBusProxy *, co
+     foreach (AbstractVoiceCallHandler *callHandler, d->childCalls) {
+         static_cast<BaseChannelHandler*>(callHandler)->setParentHandlerId(QString());
+     }
++    // Released: with their parent id cleared, the children no longer remove
++    // themselves from this list when they are deleted, which may be before
++    // this handler is (the destructor walks the list).
++    d->childCalls.clear();
+ 
+     setStatus(STATUS_NULL);
+     emit this->invalidated(errorName, errorMessage);
+diff --git a/plugins/providers/telepathy/src/telepathyprovider.cpp b/plugins/providers/telepathy/src/telepathyprovider.cpp
+index c7af1a7..59b674c 100644
+--- a/plugins/providers/telepathy/src/telepathyprovider.cpp
++++ b/plugins/providers/telepathy/src/telepathyprovider.cpp
+@@ -167,7 +167,12 @@ bool TelepathyProvider::createConference(Tp::ChannelPtr channel1, Tp::ChannelPtr
+     }
+ 
+     if (d->account->protocolName() == "sip") {
+-        WARNING_T("Conference calls not supported for SIP protocol");
++        // Fail like the other unsupported cases: there is no request to
++        // wait for (connecting to a null request only produced warnings).
++        d->errorString = "Conference calls not supported for SIP protocol";
++        WARNING_T("%s", qPrintable(d->errorString));
++        emit this->error(d->errorString);
++        return false;
+     } else if (d->account->protocolName() == "tel") {
+         QList<Tp::ChannelPtr> channels;
+         channels << channel1 << channel2;
+diff --git a/plugins/providers/telepathy/src/telepathyproviderplugin.cpp b/plugins/providers/telepathy/src/telepathyproviderplugin.cpp
+index 998e0d5..5bf1234 100644
+--- a/plugins/providers/telepathy/src/telepathyproviderplugin.cpp
++++ b/plugins/providers/telepathy/src/telepathyproviderplugin.cpp
+@@ -93,7 +93,9 @@ TelepathyProviderPlugin::~TelepathyProviderPlugin()
+ {
+     TRACE
+     Q_D(TelepathyProviderPlugin);
+-    d->tpClientRegistrar->unregisterClient(d->tpClientHandler);
++    // Not there if initialize() never ran
++    if (d->tpClientRegistrar)
++        d->tpClientRegistrar->unregisterClient(d->tpClientHandler);
+     delete this->d_ptr;
+ }
+ 
+@@ -226,6 +228,9 @@ void TelepathyProviderPlugin::handleChannels(const Tp::MethodInvocationContextPt
+ 
+     if (!d->providers.contains(account.data()->uniqueIdentifier())) {
+         DEBUG_T("Ignoring channels as account '%s' is not registered.", qPrintable(account.data()->uniqueIdentifier()));
++        // Answer, or the channel dispatcher waits for the D-Bus timeout
++        context->setFinishedWithError(TP_QT_ERROR_NOT_AVAILABLE,
++                                      QLatin1String("Account is not registered with voicecall"));
+         return;
+     }
+ 
+diff --git a/rpm/voicecall-qt5.spec b/rpm/voicecall-qt5.spec
+index 59b7beb..7718b65 100644
+--- a/rpm/voicecall-qt5.spec
++++ b/rpm/voicecall-qt5.spec
+@@ -168,3 +168,4 @@ fi
+ /opt/tests/voicecall/cellbroadcast
+ /opt/tests/voicecall/manager
+ /opt/tests/voicecall/ofono
++/opt/tests/voicecall/telepathy
+diff --git a/tests/dtmf.pro b/tests/dtmf.pro
+new file mode 100644
+index 0000000..3a60eb6
+--- /dev/null
++++ b/tests/dtmf.pro
+@@ -0,0 +1,16 @@
++TEMPLATE = app
++TARGET = tst_dtmf
++QT += core testlib
++QT -= gui
++
++OBJECTS_DIR = $$OUT_PWD/.obj/dtmf
++MOC_DIR = $$OUT_PWD/.moc/dtmf
++
++INCLUDEPATH += ../plugins/providers/telepathy/src
++
++HEADERS += ../plugins/providers/telepathy/src/dtmf.h
++SOURCES += tst_dtmf.cpp
++
++target.path = /opt/tests/voicecall/telepathy
++
++INSTALLS += target
+diff --git a/tests/tests.pro b/tests/tests.pro
+index 212b661..5ba9cbe 100644
+--- a/tests/tests.pro
++++ b/tests/tests.pro
+@@ -4,8 +4,9 @@ store.file = store.pro
+ controller.file = controller.pro
+ manager.file = manager.pro
+ ofono.file = ofono.pro
++dtmf.file = dtmf.pro
+ 
+-SUBDIRS += store controller manager ofono
++SUBDIRS += store controller manager ofono dtmf
+ 
+ tests_xml.path = /opt/tests/voicecall/cellbroadcast
+ tests_xml.files = tests.xml
+diff --git a/tests/tests.xml b/tests/tests.xml
+index 8f15643..5e81e7b 100644
+--- a/tests/tests.xml
++++ b/tests/tests.xml
+@@ -22,6 +22,9 @@
+       <case manual="false" name="ofono-provider">
+         <step>/opt/tests/voicecall/ofono/tst_ofonoprovider</step>
+       </case>
++      <case manual="false" name="telepathy-dtmf">
++        <step>/opt/tests/voicecall/telepathy/tst_dtmf</step>
++      </case>
+     </set>
+   </suite>
+ </testdefinition>
+diff --git a/tests/tst_dtmf.cpp b/tests/tst_dtmf.cpp
+new file mode 100644
+index 0000000..fb09067
+--- /dev/null
++++ b/tests/tst_dtmf.cpp
+@@ -0,0 +1,55 @@
++/*
++ * This file is a part of the Voice Call Manager project
++ *
++ * Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ */
++
++// DTMF key to Telepathy event mapping of the telepathy provider.
++
++#include "dtmf.h"
++
++#include <QtTest>
++
++class tst_Dtmf : public QObject
++{
++    Q_OBJECT
++
++private Q_SLOTS:
++    void keys_data();
++    void keys();
++};
++
++void tst_Dtmf::keys_data()
++{
++    QTest::addColumn<QChar>("key");
++    QTest::addColumn<int>("event");
++
++    for (int i = 0; i <= 9; ++i)
++        QTest::newRow(qPrintable(QString::number(i))) << QChar('0' + i) << i;
++    QTest::newRow("star") << QChar('*') << 10;
++    QTest::newRow("hash") << QChar('#') << 11;
++    QTest::newRow("A") << QChar('A') << 12;
++    QTest::newRow("D") << QChar('D') << 15;
++    QTest::newRow("a") << QChar('a') << 12;
++    QTest::newRow("d") << QChar('d') << 15;
++    QTest::newRow("E") << QChar('E') << -1;
++    QTest::newRow("minus") << QChar('-') << -1;
++    QTest::newRow("space") << QChar(' ') << -1;
++    QTest::newRow("arabic-indic 1") << QChar(0x0661) << -1;
++}
++
++void tst_Dtmf::keys()
++{
++    QFETCH(QChar, key);
++    QFETCH(int, event);
++    QCOMPARE(Dtmf::event(key), event);
++}
++
++QTEST_GUILESS_MAIN(tst_Dtmf)
++
++#include "tst_dtmf.moc"

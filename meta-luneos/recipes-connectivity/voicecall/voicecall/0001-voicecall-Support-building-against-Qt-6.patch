@@ -1,14 +1,17 @@
-From 6bfaf2a7aaca47c436d53ad45ae58b69a92b2c65 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Herman van Hazendonk <github.com@herrie.org>
-Date: Sat, 15 Aug 2026 21:25:12 +0200
-Subject: [PATCH 1/2] Support building against Qt 6
+Date: Fri, 6 Nov 2026 19:25:02 +0100
+Subject: [PATCH] [voicecall] Support building against Qt 6.
 
 The sources build against Qt 5 or Qt 6 from the same tree:
 
-  - qofono is looked up as qofono-qt$${QT_MAJOR_VERSION} rather than
-    hardcoding qofono-qt5.
+  - qofono and mlite are looked up as qofono-qt$${QT_MAJOR_VERSION} and
+    mlite$${QT_MAJOR_VERSION} rather than hardcoding their Qt 5 flavours.
   - qt5-boostable is only looked for on Qt 5; there is no Qt 6 equivalent
     and packagesExist() would warn on every build otherwise.
+  - The commhistory and filter plugins are only built when commhistory-qt
+    is installed. They are optional, and commhistory-qt is part of the
+    Nemo stack and not available everywhere.
   - The recorder uses the Qt 6 multimedia API - QAudioSource,
     QAudioDevice and QMediaDevices - behind QT_VERSION checks. Qt 6
     dropped setSampleSize/setCodec/setByteOrder/setSampleType: a
@@ -17,16 +20,23 @@ The sources build against Qt 5 or Qt 6 from the same tree:
     preferredFormat() replaces nearestFormat().
   - Q_MOC_INCLUDE tells moc where forward-declared types used in
     properties live; it needs Qt 5.15 or newer, so it is guarded.
-  - mlite5 is dropped from src/src.pro, which hardcoded the Qt 5 flavour
-    of a package that has a Qt 6 one. It is still needed - cellbroadcast-
-    topics.cpp uses MDConfItem - so the next commit brings it back as an
-    optional, version-agnostic dependency instead of a hard Qt 5 one.
+  - QString::SkipEmptyParts moved to Qt::SkipEmptyParts in Qt 5.14 and is
+    gone in Qt 6, so the cell broadcast code uses the latter there.
+  - Qt 6 removed QGeoPositionInfoSource::updateTimeout(); a timed out
+    update is reported as errorOccurred(UpdateTimeoutError) instead, so
+    the geofence listens for that on Qt 6.
+  - The cell broadcast store test runs with QTEST_GUILESS_MAIN. On Qt 6
+    QSqlDatabase needs a QCoreApplication to load its driver ("QSqlDatabase
+    requires a QCoreApplication"), and without one the test crashed in
+    QSqlDatabase::open().
 
 Also lets a distribution point the plugin directory somewhere other than
 $$[QT_INSTALL_LIBS] via VOICECALL_INSTALL_LIBDIR, since that value comes
 from the Qt running qmake, which is the host Qt when cross-building.
+
 Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
-Upstream-Status: Pending [written against 8e6ec88, intended for sailfishos/voicecall]
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Upstream-Status: Submitted [https://github.com/sailfishos/voicecall/pull/29]
 ---
  lib/src/abstractvoicecallhandler.h            |  7 ++++++
  lib/src/src.pro                               |  8 ++++++-
@@ -36,8 +46,13 @@ Upstream-Status: Pending [written against 8e6ec88, intended for sailfishos/voice
  plugins/plugin.pri                            |  8 ++++++-
  plugins/plugins.pro                           |  9 +++++++-
  plugins/providers/ofono/src/src.pro           |  2 +-
+ src/cellbroadcastgeofence.cpp                 | 10 +++++++++
+ src/cellbroadcastgeometry.cpp                 |  4 ++++
+ src/cellbroadcaststore.cpp                    | 10 +++++++++
+ src/cellbroadcasttopics.cpp                   |  6 +++++
  src/src.pro                                   | 12 +++++++---
- 9 files changed, 77 insertions(+), 7 deletions(-)
+ tests/tst_cellbroadcaststore.cpp              |  2 +-
+ 14 files changed, 108 insertions(+), 8 deletions(-)
 
 diff --git a/lib/src/abstractvoicecallhandler.h b/lib/src/abstractvoicecallhandler.h
 index c0bd768..56aac08 100644
@@ -227,8 +242,104 @@ index a38a209..6f20ee5 100644
  
  HEADERS += \
      ofonovoicecallhandler.h  \
+diff --git a/src/cellbroadcastgeofence.cpp b/src/cellbroadcastgeofence.cpp
+index 3672743..35a92f0 100644
+--- a/src/cellbroadcastgeofence.cpp
++++ b/src/cellbroadcastgeofence.cpp
+@@ -31,8 +31,18 @@ CellBroadcastGeoFence::CellBroadcastGeoFence(QObject *parent,
+         m_source->setUpdateInterval(1000);
+         connect(m_source, &QGeoPositionInfoSource::positionUpdated,
+                 this, &CellBroadcastGeoFence::positionUpdated);
++#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
++        // Qt 6 reports a timed out update as UpdateTimeoutError instead
++        connect(m_source, &QGeoPositionInfoSource::errorOccurred,
++                this, [this](QGeoPositionInfoSource::Error error) {
++            if (error == QGeoPositionInfoSource::UpdateTimeoutError) {
++                positionTimeout();
++            }
++        });
++#else
+         connect(m_source, &QGeoPositionInfoSource::updateTimeout,
+                 this, &CellBroadcastGeoFence::positionTimeout);
++#endif
+     }
+ }
+ 
+diff --git a/src/cellbroadcastgeometry.cpp b/src/cellbroadcastgeometry.cpp
+index bc7a913..517bb86 100644
+--- a/src/cellbroadcastgeometry.cpp
++++ b/src/cellbroadcastgeometry.cpp
+@@ -170,7 +170,11 @@ CellBroadcastGeometry::Evaluation CellBroadcastGeometry::evaluate(
+ 
+     bool validGeometry = false;
+     bool ambiguous = false;
++#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
++    const QStringList shapes = geometries.split(QLatin1Char(';'), Qt::SkipEmptyParts);
++#else
+     const QStringList shapes = geometries.split(QLatin1Char(';'), QString::SkipEmptyParts);
++#endif
+     for (const QString &shape : shapes) {
+         QStringList parts = shape.split(QLatin1Char('|'));
+         const QString type = parts.takeFirst();
+diff --git a/src/cellbroadcaststore.cpp b/src/cellbroadcaststore.cpp
+index f315983..c890166 100644
+--- a/src/cellbroadcaststore.cpp
++++ b/src/cellbroadcaststore.cpp
+@@ -1296,8 +1296,13 @@ QVariantList CellBroadcastStore::geoFenceAlerts(
+     }
+ 
+     const qint64 cutoff = QDateTime::currentDateTimeUtc().addDays(-1).toMSecsSinceEpoch();
++#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
++    const QStringList references = referenceList.split(QLatin1Char(';'),
++                                                       Qt::SkipEmptyParts);
++#else
+     const QStringList references = referenceList.split(QLatin1Char(';'),
+                                                        QString::SkipEmptyParts);
++#endif
+     QSet<quint64> alertIds;
+     for (const QString &reference : references) {
+         const QStringList identity = reference.split(QLatin1Char(','));
+@@ -1375,8 +1380,13 @@ QVariantList CellBroadcastStore::prepareGeoFenceTrigger(
+         const QVariantMap alert = value.toMap();
+         maximumWait = qMax(maximumWait, maximumWaitSeconds(alert));
+         if (triggerType == SharedWarningAreaTriggerType) {
++#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
++            const QStringList areas = valueString(alert, "Geometries").split(
++                        QLatin1Char(';'), Qt::SkipEmptyParts);
++#else
+             const QStringList areas = valueString(alert, "Geometries").split(
+                         QLatin1Char(';'), QString::SkipEmptyParts);
++#endif
+             for (const QString &area : areas) {
+                 if (!commonAreas.contains(area)) {
+                     commonAreas.append(area);
+diff --git a/src/cellbroadcasttopics.cpp b/src/cellbroadcasttopics.cpp
+index bcea244..6a985ed 100644
+--- a/src/cellbroadcasttopics.cpp
++++ b/src/cellbroadcasttopics.cpp
+@@ -20,6 +20,8 @@
+  */
+ #include "cellbroadcasttopics.h"
+ 
++#include <QtGlobal>
++
+ #include <algorithm>
+ 
+ #include <QStringList>
+@@ -45,7 +47,11 @@ CellBroadcastTopicRangeList CellBroadcastTopics::parse(const QString &topics)
+         return ranges;
+     }
+ 
++#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
++    const QStringList parts = trimmed.split(QLatin1Char(','), Qt::SkipEmptyParts);
++#else
+     const QStringList parts = trimmed.split(QLatin1Char(','), QString::SkipEmptyParts);
++#endif
+     for (const QString &part : parts) {
+         const QString range = part.trimmed();
+         const int separator = range.indexOf(QLatin1Char('-'));
 diff --git a/src/src.pro b/src/src.pro
-index 8070136..a1ce753 100644
+index d5691e5..a90370c 100644
 --- a/src/src.pro
 +++ b/src/src.pro
 @@ -5,16 +5,22 @@ CONFIG += link_pkgconfig
@@ -245,7 +356,7 @@ index 8070136..a1ce753 100644
 +!isEmpty(VOICECALL_INSTALL_LIBDIR): VOICECALL_LIBDIR = $${VOICECALL_INSTALL_LIBDIR}
 +DEFINES += VOICECALL_PLUGIN_DIRECTORY=\"\\\"$${VOICECALL_LIBDIR}/voicecall/plugins\\\"\"
 +
-+PKGCONFIG += qofono-qt$${QT_MAJOR_VERSION}
++PKGCONFIG += mlite$${QT_MAJOR_VERSION} qofono-qt$${QT_MAJOR_VERSION}
  
  enable-nemo-devicelock {
      PKGCONFIG += nemodevicelock
@@ -257,3 +368,14 @@ index 8070136..a1ce753 100644
      DEFINES += HAS_BOOSTER
      PKGCONFIG += qt5-boostable
  } else {
+diff --git a/tests/tst_cellbroadcaststore.cpp b/tests/tst_cellbroadcaststore.cpp
+index 9a1ab1d..d105cce 100644
+--- a/tests/tst_cellbroadcaststore.cpp
++++ b/tests/tst_cellbroadcaststore.cpp
+@@ -1908,5 +1908,5 @@ void TestCellBroadcastStore::cancelsObsoleteGeoFenceRequest()
+ }
+ #endif
+ 
+-QTEST_APPLESS_MAIN(TestCellBroadcastStore)
++QTEST_GUILESS_MAIN(TestCellBroadcastStore)
+ #include "tst_cellbroadcaststore.moc"
