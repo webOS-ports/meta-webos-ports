@@ -154,6 +154,31 @@ signal_strength_range=${deviceinfo_binder_signal_strength_range:--125,-85}
 # swap is chosen (11 Nov 2026). A 5G device adds nr in its deviceinfo.
 technologies=${deviceinfo_binder_technologies:-gsm,umts,lte}
 
+# The radio capability manager does not work over HIDL, so it is off there.
+# Before a swap it locks every slot's RadioClient for its own request group
+# and then waits for setDataAllowed(false) on each slot. That request goes out
+# through the data request group, and over HIDL the data and modem interfaces
+# are the same RadioClient, which the capability group now owns: it can never
+# be sent. Every swap stalls both slots until that request times out and the
+# swap is abandoned. Unpatched libgbinder-radio never armed the timeout of a
+# request still in the queue, so on an idle slot the stall was permanent; and
+# the wait for the slots' locks, before that, has no timeout at all. The swap
+# starts whenever a SIM goes offline or online, airplane mode included.
+# Measured on the MindPhone (12 Nov 2026), with "auto": 54 swaps started and
+# none reached setRadioCapability; both SIMs stayed dead until ofonod was
+# restarted after 3 of 6 SIM 1 off/on toggles and 1 of 2 airplane mode cycles,
+# and with the libgbinder-radio timeout fix still after 1 of 3 airplane mode
+# cycles (0 of 10 toggles). With "off": 14 toggles and 6 airplane mode cycles,
+# every dial reached the modem. The LTE-to-data-SIM swap described above is
+# chosen but never carried out, so nothing that works is lost. AIDL keeps the
+# plugin's own default: there the data interface is a client of its own.
+# deviceinfo_binder_set_radio_capability (auto, on or off) overrides either.
+if [ "$iface" = "hidl" ]; then
+    set_radio_capability=${deviceinfo_binder_set_radio_capability:-off}
+else
+    set_radio_capability=${deviceinfo_binder_set_radio_capability:-}
+fi
+
 mkdir -p "$GEN/files/etc/ofono"
 
 # ExpectSlots names only the first: boot should not wait on slots that are
@@ -174,6 +199,7 @@ mkdir -p "$GEN/files/etc/ofono"
     else
         echo "ExpectSlots = slot1"
     fi
+    [ -n "$set_radio_capability" ] && echo "SetRadioCapability = $set_radio_capability"
     for s in $slots; do
         n=${s#slot}
         echo
