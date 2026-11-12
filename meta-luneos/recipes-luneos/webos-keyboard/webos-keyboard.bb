@@ -17,7 +17,8 @@ inherit qt6-qmake
 inherit webos_ports_repo
 inherit pkgconfig
 
-DEPENDS = "maliit-framework-webos hunspell presage luna-service2 presage-native qt5compat"
+# sqlite3: the Pre Keyboard's swipe reads presage's word databases with it directly.
+DEPENDS = "maliit-framework-webos hunspell presage luna-service2 presage-native qt5compat sqlite3"
 
 # maliit-framework-webos provides maliit-server, which hosts the keyboard plugin
 # this recipe installs into ${libdir}/maliit/plugins -- without it there is no VKB
