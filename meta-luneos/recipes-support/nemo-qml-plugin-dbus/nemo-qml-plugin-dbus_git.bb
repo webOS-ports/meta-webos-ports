@@ -14,7 +14,9 @@ SRCREV = "32d1696a0c81f25deb278e76fc919e8da990d26b"
 # 0001-Fix-build-with-Qt-6.5.patch was dropped at 2.1.39: upstream's "Allow build
 # with Qt 6" (2dcadbf) made signalHandler() build both ways by constructing the
 # QGenericArgument from QMetaType under Qt 6, which covers the same Q_ARG error.
-SRC_URI = "git://github.com/sailfishos/nemo-qml-plugin-dbus;branch=master;protocol=https"
+SRC_URI = "git://github.com/sailfishos/nemo-qml-plugin-dbus;branch=master;protocol=https \
+           file://0001-Deliver-D-Bus-signals-to-QML-with-Qt-6.patch \
+"
 
 inherit qt6-qmake
 
