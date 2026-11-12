@@ -18,7 +18,8 @@ inherit webos_ports_repo
 inherit pkgconfig
 
 # sqlite3: the Pre Keyboard's swipe reads presage's word databases with it directly.
-DEPENDS = "maliit-framework-webos hunspell presage luna-service2 presage-native qt5compat sqlite3"
+# pulseaudio: its dictation listens through libpulse-simple.
+DEPENDS = "maliit-framework-webos hunspell presage luna-service2 presage-native qt5compat sqlite3 pulseaudio"
 
 # maliit-framework-webos provides maliit-server, which hosts the keyboard plugin
 # this recipe installs into ${libdir}/maliit/plugins -- without it there is no VKB
@@ -31,6 +32,10 @@ RRECOMMENDS:${PN} += "hunspell-dictionaries"
 # in qtbase-plugins) and their previews (the GIF reader, also there, and WebP,
 # in qtimageformats-plugins). Without them the tabs stay empty; nothing else.
 RRECOMMENDS:${PN} += "qtbase-plugins qtimageformats-plugins"
+# Dictation (hold the Pre Keyboard's period): Vosk, opened when first used, and
+# a model per language in ${datadir}/vosk, which the image picks
+# (vosk-model-small-*). Without them the period has no microphone.
+RRECOMMENDS:${PN} += "vosk"
 
 
 SRCREV = "0cfafafa734eaa81aed8633b969c20f4b4e71e7f"
