@@ -1,0 +1,65 @@
+# LuneOS adaptation for the Unihertz Titan (the original, 2019; MT6771).
+#
+# Only what cannot be derived belongs here. The vendor is Unihertz's Android 10
+# (VNDK 29: /vendor/etc/selinux/plat_sepolicy_vers.txt reads 29.0) under the
+# Android 16 GSI. First boot on a Titan: 12 Nov 2026.
+
+# The GPU driver needs libladder.so, which imports Unwinder::FormatFrame(size_t)
+# under its Android 10 name; Android 16 has it only as a const method. Without
+# this the compositor aborts on every start ("couldn't find an OpenGL ES
+# implementation") and the screen stays black. See
+# generators/05-vendor-weak-imports. Only the 64-bit library: the rootfs is
+# aarch64, so nothing on the host loads lib/libladder.so.
+deviceinfo_vendor_weak_imports="lib64/libladder.so:_ZN11unwindstack8Unwinder11FormatFrameEm"
+
+# The vendor's configstore HAL dies of SIGSYS (its Android 10 seccomp policy
+# against Android 16's libc) every 5 s. meta-unihertz's
+# extra-init.d/Titan/vendor-configstore-off.rc marks it disabled; this keeps
+# start-android-hals.sh from force-starting it because it is.
+#
+# fuse_usbotg, from the vendor's init.project.rc, is disabled there too, and
+# runs /system/bin/sdcard with an Android 6 command line (-u -g -w -d <source>
+# <target>) that Android 16's sdcard rejects ("too many arguments"), so once
+# force-started it exited and was restarted for as long as the phone was on
+# (12 Nov 2026: the restart message 60 times a minute in the kernel log). USB
+# storage on LuneOS does not go through it.
+deviceinfo_android_skip_services="vendor.configstore-hal fuse_usbotg"
+
+# The Bluetooth controller answers Read Local Supported Commands with octets
+# 25-28, the whole LE range, cleared - the MT6739's habit, which bluebinder's
+# BLUEBINDER_LOCAL_COMMANDS_SET was written for. The kernel then leaves LE
+# Advertising Report out of the LE event mask (it was 0x10), so a scan found
+# nothing although the Titan was itself visible to other phones. Measured on
+# the device (12 Nov 2026): with these bits, the four that only gate events,
+# a 15 s scan found 10 devices. See generators/80-bluebinder-env.
+deviceinfo_bluebinder_local_commands_set="26:18,27:24"
+
+# audio.primary.mt6771.so does not load into pulseaudio by default, so there is
+# no sound:
+#
+#   cannot locate symbol "_ZN7android13TypeConverterINS_12VectorTraitsI14audio_format_tEEE6mTableE"
+#     referenced by "/android/vendor/lib64/hw/audio.primary.mt6771.so"
+#
+# The Pocket's fix, hybris_prefer_vndk, is half of it here: with it the GSI's
+# libcgrouprc.so gets VNDK 29's libbase and misses Android 11's
+# android::base::LogMessage and ShouldLog instead. The other half gives
+# pulseaudio the stock Android 10 system partition's libcgrouprc.so, built
+# against that libbase; see generators/70-pulseaudio-env. Measured on the
+# device (12 Nov 2026): with both, module-droid-card loads the HAL and the
+# speaker plays.
+deviceinfo_hybris_prefer_vndk="1"
+deviceinfo_pulseaudio_stock_libcgrouprc="1"
+
+# The keyboard backlight is the LED class device button-backlight, as on the
+# Titan Pocket; nyx does not find it by name. 30-nyx-conf hands this to nyx's
+# led_controller.
+deviceinfo_keypad_backlight_path="/sys/class/leds/button-backlight"
+
+# The notification LED is the MT6370's RGB LED, four numbered channels, wired
+# as on the Titan Pocket. Each lit alone at max_brightness (12 Nov 2026), on
+# the charger: led1 nothing (only the faint red charge indicator showed), led2
+# green, led3 blue, led4 red. led4 is also the charge indicator, which the
+# charger drives when nothing else does.
+deviceinfo_notification_led_red_path="/sys/class/leds/mt6370_pmu_led4"
+deviceinfo_notification_led_green_path="/sys/class/leds/mt6370_pmu_led2"
+deviceinfo_notification_led_blue_path="/sys/class/leds/mt6370_pmu_led3"

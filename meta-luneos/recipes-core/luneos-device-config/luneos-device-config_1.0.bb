@@ -1,5 +1,5 @@
 DESCRIPTION = "Derive device configuration at runtime so one rootfs boots on any device"
-PR = "r18"
+PR = "r23"
 
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
@@ -12,8 +12,11 @@ SECTION = "base"
 PACKAGE_ARCH = "${TUNE_PKGARCH}"
 
 # udevadm for input capability queries, and the container's getprop. kmod for
-# the modules a boot image stages.
-RDEPENDS:${PN} = "udev kmod"
+# the modules a boot image stages. python3 for elf-weaken-imports, which
+# generators/05-vendor-weak-imports runs for an adaptation that asks for it.
+# e2fsprogs for debugfs, which generators/70-pulseaudio-env uses to read a file
+# off the stock system partition without mounting it.
+RDEPENDS:${PN} = "udev kmod python3-core e2fsprogs"
 
 inherit systemd
 
@@ -31,6 +34,8 @@ SRC_URI = " \
     file://pulseaudio.conf \
     file://bluebinder-luneos-device.conf \
     file://hardware-keys.json \
+    file://elf-weaken-imports \
+    file://pulseaudio-stock-libcgrouprc.conf \
 "
 
 # Everything in SRC_URI is a local file, so nothing lands in the default
@@ -45,12 +50,19 @@ do_install() {
 
     install -d ${D}${systemd_unitdir}/system
     install -m 0644 ${UNPACKDIR}/luneos-device-config.service ${D}${systemd_unitdir}/system
+    # Binds what generators/70-pulseaudio-env may leave in /run; a no-op otherwise.
+    install -d ${D}${systemd_unitdir}/system/pulseaudio.service.d
+    install -m 0644 ${UNPACKDIR}/pulseaudio-stock-libcgrouprc.conf \
+        ${D}${systemd_unitdir}/system/pulseaudio.service.d/50-luneos-stock-libcgrouprc.conf
 
     install -d ${D}${datadir}/luneos/adaptations
     cp -r ${UNPACKDIR}/adaptations/* ${D}${datadir}/luneos/adaptations/
 
     install -d ${D}${libdir}/luneos-device-config/generators
     install -m 0755 ${UNPACKDIR}/generators/* ${D}${libdir}/luneos-device-config/generators/
+    # Beside the generators, not among them: every executable in generators/
+    # is run as one.
+    install -m 0755 ${UNPACKDIR}/elf-weaken-imports ${D}${libdir}/luneos-device-config/
 
     # Ship the configd override layer directory empty. /etc/configd/layers.json
     # already declares it at priority 900; shipping the mount point means the
@@ -73,6 +85,6 @@ do_install() {
         ${D}${localstatedir}/lib/environment/bluebinder/luneos-device.conf
 }
 
-FILES:${PN} += "${datadir}/luneos/adaptations ${libdir}/luneos-device-config ${sysconfdir}/configd/layers/overlay ${sysconfdir}/default/pulseaudio.conf ${localstatedir}/lib/environment/bluebinder/luneos-device.conf ${sysconfdir}/luneos/hardware-keys.json"
+FILES:${PN} += "${systemd_unitdir}/system/pulseaudio.service.d ${datadir}/luneos/adaptations ${libdir}/luneos-device-config ${sysconfdir}/configd/layers/overlay ${sysconfdir}/default/pulseaudio.conf ${localstatedir}/lib/environment/bluebinder/luneos-device.conf ${sysconfdir}/luneos/hardware-keys.json"
 
 SYSTEMD_SERVICE:${PN} = "luneos-device-config.service"
