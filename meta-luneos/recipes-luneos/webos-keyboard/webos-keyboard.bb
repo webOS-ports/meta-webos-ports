@@ -8,6 +8,10 @@ LIC_FILES_CHKSUM = " \
     file://COPYING.CC-BY;md5=c14dd4d440694f070fc6520d9c9a65eb \
     file://plugins/CORPORA.md;md5=a6c8dc2742b00f66707c53ed5c95bb34 \
 "
+# The Pre keyboard data (Unicode-3.0) is on herrie/pre-keyboard, not yet on
+# master; enable these once it is merged.
+#LICENSE:append = " & Unicode-3.0"
+#LIC_FILES_CHKSUM:append = " file://data/pre/README.md;beginline=16;endline=18;md5=0a2beda967c8ffe730a4393d309ddf2b"
 
 inherit qt6-qmake
 inherit webos_ports_repo
@@ -24,15 +28,16 @@ RDEPENDS:${PN} += "maliit-framework-webos qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS:${PN} += "hunspell-dictionaries"
 
 
-SRCREV = "f8453b96e552c1e8cde94407468268acdb7a03f5"
+SRCREV = "0cfafafa734eaa81aed8633b969c20f4b4e71e7f"
+PE = "2"
 PV = "0.99.2+git"
-PR = "r33"
+PR = "r34"
 
 # We own webos-keyboard, so fixes belong in its actual source history, not
 # as patches carried here - unlike presage or imemanager, which are genuinely
 # upstream/third-party. 0001-0003 (hunspell API compat, hardware keyboard
 # input, Qt6Core5Compat linking) and the db8-backed user dictionary are all
-# real commits on herrie/dict-backup now; this SRCREV is the tip of that.
+# real commits now (herrie/dict-backup, merged into master).
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 # a lot of cases like:
