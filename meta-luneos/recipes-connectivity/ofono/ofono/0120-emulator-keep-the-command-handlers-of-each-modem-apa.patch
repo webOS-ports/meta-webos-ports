@@ -1,0 +1,547 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] emulator: keep the command handlers of each modem apart
+
+GAtServer keeps one handler per command prefix, and with several modems
+on one emulator every modem's voicecall, netreg and sim registers the
+same prefixes: A, +CHUP, +CLCC, +CHLD, +VTS, D, +BLDN, +COPS, +CNUM.
+Whoever registers last owns the command, and when one modem's atom
+goes away its ofono_emulator_remove_handler() also takes the prefix
+away from the others. If the modem that goes away owned the handler,
+the server keeps calling it with that modem's freed data. Sailfish
+d9c68c4f has this problem.
+
+Keep a list of handlers on the emulator, each with the atom that owns
+it, and register one proxy per prefix with GAtServer. For each request
+the proxy picks the handler: one added through the public
+ofono_emulator_add_handler() (no owner) if there is one, otherwise the
+one owned by the first modem the emulator serves that has it. A prefix
+with no handler left answers ERROR and is removed from the server.
+
+__ofono_emulator_add_atom_handler() and
+__ofono_emulator_remove_atom_handler() add and remove a handler owned
+by the emulator atom passed in. voicecall, network and sim now use
+them.
+When a modem's atom is unregistered its handlers are freed, and the
+handlers of the other modems answer from then on.
+
+devinfo still uses the public API; it registers only on DUN, which
+serves one modem.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+diff --git a/src/emulator.c b/src/emulator.c
+index 3967c19..f62687c 100644
+--- a/src/emulator.c
++++ b/src/emulator.c
+@@ -44,6 +44,8 @@ struct emulator_modem {
+ struct ofono_emulator {
+ 	GSList *modems;		/* struct emulator_modem, in order added */
+ 	bool registered;
++	GSList *handlers;	/* struct handler, in order added */
++	GSList *prefixes;	/* prefixes registered with the AT server */
+ 	enum ofono_emulator_type type;
+ 	GAtServer *server;
+ 	GAtPPP *ppp;
+@@ -1212,6 +1214,10 @@ static bool other_modem_registered(struct ofono_emulator *em,
+ 	return false;
+ }
+ 
++static void handlers_free(struct ofono_emulator *em);
++static void handlers_drop_owner(struct ofono_emulator *em,
++					struct ofono_atom *owner);
++
+ static void emulator_teardown(struct ofono_emulator *em)
+ {
+ 	GSList *l;
+@@ -1246,6 +1252,8 @@ static void emulator_teardown(struct ofono_emulator *em)
+ 	g_at_server_unref(em->server);
+ 	em->server = NULL;
+ 
++	handlers_free(em);
++
+ 	ofono_handsfree_card_remove(em->card);
+ 	em->card = NULL;
+ }
+@@ -1260,8 +1268,11 @@ static void emulator_unregister(struct ofono_atom *atom)
+ 	 * A modem going away only takes its own atom with it. The link
+ 	 * stays up for as long as the emulator serves any modem at all.
+ 	 */
+-	if (other_modem_registered(em, atom))
++	if (other_modem_registered(em, atom)) {
++		/* Whatever this modem answered, another one answers now */
++		handlers_drop_owner(em, atom);
+ 		return;
++	}
+ 
+ 	emulator_teardown(em);
+ }
+@@ -1525,11 +1536,25 @@ void ofono_emulator_send_info(struct ofono_emulator *em, const char *line,
+ 	g_at_server_send_info(em->server, line, last);
+ }
+ 
++/*
++ * A command handler. A subsystem of one modem adds it for that modem's
++ * emulator atom (owner), so that each modem keeps its own handler and losing
++ * a modem only ever drops that modem's. The public API adds handlers without
++ * an owner; those take precedence, as replacing a handler always did.
++ */
+ struct handler {
+ 	ofono_emulator_request_cb_t cb;
+ 	void *data;
+ 	ofono_destroy_func destroy;
+ 	struct ofono_emulator *em;
++	struct ofono_atom *owner;
++	char *prefix;
++};
++
++/* What the AT server calls for a prefix: the handler is picked per request */
++struct handler_slot {
++	struct ofono_emulator *em;
++	char prefix[];
+ };
+ 
+ struct ofono_emulator_request {
+@@ -1537,12 +1562,54 @@ struct ofono_emulator_request {
+ 	enum ofono_emulator_request_type type;
+ };
+ 
++static struct handler *active_handler(struct ofono_emulator *em,
++						const char *prefix)
++{
++	struct handler *found = NULL;
++	GSList *l;
++	GSList *m;
++
++	for (l = em->handlers; l; l = l->next) {
++		struct handler *h = l->data;
++
++		if (h->owner == NULL && !strcmp(h->prefix, prefix))
++			found = h;
++	}
++
++	if (found)
++		return found;
++
++	/* Otherwise the first modem, in the order they were added */
++	for (m = em->modems; m; m = m->next) {
++		struct emulator_modem *em_modem = m->data;
++
++		if (!__ofono_atom_get_registered(em_modem->atom))
++			continue;
++
++		for (l = em->handlers; l; l = l->next) {
++			struct handler *h = l->data;
++
++			if (h->owner == em_modem->atom &&
++					!strcmp(h->prefix, prefix))
++				return h;
++		}
++	}
++
++	return NULL;
++}
++
+ static void handler_proxy(GAtServer *server, GAtServerRequestType type,
+ 					GAtResult *result, gpointer userdata)
+ {
+-	struct handler *h = userdata;
++	struct handler_slot *slot = userdata;
++	struct handler *h = active_handler(slot->em, slot->prefix);
+ 	struct ofono_emulator_request req;
+ 
++	if (h == NULL) {
++		g_at_server_send_final(server, G_AT_SERVER_RESULT_ERROR);
++		return;
++	}
++
+ 	switch (type) {
+ 	case G_AT_SERVER_REQUEST_TYPE_COMMAND_ONLY:
+ 		req.type = OFONO_EMULATOR_REQUEST_TYPE_COMMAND_ONLY;
+@@ -1560,17 +1627,17 @@ static void handler_proxy(GAtServer *server, GAtServerRequestType type,
+ 	g_at_result_iter_init(&req.iter, result);
+ 	g_at_result_iter_next(&req.iter, "");
+ 
+-	h->cb(h->em, &req, h->data);
++	h->cb(slot->em, &req, h->data);
+ }
+ 
+ static void handler_proxy_need_slc(GAtServer *server,
+ 					GAtServerRequestType type,
+ 					GAtResult *result, gpointer userdata)
+ {
+-	struct handler *h = userdata;
++	struct handler_slot *slot = userdata;
+ 
+-	if (h->em->slc == FALSE) {
+-		g_at_server_send_final(h->em->server, G_AT_SERVER_RESULT_ERROR);
++	if (slot->em->slc == FALSE) {
++		g_at_server_send_final(server, G_AT_SERVER_RESULT_ERROR);
+ 		return;
+ 	}
+ 
+@@ -1580,39 +1647,72 @@ static void handler_proxy_need_slc(GAtServer *server,
+ static void handler_proxy_chld(GAtServer *server, GAtServerRequestType type,
+ 				GAtResult *result, gpointer userdata)
+ {
+-	struct handler *h = userdata;
++	struct handler_slot *slot = userdata;
+ 
+-	if (h->em->slc == FALSE && type != G_AT_SERVER_REQUEST_TYPE_SUPPORT) {
+-		g_at_server_send_final(h->em->server, G_AT_SERVER_RESULT_ERROR);
++	if (slot->em->slc == FALSE && type != G_AT_SERVER_REQUEST_TYPE_SUPPORT) {
++		g_at_server_send_final(server, G_AT_SERVER_RESULT_ERROR);
+ 		return;
+ 	}
+ 
+ 	handler_proxy(server, type, result, userdata);
+ }
+ 
+-static void handler_destroy(gpointer userdata)
++static void handler_free(struct handler *h)
+ {
+-	struct handler *h = userdata;
+-
+ 	if (h->destroy)
+ 		h->destroy(h->data);
+ 
++	l_free(h->prefix);
+ 	g_free(h);
+ }
+ 
+-ofono_bool_t ofono_emulator_add_handler(struct ofono_emulator *em,
+-					const char *prefix,
+-					ofono_emulator_request_cb_t cb,
+-					void *data, ofono_destroy_func destroy)
++static bool prefix_in_use(struct ofono_emulator *em, const char *prefix)
+ {
+-	struct handler *h;
++	GSList *l;
++
++	for (l = em->handlers; l; l = l->next) {
++		struct handler *h = l->data;
++
++		if (!strcmp(h->prefix, prefix))
++			return true;
++	}
++
++	return false;
++}
++
++static GSList *find_prefix(struct ofono_emulator *em, const char *prefix)
++{
++	GSList *l;
++
++	for (l = em->prefixes; l; l = l->next)
++		if (!strcmp(l->data, prefix))
++			return l;
++
++	return NULL;
++}
++
++/* Keep the AT server's view of a prefix in step with the handler list */
++static bool prefix_sync(struct ofono_emulator *em, const char *prefix)
++{
++	GSList *l = find_prefix(em, prefix);
+ 	GAtServerNotifyFunc func = handler_proxy;
++	struct handler_slot *slot;
++	size_t len;
+ 
+-	h = g_new0(struct handler, 1);
+-	h->cb = cb;
+-	h->data = data;
+-	h->destroy = destroy;
+-	h->em = em;
++	if (!prefix_in_use(em, prefix)) {
++		if (l == NULL)
++			return true;
++
++		if (em->server)
++			g_at_server_unregister(em->server, prefix);
++
++		l_free(l->data);
++		em->prefixes = g_slist_delete_link(em->prefixes, l);
++		return true;
++	}
++
++	if (l)
++		return true;
+ 
+ 	if (em->type == OFONO_EMULATOR_TYPE_HFP) {
+ 		func = handler_proxy_need_slc;
+@@ -1621,19 +1721,148 @@ ofono_bool_t ofono_emulator_add_handler(struct ofono_emulator *em,
+ 			func = handler_proxy_chld;
+ 	}
+ 
+-	if (g_at_server_register(em->server, prefix, func, h,
+-					handler_destroy) == TRUE)
++	len = strlen(prefix);
++	slot = g_malloc0(sizeof(*slot) + len + 1);
++	slot->em = em;
++	memcpy(slot->prefix, prefix, len);
++
++	if (!g_at_server_register(em->server, prefix, func, slot, g_free)) {
++		g_free(slot);
++		return false;
++	}
++
++	em->prefixes = g_slist_prepend(em->prefixes, l_strdup(prefix));
++	return true;
++}
++
++/* Remove the handlers of one owner, NULL being the public API's */
++static bool handlers_remove(struct ofono_emulator *em,
++				struct ofono_atom *owner, const char *prefix)
++{
++	GSList *l = em->handlers;
++	bool removed = false;
++
++	while (l) {
++		struct handler *h = l->data;
++		GSList *next = l->next;
++
++		if (h->owner == owner && !strcmp(h->prefix, prefix)) {
++			em->handlers = g_slist_delete_link(em->handlers, l);
++			handler_free(h);
++			removed = true;
++		}
++
++		l = next;
++	}
++
++	return removed;
++}
++
++static ofono_bool_t handler_add(struct ofono_emulator *em,
++				struct ofono_atom *owner, const char *prefix,
++				ofono_emulator_request_cb_t cb,
++				void *data, ofono_destroy_func destroy)
++{
++	struct handler *h;
++
++	if (em->server == NULL || prefix == NULL || cb == NULL)
++		return FALSE;
++
++	/* Adding again for the same owner replaces, as it always did */
++	handlers_remove(em, owner, prefix);
++
++	h = g_new0(struct handler, 1);
++	h->cb = cb;
++	h->data = data;
++	h->destroy = destroy;
++	h->em = em;
++	h->owner = owner;
++	h->prefix = l_strdup(prefix);
++
++	em->handlers = g_slist_append(em->handlers, h);
++
++	if (prefix_sync(em, prefix))
+ 		return TRUE;
+ 
++	em->handlers = g_slist_remove(em->handlers, h);
++	l_free(h->prefix);
+ 	g_free(h);
+ 
+ 	return FALSE;
+ }
+ 
++static void handlers_drop_owner(struct ofono_emulator *em,
++					struct ofono_atom *owner)
++{
++	GSList *l = em->handlers;
++	GSList *prefixes = NULL;
++	GSList *p;
++
++	while (l) {
++		struct handler *h = l->data;
++		GSList *next = l->next;
++
++		if (h->owner == owner) {
++			em->handlers = g_slist_delete_link(em->handlers, l);
++			prefixes = g_slist_prepend(prefixes, h->prefix);
++			h->prefix = NULL;
++			handler_free(h);
++		}
++
++		l = next;
++	}
++
++	for (p = prefixes; p; p = p->next)
++		prefix_sync(em, p->data);
++
++	g_slist_free_full(prefixes, l_free);
++}
++
++/* Teardown: the AT server is gone, and with it every handler slot */
++static void handlers_free(struct ofono_emulator *em)
++{
++	g_slist_free_full(em->handlers, (GDestroyNotify) handler_free);
++	em->handlers = NULL;
++
++	g_slist_free_full(em->prefixes, l_free);
++	em->prefixes = NULL;
++}
++
++ofono_bool_t ofono_emulator_add_handler(struct ofono_emulator *em,
++					const char *prefix,
++					ofono_emulator_request_cb_t cb,
++					void *data, ofono_destroy_func destroy)
++{
++	return handler_add(em, NULL, prefix, cb, data, destroy);
++}
++
+ ofono_bool_t ofono_emulator_remove_handler(struct ofono_emulator *em,
+ 						const char *prefix)
+ {
+-	return g_at_server_unregister(em->server, prefix);
++	bool removed = handlers_remove(em, NULL, prefix);
++
++	prefix_sync(em, prefix);
++
++	return removed;
++}
++
++ofono_bool_t __ofono_emulator_add_atom_handler(struct ofono_atom *atom,
++					const char *prefix,
++					ofono_emulator_request_cb_t cb,
++					void *data, ofono_destroy_func destroy)
++{
++	struct ofono_emulator *em = __ofono_atom_get_data(atom);
++
++	return handler_add(em, atom, prefix, cb, data, destroy);
++}
++
++void __ofono_emulator_remove_atom_handler(struct ofono_atom *atom,
++						const char *prefix)
++{
++	struct ofono_emulator *em = __ofono_atom_get_data(atom);
++
++	if (handlers_remove(em, atom, prefix))
++		prefix_sync(em, prefix);
+ }
+ 
+ ofono_bool_t ofono_emulator_request_next_string(
+diff --git a/src/network.c b/src/network.c
+index 88a1d53..257538f 100644
+--- a/src/network.c
++++ b/src/network.c
+@@ -1728,9 +1728,7 @@ const char *ofono_netreg_get_mnc(struct ofono_netreg *netreg)
+ 
+ static void emulator_remove_handler(struct ofono_atom *atom, void *data)
+ {
+-	struct ofono_emulator *em = __ofono_atom_get_data(atom);
+-
+-	ofono_emulator_remove_handler(em, data);
++	__ofono_emulator_remove_atom_handler(atom, data);
+ }
+ 
+ static void netreg_unregister(struct ofono_atom *atom)
+@@ -1972,13 +1970,13 @@ fail:
+ static void emulator_hfp_init(struct ofono_atom *atom, void *data)
+ {
+ 	struct ofono_netreg *netreg = data;
+-	struct ofono_emulator *em = __ofono_atom_get_data(atom);
+ 
+ 	notify_emulator_status(atom, GINT_TO_POINTER(netreg->status));
+ 	notify_emulator_strength(atom,
+ 				GINT_TO_POINTER(netreg->signal_strength));
+ 
+-	ofono_emulator_add_handler(em, "+COPS", emulator_cops_cb, data, NULL);
++	__ofono_emulator_add_atom_handler(atom, "+COPS", emulator_cops_cb,
++						data, NULL);
+ }
+ 
+ static void emulator_hfp_watch(struct ofono_atom *atom,
+diff --git a/src/ofono.h b/src/ofono.h
+index 154cdaa..7432ba0 100644
+--- a/src/ofono.h
++++ b/src/ofono.h
+@@ -643,6 +643,18 @@ enum ofono_emulator_slc_condition {
+ 
+ void __ofono_emulator_set_indicator_forced(struct ofono_emulator *em,
+ 						const char *name, int value);
++/*
++ * Handlers that one modem's subsystems add for that modem's emulator atom.
++ * An emulator serving several modems keeps each modem's handlers apart and
++ * answers with the first modem's; a modem leaving drops only its own.
++ */
++ofono_bool_t __ofono_emulator_add_atom_handler(struct ofono_atom *atom,
++					const char *prefix,
++					ofono_emulator_request_cb_t cb,
++					void *data, ofono_destroy_func destroy);
++void __ofono_emulator_remove_atom_handler(struct ofono_atom *atom,
++						const char *prefix);
++
+ void __ofono_emulator_slc_condition(struct ofono_emulator *em,
+ 					enum ofono_emulator_slc_condition cond);
+ 
+diff --git a/src/sim.c b/src/sim.c
+index 1d60181..3b0b559 100644
+--- a/src/sim.c
++++ b/src/sim.c
+@@ -3356,9 +3356,7 @@ void __ofono_sim_recheck_pin(struct ofono_sim *sim)
+ 
+ static void emulator_remove_handler(struct ofono_atom *atom, void *data)
+ {
+-	struct ofono_emulator *em = __ofono_atom_get_data(atom);
+-
+-	ofono_emulator_remove_handler(em, data);
++	__ofono_emulator_remove_atom_handler(atom, data);
+ }
+ 
+ /*
+@@ -3715,11 +3713,9 @@ static void emulator_hfp_watch(struct ofono_atom *atom,
+ 				enum ofono_atom_watch_condition cond,
+ 				void *data)
+ {
+-	struct ofono_emulator *em = __ofono_atom_get_data(atom);
+-
+ 	if (cond == OFONO_ATOM_WATCH_CONDITION_REGISTERED)
+-		ofono_emulator_add_handler(em, "+CNUM", emulator_cnum_cb, data,
+-						NULL);
++		__ofono_emulator_add_atom_handler(atom, "+CNUM",
++						emulator_cnum_cb, data, NULL);
+ }
+ 
+ void ofono_sim_register(struct ofono_sim *sim)
+diff --git a/src/voicecall.c b/src/voicecall.c
+index 42921cd..1932c5b 100644
+--- a/src/voicecall.c
++++ b/src/voicecall.c
+@@ -2708,9 +2708,7 @@ void ofono_voicecall_en_list_notify(struct ofono_voicecall *vc,
+ 
+ static void emulator_remove_handler(struct ofono_atom *atom, void *data)
+ {
+-	struct ofono_emulator *em = __ofono_atom_get_data(atom);
+-
+-	ofono_emulator_remove_handler(em, data);
++	__ofono_emulator_remove_atom_handler(atom, data);
+ }
+ 
+ static void emulator_hfp_unregister(struct ofono_atom *atom)
+@@ -3588,13 +3586,18 @@ static void emulator_hfp_watch(struct ofono_atom *atom,
+ 
+ 	notify_emulator_call_status(vc);
+ 
+-	ofono_emulator_add_handler(em, "A", emulator_ata_cb, vc, NULL);
+-	ofono_emulator_add_handler(em, "+CHUP", emulator_chup_cb, vc, NULL);
+-	ofono_emulator_add_handler(em, "+CLCC", emulator_clcc_cb, vc, NULL);
+-	ofono_emulator_add_handler(em, "+CHLD", emulator_chld_cb, vc, NULL);
+-	ofono_emulator_add_handler(em, "+VTS", emulator_vts_cb, vc, NULL);
+-	ofono_emulator_add_handler(em, "D", emulator_atd_cb, vc, NULL);
+-	ofono_emulator_add_handler(em, "+BLDN", emulator_bldn_cb, vc, NULL);
++	__ofono_emulator_add_atom_handler(atom, "A", emulator_ata_cb, vc, NULL);
++	__ofono_emulator_add_atom_handler(atom, "+CHUP", emulator_chup_cb, vc,
++						NULL);
++	__ofono_emulator_add_atom_handler(atom, "+CLCC", emulator_clcc_cb, vc,
++						NULL);
++	__ofono_emulator_add_atom_handler(atom, "+CHLD", emulator_chld_cb, vc,
++						NULL);
++	__ofono_emulator_add_atom_handler(atom, "+VTS", emulator_vts_cb, vc,
++						NULL);
++	__ofono_emulator_add_atom_handler(atom, "D", emulator_atd_cb, vc, NULL);
++	__ofono_emulator_add_atom_handler(atom, "+BLDN", emulator_bldn_cb, vc,
++						NULL);
+ }
+ 
+ void ofono_voicecall_register(struct ofono_voicecall *vc)

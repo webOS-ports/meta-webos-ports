@@ -1,0 +1,117 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] hfp_ag_bluez5: remove the HUP watch together with its socket
+
+Port Sailfish OS oFono 8fa9a706 ("[hfp_ag_bluez5] Remove event source
+after closing BT socket. JB#58727", Slava Monich).
+
+NewConnection watches a duplicate of the RFCOMM socket for G_IO_HUP and
+keeps the fd in connection_hash. When BlueZ asks to disconnect, the
+entry is removed and the fd closed, but the watch on it stays in the
+main loop: it then polls a closed fd, or one the number has been given
+to since.
+
+Keep the watch id with the fd. Removing the entry removes the source,
+and the channel, which owns the fd, closes it.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+diff --git a/plugins/hfp_ag_bluez5.c b/plugins/hfp_ag_bluez5.c
+index e6016dc..0f86002 100644
+--- a/plugins/hfp_ag_bluez5.c
++++ b/plugins/hfp_ag_bluez5.c
+@@ -48,6 +48,12 @@ static unsigned int bluez_watch_id;
+ static bool bluez_present;
+ static struct l_queue *emulators;	/* one per connected headset */
+ 
++/* The HUP watch on our duplicate of a connection's RFCOMM socket */
++struct watch_fd {
++	unsigned int id;
++	int fd;
++};
++
+ struct modem_info {
+ 	struct ofono_modem *modem;
+ 	unsigned int sim_watch;
+@@ -223,11 +229,17 @@ static struct ofono_handsfree_card_driver hfp_ag_driver = {
+ 
+ static void connection_destroy(gpointer data)
+ {
+-	int fd = GPOINTER_TO_INT(data);
++	struct watch_fd *watch = data;
+ 
+-	DBG("fd %d", fd);
++	DBG("fd %d", watch->fd);
+ 
+-	close(fd);
++	/*
++	 * Removing the source drops the last reference to the channel,
++	 * which closes the fd. Closing it underneath a live watch instead
++	 * would leave the main loop polling a dead fd, spinning on POLLNVAL.
++	 */
++	g_source_remove(watch->id);
++	g_free(watch);
+ }
+ 
+ static gboolean io_hup_cb(GIOChannel *io, GIOCondition cond, gpointer data)
+@@ -247,7 +259,8 @@ static DBusMessage *profile_new_connection(DBusConnection *conn,
+ 	DBusMessageIter entry;
+ 	const char *device;
+ 	GIOChannel *io;
+-	int fd, fd_dup;
++	int fd;
++	struct watch_fd *watch;
+ 	struct sockaddr_rc saddr;
+ 	socklen_t optlen;
+ 	struct ofono_emulator *em;
+@@ -327,10 +340,12 @@ static DBusMessage *profile_new_connection(DBusConnection *conn,
+ 	emulator_add_active_modems(em);
+ 	ofono_emulator_register(em, fd);
+ 
+-	fd_dup = dup(fd);
+-	io = g_io_channel_unix_new(fd_dup);
+-	g_io_add_watch_full(io, G_PRIORITY_DEFAULT, G_IO_HUP, io_hup_cb,
+-						g_strdup(device), g_free);
++	watch = g_new0(struct watch_fd, 1);
++	watch->fd = dup(fd);
++	io = g_io_channel_unix_new(watch->fd);
++	g_io_channel_set_close_on_unref(io, TRUE);
++	watch->id = g_io_add_watch_full(io, G_PRIORITY_DEFAULT, G_IO_HUP,
++					io_hup_cb, g_strdup(device), g_free);
+ 	g_io_channel_unref(io);
+ 
+ 	card = ofono_handsfree_card_create(0,
+@@ -345,8 +360,7 @@ static DBusMessage *profile_new_connection(DBusConnection *conn,
+ 	ofono_emulator_set_handsfree_card(em, card);
+ 	l_queue_push_tail(emulators, em);
+ 
+-	g_hash_table_insert(connection_hash, g_strdup(device),
+-						GINT_TO_POINTER(fd_dup));
++	g_hash_table_insert(connection_hash, g_strdup(device), watch);
+ 
+ 	return dbus_message_new_method_return(msg);
+ 
+@@ -380,7 +394,7 @@ static DBusMessage *profile_disconnection(DBusConnection *conn,
+ {
+ 	DBusMessageIter iter;
+ 	const char *device;
+-	gpointer fd;
++	struct watch_fd *watch;
+ 
+ 	DBG("Profile handler RequestDisconnection");
+ 
+@@ -394,11 +408,11 @@ static DBusMessage *profile_disconnection(DBusConnection *conn,
+ 
+ 	DBG("%s", device);
+ 
+-	fd = g_hash_table_lookup(connection_hash, device);
+-	if (fd == NULL)
++	watch = g_hash_table_lookup(connection_hash, device);
++	if (watch == NULL)
+ 		goto invalid;
+ 
+-	shutdown(GPOINTER_TO_INT(fd), SHUT_RDWR);
++	shutdown(watch->fd, SHUT_RDWR);
+ 
+ 	g_hash_table_remove(connection_hash, device);
+ 

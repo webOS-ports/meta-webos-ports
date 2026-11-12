@@ -1,0 +1,564 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] unit: test that the HFP AG profile follows BlueZ
+
+Build hfp_ag_bluez5.c into a test with the oFono core stubbed out, and
+play BlueZ with a second connection to a private bus that owns org.bluez
+and counts RegisterProfile and UnregisterProfile calls.
+
+The cases: BlueZ first and then the modem; a BlueZ restart, twice, with
+two active modems; a modem that is ready before BlueZ appears; and a
+modem without a voicecall atom, which must never register.
+
+The test needs a bus and takes it from DBUS_SESSION_BUS_ADDRESS, so run
+it under dbus-run-session. Without a bus it reports itself skipped.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+
+diff --git a/Makefile.am b/Makefile.am
+index a115b0a..5dd8b4b 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -968,6 +968,16 @@ unit_test_provision_DEPENDENCIES = $(ell_dependencies) \
+ 					unit/test-provision.db
+ unit_objects += $(unit_test_provision_OBJECTS)
+ 
++if BLUETOOTH
++unit_tests += unit/test-hfp-ag-bluez5
++
++unit_test_hfp_ag_bluez5_SOURCES = unit/test-hfp-ag-bluez5.c \
++				plugins/bluez5.c plugins/bluez5.h
++unit_test_hfp_ag_bluez5_LDADD = gdbus/libgdbus-internal.la @GLIB_LIBS@ \
++				@DBUS_LIBS@ $(ell_ldadd)
++unit_objects += $(unit_test_hfp_ag_bluez5_OBJECTS)
++endif
++
+ LOG_DRIVER = env AM_TAP_AWK='$(AWK)' $(SHELL) \
+ 			$(top_srcdir)/build-aux/tap-driver.sh
+ 
+diff --git a/unit/test-hfp-ag-bluez5.c b/unit/test-hfp-ag-bluez5.c
+new file mode 100644
+index 0000000..831ad8f
+--- /dev/null
++++ b/unit/test-hfp-ag-bluez5.c
+@@ -0,0 +1,520 @@
++/*
++ * oFono - Open Source Telephony
++ *
++ * Test that the HFP AG plugin follows BlueZ on the bus: the profile is
++ * registered with ProfileManager1 whenever org.bluez appears while a
++ * voicecall-capable modem with a ready SIM exists, and again after BlueZ
++ * exits and comes back.
++ *
++ * The plugin is built into this test with the oFono core stubbed out. BlueZ
++ * is played by a second connection to a private bus that owns org.bluez and
++ * counts RegisterProfile/UnregisterProfile calls. The bus address is taken
++ * from DBUS_SESSION_BUS_ADDRESS; run it under dbus-run-session. Without a
++ * bus the test reports itself skipped.
++ *
++ * SPDX-License-Identifier: GPL-2.0-only
++ */
++
++#include "../plugins/hfp_ag_bluez5.c"
++
++#include <assert.h>
++
++/* ---- oFono core stubs --------------------------------------------- */
++
++struct ofono_modem {
++	bool has_voicecall;
++	struct ofono_sim *sim;
++	ofono_atom_watch_func sim_notify;
++	void *sim_data;
++	ofono_atom_watch_func vc_notify;
++	void *vc_data;
++};
++
++struct ofono_sim {
++	enum ofono_sim_state state;
++	ofono_sim_state_event_cb_t cb;
++	void *cb_data;
++	ofono_destroy_func cb_destroy;
++};
++
++struct ofono_atom {
++	void *data;
++};
++
++static DBusConnection *ofono_conn;
++static ofono_modemwatch_cb_t modemwatch_cb;
++static struct ofono_modem *modems_present[2];
++static unsigned int n_modems_present;
++static int voicecall_atom;	/* only its address is used */
++
++DBusConnection *ofono_dbus_get_connection(void)
++{
++	return ofono_conn;
++}
++
++void ofono_debug(const char *format, ...)
++{
++	va_list ap;
++
++	if (!getenv("TEST_VERBOSE"))
++		return;
++
++	va_start(ap, format);
++	vfprintf(stderr, format, ap);
++	va_end(ap);
++	fputc('\n', stderr);
++}
++
++void ofono_error(const char *format, ...)
++{
++	va_list ap;
++
++	va_start(ap, format);
++	vfprintf(stderr, format, ap);
++	va_end(ap);
++	fputc('\n', stderr);
++}
++
++void ofono_dbus_dict_append(DBusMessageIter *dict, const char *key, int type,
++				const void *value)
++{
++	DBusMessageIter entry, var;
++	char sig[2] = { (char) type, '\0' };
++
++	dbus_message_iter_open_container(dict, DBUS_TYPE_DICT_ENTRY, NULL,
++						&entry);
++	dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &key);
++	dbus_message_iter_open_container(&entry, DBUS_TYPE_VARIANT, sig, &var);
++	dbus_message_iter_append_basic(&var, type, value);
++	dbus_message_iter_close_container(&entry, &var);
++	dbus_message_iter_close_container(dict, &entry);
++}
++
++unsigned int __ofono_modemwatch_add(ofono_modemwatch_cb_t cb, void *user,
++					ofono_destroy_func destroy)
++{
++	modemwatch_cb = cb;
++	return 1;
++}
++
++gboolean __ofono_modemwatch_remove(unsigned int id)
++{
++	modemwatch_cb = NULL;
++	return TRUE;
++}
++
++void __ofono_modem_foreach(ofono_modem_foreach_func cb, void *userdata)
++{
++	unsigned int i;
++
++	for (i = 0; i < n_modems_present; i++)
++		cb(modems_present[i], userdata);
++}
++
++unsigned int __ofono_modem_add_atom_watch(struct ofono_modem *modem,
++					enum ofono_atom_type type,
++					ofono_atom_watch_func notify,
++					void *data, ofono_destroy_func destroy)
++{
++	if (type == OFONO_ATOM_TYPE_SIM) {
++		modem->sim_notify = notify;
++		modem->sim_data = data;
++		return 1;
++	}
++
++	modem->vc_notify = notify;
++	modem->vc_data = data;
++	return 2;
++}
++
++gboolean __ofono_modem_remove_atom_watch(struct ofono_modem *modem,
++						unsigned int id)
++{
++	if (id == 1)
++		modem->sim_notify = NULL;
++	else
++		modem->vc_notify = NULL;
++
++	return TRUE;
++}
++
++struct ofono_atom *__ofono_modem_find_atom(struct ofono_modem *modem,
++						enum ofono_atom_type type)
++{
++	if (type == OFONO_ATOM_TYPE_VOICECALL && modem->has_voicecall)
++		return (struct ofono_atom *) &voicecall_atom;
++
++	return NULL;
++}
++
++void *__ofono_atom_get_data(struct ofono_atom *atom)
++{
++	return atom->data;
++}
++
++unsigned int ofono_sim_add_state_watch(struct ofono_sim *sim,
++					ofono_sim_state_event_cb_t cb,
++					void *data, ofono_destroy_func destroy)
++{
++	sim->cb = cb;
++	sim->cb_data = data;
++	sim->cb_destroy = destroy;
++	return 1;
++}
++
++void ofono_sim_remove_state_watch(struct ofono_sim *sim, unsigned int id)
++{
++	ofono_destroy_func destroy = sim->cb_destroy;
++	void *data = sim->cb_data;
++
++	sim->cb = NULL;
++	sim->cb_destroy = NULL;
++
++	if (destroy)
++		destroy(data);
++}
++
++enum ofono_sim_state ofono_sim_get_state(struct ofono_sim *sim)
++{
++	return sim->state;
++}
++
++/* Not reached: no HFP connection is made in this test */
++struct ofono_emulator *ofono_emulator_create(struct ofono_modem *modem,
++						enum ofono_emulator_type type)
++{
++	abort();
++}
++
++void ofono_emulator_register(struct ofono_emulator *em, int fd)
++{
++	abort();
++}
++
++void ofono_emulator_set_handsfree_card(struct ofono_emulator *em,
++					struct ofono_handsfree_card *card)
++{
++	abort();
++}
++
++int ofono_emulator_start_codec_negotiation(struct ofono_emulator *em,
++		ofono_emulator_codec_negotiation_cb cb, void *data)
++{
++	abort();
++}
++
++struct ofono_handsfree_card *ofono_handsfree_card_create(unsigned int vendor,
++				enum ofono_handsfree_card_type type,
++				const char *driver, void *data)
++{
++	abort();
++}
++
++void ofono_handsfree_card_set_data(struct ofono_handsfree_card *card,
++					void *data)
++{
++	abort();
++}
++
++void *ofono_handsfree_card_get_data(struct ofono_handsfree_card *card)
++{
++	abort();
++}
++
++void ofono_handsfree_card_set_remote(struct ofono_handsfree_card *card,
++					const char *remote)
++{
++	abort();
++}
++
++void ofono_handsfree_card_set_local(struct ofono_handsfree_card *card,
++					const char *local)
++{
++	abort();
++}
++
++void ofono_handsfree_audio_ref(void)
++{
++}
++
++void ofono_handsfree_audio_unref(void)
++{
++}
++
++int ofono_handsfree_card_driver_register(
++				const struct ofono_handsfree_card_driver *d)
++{
++	return 0;
++}
++
++void ofono_handsfree_card_driver_unregister(
++				const struct ofono_handsfree_card_driver *d)
++{
++}
++
++/* ---- fake BlueZ ------------------------------------------------------ */
++
++struct fake_bluez {
++	DBusConnection *conn;
++	unsigned int registered;
++	unsigned int unregistered;
++};
++
++static DBusHandlerResult fake_bluez_message(DBusConnection *conn,
++						DBusMessage *msg, void *data)
++{
++	struct fake_bluez *bz = data;
++	DBusMessage *reply;
++
++	if (dbus_message_is_method_call(msg, "org.bluez.ProfileManager1",
++						"RegisterProfile"))
++		bz->registered++;
++	else if (dbus_message_is_method_call(msg, "org.bluez.ProfileManager1",
++						"UnregisterProfile"))
++		bz->unregistered++;
++	else
++		return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
++
++	reply = dbus_message_new_method_return(msg);
++	dbus_connection_send(conn, reply, NULL);
++	dbus_message_unref(reply);
++
++	return DBUS_HANDLER_RESULT_HANDLED;
++}
++
++static const DBusObjectPathVTable fake_bluez_vtable = {
++	.message_function = fake_bluez_message,
++};
++
++static struct fake_bluez *fake_bluez_start(void)
++{
++	struct fake_bluez *bz = g_new0(struct fake_bluez, 1);
++	DBusError err;
++
++	dbus_error_init(&err);
++	bz->conn = g_dbus_setup_private(DBUS_BUS_SESSION, NULL, &err);
++	assert(bz->conn);
++	assert(dbus_connection_register_object_path(bz->conn, "/org/bluez",
++						&fake_bluez_vtable, bz));
++	assert(dbus_bus_request_name(bz->conn, BLUEZ_SERVICE,
++					DBUS_NAME_FLAG_DO_NOT_QUEUE, &err) ==
++				DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER);
++	return bz;
++}
++
++/* As bluetoothd exiting or crashing: the bus drops its name. */
++static void fake_bluez_stop(struct fake_bluez *bz)
++{
++	dbus_connection_close(bz->conn);
++	dbus_connection_unref(bz->conn);
++	g_free(bz);
++}
++
++/* ---- helpers ------------------------------------------------------------- */
++
++static gboolean quit_cb(gpointer data)
++{
++	*(bool *) data = true;
++	return G_SOURCE_REMOVE;
++}
++
++/* Let the bus traffic settle: run the loop for a fixed while. */
++static void spin(unsigned int ms)
++{
++	bool done = false;
++
++	g_timeout_add(ms, quit_cb, &done);
++	while (!done)
++		g_main_context_iteration(NULL, TRUE);
++}
++
++static struct ofono_modem *modem_new(bool voicecall)
++{
++	struct ofono_modem *modem = g_new0(struct ofono_modem, 1);
++
++	modem->has_voicecall = voicecall;
++	modem->sim = g_new0(struct ofono_sim, 1);
++	modem->sim->state = OFONO_SIM_STATE_NOT_PRESENT;
++	return modem;
++}
++
++static void modem_add(struct ofono_modem *modem)
++{
++	struct ofono_atom sim_atom = { .data = modem->sim };
++
++	modems_present[n_modems_present++] = modem;
++	assert(modemwatch_cb);
++	modemwatch_cb(modem, TRUE, NULL);
++	assert(modem->sim_notify);
++	modem->sim_notify(&sim_atom, OFONO_ATOM_WATCH_CONDITION_REGISTERED,
++				modem->sim_data);
++}
++
++static void sim_set_state(struct ofono_modem *modem, enum ofono_sim_state s)
++{
++	modem->sim->state = s;
++	if (modem->sim->cb)
++		modem->sim->cb(s, modem->sim->cb_data);
++}
++
++static void test_setup(void)
++{
++	DBusError err;
++
++	dbus_error_init(&err);
++	ofono_conn = g_dbus_setup_private(DBUS_BUS_SESSION, NULL, &err);
++	assert(ofono_conn);
++	n_modems_present = 0;
++}
++
++static void test_teardown(void)
++{
++	unsigned int i;
++
++	hfp_ag_exit();
++
++	for (i = 0; i < n_modems_present; i++) {
++		g_free(modems_present[i]->sim);
++		g_free(modems_present[i]);
++	}
++
++	n_modems_present = 0;
++	dbus_connection_close(ofono_conn);
++	dbus_connection_unref(ofono_conn);
++	ofono_conn = NULL;
++}
++
++/* ---- tests ------------------------------------------------------------- */
++
++/* BlueZ up first, then the modem: registered once. */
++static void test_register_basic(void)
++{
++	struct fake_bluez *bz;
++	struct ofono_modem *m;
++
++	test_setup();
++	bz = fake_bluez_start();
++	assert(hfp_ag_init() == 0);
++	spin(100);
++	assert(bz->registered == 0);
++
++	m = modem_new(true);
++	modem_add(m);
++	sim_set_state(m, OFONO_SIM_STATE_READY);
++	spin(100);
++	assert(bz->registered == 1);
++
++	sim_set_state(m, OFONO_SIM_STATE_NOT_PRESENT);
++	spin(100);
++	assert(bz->unregistered == 1);
++
++	test_teardown();
++	fake_bluez_stop(bz);
++}
++
++/* The G5-4 case: bluetoothd restarts with a dual-SIM modem active. */
++static void test_reregister_after_bluez_restart(void)
++{
++	struct fake_bluez *bz;
++	struct ofono_modem *m1, *m2;
++
++	test_setup();
++	bz = fake_bluez_start();
++	assert(hfp_ag_init() == 0);
++
++	m1 = modem_new(true);
++	m2 = modem_new(true);
++	modem_add(m1);
++	modem_add(m2);
++	sim_set_state(m1, OFONO_SIM_STATE_READY);
++	sim_set_state(m2, OFONO_SIM_STATE_READY);
++	spin(100);
++	assert(bz->registered == 1);
++
++	fake_bluez_stop(bz);
++	spin(100);
++
++	bz = fake_bluez_start();
++	spin(200);
++	assert(bz->registered == 1);
++	assert(bz->unregistered == 0);
++
++	/* and a second time */
++	fake_bluez_stop(bz);
++	spin(100);
++	bz = fake_bluez_start();
++	spin(200);
++	assert(bz->registered == 1);
++
++	test_teardown();
++	fake_bluez_stop(bz);
++}
++
++/* Modem ready before BlueZ exists: registered when BlueZ arrives. */
++static void test_register_when_bluez_appears(void)
++{
++	struct fake_bluez *bz;
++	struct ofono_modem *m;
++
++	test_setup();
++	assert(hfp_ag_init() == 0);
++
++	m = modem_new(true);
++	modem_add(m);
++	sim_set_state(m, OFONO_SIM_STATE_READY);
++	spin(100);
++
++	bz = fake_bluez_start();
++	spin(200);
++	assert(bz->registered == 1);
++
++	test_teardown();
++	fake_bluez_stop(bz);
++}
++
++/* No voicecall atom: never registered, even across a BlueZ restart. */
++static void test_no_voicecall_no_register(void)
++{
++	struct fake_bluez *bz;
++	struct ofono_modem *m;
++
++	test_setup();
++	bz = fake_bluez_start();
++	assert(hfp_ag_init() == 0);
++
++	m = modem_new(false);
++	modem_add(m);
++	sim_set_state(m, OFONO_SIM_STATE_READY);
++	spin(100);
++	assert(bz->registered == 0);
++
++	fake_bluez_stop(bz);
++	spin(100);
++	bz = fake_bluez_start();
++	spin(200);
++	assert(bz->registered == 0);
++
++	test_teardown();
++	fake_bluez_stop(bz);
++}
++
++int main(int argc, char **argv)
++{
++	if (!getenv("DBUS_SESSION_BUS_ADDRESS")) {
++		/* TAP: skip the whole file */
++		printf("1..0 # SKIP needs a D-Bus bus, run under dbus-run-session\n");
++		return 0;
++	}
++
++	g_test_init(&argc, &argv, NULL);
++
++	g_test_add_func("/hfp_ag_bluez5/register", test_register_basic);
++	g_test_add_func("/hfp_ag_bluez5/reregister-after-bluez-restart",
++				test_reregister_after_bluez_restart);
++	g_test_add_func("/hfp_ag_bluez5/register-when-bluez-appears",
++				test_register_when_bluez_appears);
++	g_test_add_func("/hfp_ag_bluez5/no-voicecall-no-register",
++				test_no_voicecall_no_register);
++
++	return g_test_run();
++}
