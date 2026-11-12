@@ -1,0 +1,88 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 07:11:57 +0100
+Subject: [PATCH] [oneshot] Don't follow user-controlled links when moving
+ recordings.
+
+phone-move-recordings-dir runs as root from %post, over paths in the
+user's home that the user can change at any time. It followed symbolic
+links: with ~/.local/share/system/privileged pointing at a root-owned
+directory, root created Phone there and gave it to the user, and chown
+-R did the same to everything already in Phone. Paths were unquoted and
+the home directory came from eval.
+
+Look the home directory up with getent, refuse when any component of
+either path is a symbolic link, quote all paths, and chown with -h,
+only the Phone directory itself and what was moved.
+
+Checked as root in a container with GNU coreutils and with busybox:
+the move still works, and a symlinked path is now refused.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ oneshot/phone-move-recordings-dir | 49 +++++++++++++++++++++++++++----
+ 1 file changed, 43 insertions(+), 6 deletions(-)
+
+diff --git a/oneshot/phone-move-recordings-dir b/oneshot/phone-move-recordings-dir
+index 6873766..ffb38d9 100644
+--- a/oneshot/phone-move-recordings-dir
++++ b/oneshot/phone-move-recordings-dir
+@@ -1,14 +1,51 @@
+ #!/bin/sh
+ 
+-USERS=$(getent group users | cut -d ":" -f 4 | tr "," "\n")
++# Moves ~/CallRecordings of each member of "users" into the privileged Phone
++# directory. This runs as root (add-oneshot --now from %post) over paths the
++# user owns and can change at any time, so:
++#  - refuse when any of the paths involved is a symbolic link,
++#  - never let chown follow a link (-h), and only touch what was moved,
++#  - quote every path, and look the home directory up instead of eval.
++
++is_link_free() {
++    # $1: home, $2: path below it
++    p=$1
++    [ -L "$p" ] && return 1
++    old_ifs=$IFS
++    IFS=/
++    for component in $2; do
++        [ -n "$component" ] || continue
++        p="$p/$component"
++        if [ -L "$p" ]; then
++            IFS=$old_ifs
++            return 1
++        fi
++    done
++    IFS=$old_ifs
++    return 0
++}
++
++USERS=$(getent group users | cut -d ":" -f 4 | tr "," " ")
+ for user in $USERS; do
+-    USERHOME=$(eval echo ~${user})
++    USERHOME=$(getent passwd "$user" | cut -d ":" -f 6)
++    [ -n "$USERHOME" ] && [ -d "$USERHOME" ] || continue
+ 
+     legacy_dir="${USERHOME}/CallRecordings"
+     new_dir="${USERHOME}/.local/share/system/privileged/Phone"
+-    if [ -d $legacy_dir -a ! -d "${new_dir}/CallRecordings" ]; then
+-        mkdir -p $new_dir
+-        mv $legacy_dir $new_dir
+-        chown -R ${user}:privileged $new_dir
++
++    [ -d "$legacy_dir" ] || continue
++    if [ -e "${new_dir}/CallRecordings" ] || [ -L "${new_dir}/CallRecordings" ]; then
++        continue
+     fi
++
++    if ! is_link_free "$USERHOME" "CallRecordings" \
++        || ! is_link_free "$USERHOME" ".local/share/system/privileged/Phone"; then
++        echo "phone-move-recordings-dir: symbolic link in the paths of $user, not moving" >&2
++        continue
++    fi
++
++    mkdir -p "$new_dir" || continue
++    mv -- "$legacy_dir" "$new_dir/" || continue
++    chown -h "${user}:privileged" "$new_dir"
++    chown -R -h "${user}:privileged" "${new_dir}/CallRecordings"
+ done

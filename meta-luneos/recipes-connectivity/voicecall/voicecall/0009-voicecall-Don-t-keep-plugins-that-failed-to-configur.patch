@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 07:07:25 +0100
+Subject: [PATCH] [voicecall] Don't keep plugins that failed to configure,
+ check filter actions.
+
+installPlugin() registered a plugin before configuring it. When
+configure() failed, the caller deleted the plugin and unloaded its
+library, but the registry kept the pointer, and a later plugin with the
+same id was refused as already installed. Register only plugins that
+configured.
+
+The filter action of the D-Bus filter() method was cast from whatever
+integer the caller sent. An unknown value set the ofono handler's
+filter action to something status() has no case for, so the call
+reported STATUS_NULL and vanished from the UI while the modem kept
+ringing. Refuse unknown actions, and don't convert out-of-range integers
+to the enumeration at all, as that is undefined behaviour.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/basicvoicecallconfigurator.cpp       |  6 ++++--
+ src/dbus/voicecallhandlerdbusadapter.cpp | 18 ++++++++++++++++--
+ 2 files changed, 20 insertions(+), 4 deletions(-)
+
+diff --git a/src/basicvoicecallconfigurator.cpp b/src/basicvoicecallconfigurator.cpp
+index 6df8b42..cc8ec9a 100644
+--- a/src/basicvoicecallconfigurator.cpp
++++ b/src/basicvoicecallconfigurator.cpp
+@@ -115,11 +115,13 @@ bool BasicVoiceCallConfigurator::installPlugin(AbstractVoiceCallManagerPlugin *p
+         return false;
+     }
+ 
+-    d->plugins.insert(plugin->pluginId(), plugin);
+-
+     plugin->initialize();
++    // The caller deletes a plugin that fails to configure, so only keep the
++    // ones that succeed.
+     if (!plugin->configure(d->manager))
+         return false;
++
++    d->plugins.insert(plugin->pluginId(), plugin);
+     plugin->start();
+     return true;
+ }
+diff --git a/src/dbus/voicecallhandlerdbusadapter.cpp b/src/dbus/voicecallhandlerdbusadapter.cpp
+index 10e673d..bec24c3 100644
+--- a/src/dbus/voicecallhandlerdbusadapter.cpp
++++ b/src/dbus/voicecallhandlerdbusadapter.cpp
+@@ -224,8 +224,16 @@ bool VoiceCallHandlerDBusAdapter::filter(AbstractVoiceCallHandler::VoiceCallFilt
+ {
+     TRACE
+     Q_D(VoiceCallHandlerDBusAdapter);
+-    d->handler->filter(action);
+-    return true;
++    // Any session bus client can call this with any integer.
++    switch (action) {
++    case AbstractVoiceCallHandler::ACTION_CONTINUE:
++    case AbstractVoiceCallHandler::ACTION_IGNORE:
++    case AbstractVoiceCallHandler::ACTION_REJECT:
++        d->handler->filter(action);
++        return true;
++    }
++    WARNING_T("Ignoring unknown filter action %d", int(action));
++    return false;
+ }
+ 
+ /*!
+@@ -344,6 +352,12 @@ const QDBusArgument &operator>>(const QDBusArgument &argument, AbstractVoiceCall
+     argument.beginStructure();
+     argument >> value;
+     argument.endStructure();
++    // Converting an integer outside the enumeration's range is undefined.
++    // Map unknown values to 3, which the enumeration can hold (its values
++    // fit in two bits) but no action has; filter() rejects it.
++    if (value < AbstractVoiceCallHandler::ACTION_CONTINUE
++            || value > AbstractVoiceCallHandler::ACTION_REJECT)
++        value = 3;
+     action = static_cast<AbstractVoiceCallHandler::VoiceCallFilterAction>(value);
+     return argument;
+ }

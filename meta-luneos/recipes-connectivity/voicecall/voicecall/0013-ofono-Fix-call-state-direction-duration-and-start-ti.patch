@@ -1,0 +1,989 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 07:15:22 +0100
+Subject: [PATCH] [ofono] Fix call state, direction, duration and start time
+ reporting.
+
+- A call let through by the call filter reported STATUS_INCOMING again
+  once it ended, as "disconnected" fell into the filter mapping. Every
+  incoming call goes through it when no filter plugin is loaded, so MCE
+  went back to "ringing" and commhistory never saw the call end. Only
+  map "disconnected" to the filter's verdict for ignored and rejected
+  calls.
+- Calls waiting behind another call were reported as outgoing, so they
+  were logged as dialled. ofono's "waiting" is mobile terminated as
+  well. Decide the direction once: ofono coming back mid-call made the
+  handler valid again in state "active".
+- durationChanged() carried the duration in milliseconds, truncated to
+  int, while duration() is in seconds. The QML duration jumped to a
+  thousand times the right value on the first tick.
+- startedAt() parsed ofono's StartTime with an empty format and was
+  never valid, and startedAtChanged() was never emitted. Parse the ISO
+  8601 time with its +HHMM offset and emit on changes.
+- Asynchronous dial failures were dropped: dialComplete() wasn't
+  connected and the provider's error() was never emitted.
+- When the modem lost its VoiceCallManager interface, calls still
+  waiting for their properties were kept with a pointer to the deleted
+  manager, used later by answer(), hold() and sendDtmf(). Delete them
+  with it, and hold the manager in a QPointer. A repeated callAdded for
+  such a call created a second handler.
+- A call whose properties were known when its handler was created was
+  never announced: the handler signalled validity from its constructor,
+  before the provider connected to it.
+
+Add a unit test of the provider and handler against stand-ins for the
+libqofono classes.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ .../ofono/src/ofonovoicecallhandler.cpp       |  73 +++--
+ .../ofono/src/ofonovoicecallhandler.h         |   3 +
+ .../ofono/src/ofonovoicecallprovider.cpp      |  45 ++-
+ .../ofono/src/ofonovoicecallprovider.h        |   1 +
+ rpm/voicecall-qt5.spec                        |   1 +
+ tests/fakes/ofono/fake_qofono.h               | 186 +++++++++++
+ tests/fakes/ofono/qofonomodem.h               |   2 +
+ tests/fakes/ofono/qofonovoicecall.h           |   2 +
+ tests/fakes/ofono/qofonovoicecallmanager.h    |   2 +
+ tests/ofono.pro                               |  33 ++
+ tests/tests.pro                               |   3 +-
+ tests/tests.xml                               |   3 +
+ tests/tst_ofonoprovider.cpp                   | 298 ++++++++++++++++++
+ 13 files changed, 618 insertions(+), 34 deletions(-)
+ create mode 100644 tests/fakes/ofono/fake_qofono.h
+ create mode 100644 tests/fakes/ofono/qofonomodem.h
+ create mode 100644 tests/fakes/ofono/qofonovoicecall.h
+ create mode 100644 tests/fakes/ofono/qofonovoicecallmanager.h
+ create mode 100644 tests/ofono.pro
+ create mode 100644 tests/tst_ofonoprovider.cpp
+
+diff --git a/plugins/providers/ofono/src/ofonovoicecallhandler.cpp b/plugins/providers/ofono/src/ofonovoicecallhandler.cpp
+index 2a23aea..13fdbc0 100644
+--- a/plugins/providers/ofono/src/ofonovoicecallhandler.cpp
++++ b/plugins/providers/ofono/src/ofonovoicecallhandler.cpp
+@@ -26,6 +26,7 @@
+ #include <qofonovoicecallmanager.h>
+ 
+ #include <QElapsedTimer>
++#include <QPointer>
+ #include <QTimerEvent>
+ 
+ class OfonoVoiceCallHandlerPrivate
+@@ -35,7 +36,7 @@ class OfonoVoiceCallHandlerPrivate
+ public:
+     OfonoVoiceCallHandlerPrivate(OfonoVoiceCallHandler *q, const QString &pHandlerId, OfonoVoiceCallProvider *pProvider, QOfonoVoiceCallManager *manager)
+         : q_ptr(q), handlerId(pHandlerId), provider(pProvider), ofonoVoiceCallManager(manager), ofonoVoiceCall(NULL)
+-        , duration(0), durationTimerId(-1), isIncoming(false)
++        , duration(0), durationTimerId(-1), isIncoming(false), directionKnown(false)
+     { /* ... */ }
+ 
+     OfonoVoiceCallHandler *q_ptr;
+@@ -44,13 +45,16 @@ public:
+ 
+     OfonoVoiceCallProvider *provider;
+ 
+-    QOfonoVoiceCallManager *ofonoVoiceCallManager;
++    // Owned by the provider, which deletes it when the modem loses its
++    // VoiceCallManager interface.
++    QPointer<QOfonoVoiceCallManager> ofonoVoiceCallManager;
+     QOfonoVoiceCall *ofonoVoiceCall;
+ 
+     quint64 duration;
+     int durationTimerId;
+     QElapsedTimer elapsedTimer;
+     bool isIncoming;
++    bool directionKnown;
+     bool filterHasRun = false;
+     AbstractVoiceCallHandler::VoiceCallFilterAction filterAction = AbstractVoiceCallHandler::ACTION_CONTINUE;
+ };
+@@ -68,6 +72,9 @@ OfonoVoiceCallHandler::OfonoVoiceCallHandler(const QString &handlerId, const QSt
+     QObject::connect(d->ofonoVoiceCall, SIGNAL(multipartyChanged(bool)), SIGNAL(multipartyChanged(bool)));
+ 
+     QObject::connect(d->ofonoVoiceCall, SIGNAL(stateChanged(QString)), SLOT(onStatusChanged()));
++    QObject::connect(d->ofonoVoiceCall, &QOfonoVoiceCall::startTimeChanged, this, [this]() {
++        emit startedAtChanged(startedAt());
++    });
+ 
+     QObject::connect(d->ofonoVoiceCall, SIGNAL(validChanged(bool)), SLOT(onValidChanged(bool)));
+     if (d->ofonoVoiceCall->isValid()) {
+@@ -86,14 +93,26 @@ void OfonoVoiceCallHandler::onValidChanged(bool isValid)
+ {
+     Q_D(OfonoVoiceCallHandler);
+ 
+-    if (isValid) {
+-        // Properties are now ready
+-        d->isIncoming = d->ofonoVoiceCall->state() == QLatin1String("incoming");
++    if (isValid && !d->directionKnown) {
++        // Properties are now ready. A call waiting behind another one is
++        // mobile terminated as well. The direction can't change, so don't
++        // recompute it when ofono comes back mid-call (it would say
++        // "active" by then).
++        const QString state = d->ofonoVoiceCall->state();
++        d->isIncoming = state == QLatin1String("incoming") || state == QLatin1String("waiting");
++        d->directionKnown = true;
+     }
+ 
+     emit validChanged(isValid);
+ }
+ 
++bool OfonoVoiceCallHandler::isValid() const
++{
++    TRACE
++    Q_D(const OfonoVoiceCallHandler);
++    return d->ofonoVoiceCall->isValid();
++}
++
+ QString OfonoVoiceCallHandler::path() const
+ {
+     TRACE
+@@ -134,7 +153,7 @@ QDateTime OfonoVoiceCallHandler::startedAt() const
+     TRACE
+     Q_D(const OfonoVoiceCallHandler);
+     DEBUG_T("CALL START TIME: %s", qPrintable(d->ofonoVoiceCall->startTime()));
+-    return QDateTime::fromString(d->ofonoVoiceCall->startTime(), "");
++    return parseStartTime(d->ofonoVoiceCall->startTime());
+ }
+ 
+ int OfonoVoiceCallHandler::duration() const
+@@ -220,10 +239,12 @@ void OfonoVoiceCallHandler::answer()
+ {
+     TRACE
+     Q_D(OfonoVoiceCallHandler);
+-    if (status() == STATUS_WAITING)
+-        d->ofonoVoiceCallManager->holdAndAnswer();
+-    else
++    if (status() == STATUS_WAITING) {
++        if (QOfonoVoiceCallManager *manager = d->ofonoVoiceCallManager)
++            manager->holdAndAnswer();
++    } else {
+         d->ofonoVoiceCall->answer();
++    }
+ }
+ 
+ void OfonoVoiceCallHandler::hangup()
+@@ -235,14 +256,14 @@ void OfonoVoiceCallHandler::hangup()
+ 
+ void OfonoVoiceCallHandler::hold(bool on)
+ {
+-    Q_UNUSED(on)
+     TRACE
+     Q_D(OfonoVoiceCallHandler);
+     bool isHeld = status() == STATUS_HELD;
+-    if (isHeld == on)
++    QOfonoVoiceCallManager *manager = d->ofonoVoiceCallManager;
++    if (isHeld == on || !manager)
+         return;
+ 
+-    d->ofonoVoiceCallManager->swapCalls();
++    manager->swapCalls();
+ }
+ 
+ void OfonoVoiceCallHandler::deflect(const QString &target)
+@@ -256,7 +277,8 @@ void OfonoVoiceCallHandler::sendDtmf(const QString &tones)
+ {
+     TRACE
+     Q_D(OfonoVoiceCallHandler);
+-    d->ofonoVoiceCallManager->sendTones(tones);
++    if (QOfonoVoiceCallManager *manager = d->ofonoVoiceCallManager)
++        manager->sendTones(tones);
+ }
+ 
+ void OfonoVoiceCallHandler::filter(VoiceCallFilterAction action)
+@@ -290,7 +312,8 @@ void OfonoVoiceCallHandler::merge(const QString &callHandle)
+     TRACE
+     Q_D(OfonoVoiceCallHandler);
+ 
+-    if (!d->ofonoVoiceCallManager->isValid()) {
++    QOfonoVoiceCallManager *manager = d->ofonoVoiceCallManager;
++    if (!manager || !manager->isValid()) {
+         d->provider->reportCallControlError(QStringLiteral("CreateMultiparty: no connection to the modem"));
+         return;
+     }
+@@ -317,7 +340,7 @@ void OfonoVoiceCallHandler::merge(const QString &callHandle)
+         return;
+     }
+ 
+-    d->ofonoVoiceCallManager->createMultiparty();
++    manager->createMultiparty();
+ }
+ 
+ /*
+@@ -330,7 +353,8 @@ void OfonoVoiceCallHandler::split()
+     TRACE
+     Q_D(OfonoVoiceCallHandler);
+ 
+-    if (!d->ofonoVoiceCallManager->isValid()) {
++    QOfonoVoiceCallManager *manager = d->ofonoVoiceCallManager;
++    if (!manager || !manager->isValid()) {
+         d->provider->reportCallControlError(QStringLiteral("PrivateChat: no connection to the modem"));
+         return;
+     }
+@@ -340,7 +364,7 @@ void OfonoVoiceCallHandler::split()
+         return;
+     }
+ 
+-    d->ofonoVoiceCallManager->privateChat(path());
++    manager->privateChat(path());
+ }
+ 
+ void OfonoVoiceCallHandler::timerEvent(QTimerEvent *event)
+@@ -351,7 +375,8 @@ void OfonoVoiceCallHandler::timerEvent(QTimerEvent *event)
+     // Whilst call is active, increase duration by a second each second.
+     if (isOngoing() && event->timerId() == d->durationTimerId) {
+         d->duration += d->elapsedTimer.restart();
+-        emit this->durationChanged(d->duration);
++        // In seconds, like duration(); d->duration is in milliseconds.
++        emit this->durationChanged(duration());
+     }
+ }
+ 
+@@ -372,3 +397,15 @@ void OfonoVoiceCallHandler::onStatusChanged()
+ 
+     emit statusChanged(status());
+ }
++
++// ofono's StartTime is "%Y-%m-%dT%H:%M:%S%z", e.g. "2024-05-01T12:00:00+0300".
++QDateTime OfonoVoiceCallHandler::parseStartTime(const QString &startTime)
++{
++    QString iso = startTime.trimmed();
++    // Qt's ISO parser wants the offset as +HH:MM
++    const int length = iso.length();
++    if (length > 5 && (iso.at(length - 5) == QLatin1Char('+') || iso.at(length - 5) == QLatin1Char('-'))) {
++        iso.insert(length - 2, QLatin1Char(':'));
++    }
++    return QDateTime::fromString(iso, Qt::ISODate);
++}
+diff --git a/plugins/providers/ofono/src/ofonovoicecallhandler.h b/plugins/providers/ofono/src/ofonovoicecallhandler.h
+index 0af5415..76bd0c2 100644
+--- a/plugins/providers/ofono/src/ofonovoicecallhandler.h
++++ b/plugins/providers/ofono/src/ofonovoicecallhandler.h
+@@ -38,6 +38,9 @@ public:
+     ~OfonoVoiceCallHandler();
+ 
+     QString path() const;
++    bool isValid() const;
++
++    static QDateTime parseStartTime(const QString &startTime);
+ 
+     AbstractVoiceCallProvider* provider() const override;
+ 
+diff --git a/plugins/providers/ofono/src/ofonovoicecallprovider.cpp b/plugins/providers/ofono/src/ofonovoicecallprovider.cpp
+index f730738..3790bd4 100644
+--- a/plugins/providers/ofono/src/ofonovoicecallprovider.cpp
++++ b/plugins/providers/ofono/src/ofonovoicecallprovider.cpp
+@@ -50,6 +50,7 @@ public:
+     {
+         errorString = message;
+         debugMessage(message);
++        emit q_ptr->error(message);
+     }
+ 
+     void debugMessage(const QString &message)
+@@ -85,6 +86,8 @@ void OfonoVoiceCallProvider::initialize()
+                      SLOT(onCallControlComplete(bool)));
+     QObject::connect(d->ofonoManager, SIGNAL(privateChatComplete(bool,QStringList)),
+                      SLOT(onCallControlComplete(bool)));
++    // dial() returns before ofono has answered; failures come here
++    QObject::connect(d->ofonoManager, SIGNAL(dialComplete(bool)), SLOT(onDialComplete(bool)));
+ 
+     foreach (const QString &call, d->ofonoManager->getCalls())
+         onCallAdded(call);
+@@ -166,8 +169,8 @@ void OfonoVoiceCallProvider::reportCallControlError(const QString &message)
+ {
+     TRACE
+     Q_D(OfonoVoiceCallProvider);
++    // setError() emits error()
+     d->setError(message);
+-    emit error(message);
+ }
+ 
+ // errorMessage() starts with the oFono method, which is how clients tell them apart.
+@@ -187,6 +190,10 @@ void OfonoVoiceCallProvider::interfacesChanged(const QStringList &interfaces)
+     if (!hasVoiceCallManager && d->ofonoManager) {
+         foreach (QString handler, d->voiceCalls.keys())
+             onCallRemoved(handler);
++        // Calls still waiting for their properties go too; they hold the
++        // manager that is deleted next.
++        qDeleteAll(d->invalidVoiceCalls);
++        d->invalidVoiceCalls.clear();
+         delete d->ofonoManager;
+         d->ofonoManager = 0;
+     } else if (hasVoiceCallManager && !d->ofonoManager) {
+@@ -198,30 +205,39 @@ void OfonoVoiceCallProvider::onCallAdded(const QString &call)
+ {
+     TRACE
+     Q_D(OfonoVoiceCallProvider);
+-    if (d->voiceCalls.contains(call))
++    if (d->voiceCalls.contains(call) || d->invalidVoiceCalls.contains(call))
+         return;
+ 
+     qDebug() << "Adding call handler " << call;
+     OfonoVoiceCallHandler *handler = new OfonoVoiceCallHandler(d->manager->generateHandlerId(), call, this, d->ofonoManager);
+     d->invalidVoiceCalls.insert(call, handler);
+     QObject::connect(handler, SIGNAL(validChanged(bool)), SLOT(onVoiceCallHandlerValidChanged(bool)));
++    // The handler announces validity from its constructor if the call's
++    // properties were already known, before the connection above existed.
++    if (handler->isValid())
++        addValidCall(handler);
+ }
+ 
+ void OfonoVoiceCallProvider::onVoiceCallHandlerValidChanged(bool isValid)
+ {
+     TRACE
+-    Q_D(OfonoVoiceCallProvider);
+ 
+-    OfonoVoiceCallHandler *handler = static_cast<OfonoVoiceCallHandler *>(QObject::sender());
+-    if (handler) {
+-        QString call = handler->path();
++    OfonoVoiceCallHandler *handler = qobject_cast<OfonoVoiceCallHandler *>(QObject::sender());
++    if (handler && isValid)
++        addValidCall(handler);
++}
++
++void OfonoVoiceCallProvider::addValidCall(OfonoVoiceCallHandler *handler)
++{
++    TRACE
++    Q_D(OfonoVoiceCallProvider);
++    QString call = handler->path();
+ 
+-        if (isValid && !d->voiceCalls.contains(call)) {
+-            d->voiceCalls.insert(call, handler);
+-            d->invalidVoiceCalls.remove(call);
+-            emit this->voiceCallAdded(handler);
+-            emit this->voiceCallsChanged();
+-        }
++    if (!d->voiceCalls.contains(call)) {
++        d->voiceCalls.insert(call, handler);
++        d->invalidVoiceCalls.remove(call);
++        emit this->voiceCallAdded(handler);
++        emit this->voiceCallsChanged();
+     }
+ }
+ 
+@@ -229,14 +245,13 @@ void OfonoVoiceCallProvider::onCallRemoved(const QString &call)
+ {
+     TRACE
+     Q_D(OfonoVoiceCallProvider);
+-    if (!d->voiceCalls.contains(call)) {
++    OfonoVoiceCallHandler *handler = d->voiceCalls.take(call);
++    if (!handler) {
+         delete d->invalidVoiceCalls.take(call);
+         return;
+     }
+ 
+-    OfonoVoiceCallHandler *handler = d->voiceCalls.value(call);
+     QString handlerId = handler->handlerId();
+-    d->voiceCalls.remove(call);
+     handler->deleteLater();
+ 
+     emit this->voiceCallRemoved(handlerId);
+diff --git a/plugins/providers/ofono/src/ofonovoicecallprovider.h b/plugins/providers/ofono/src/ofonovoicecallprovider.h
+index 0cdc57e..e11091c 100644
+--- a/plugins/providers/ofono/src/ofonovoicecallprovider.h
++++ b/plugins/providers/ofono/src/ofonovoicecallprovider.h
+@@ -61,6 +61,7 @@ protected Q_SLOTS:
+ 
+ private:
+     void initialize();
++    void addValidCall(class OfonoVoiceCallHandler *handler);
+     class OfonoVoiceCallProviderPrivate *d_ptr;
+ 
+     Q_DECLARE_PRIVATE(OfonoVoiceCallProvider)
+diff --git a/rpm/voicecall-qt5.spec b/rpm/voicecall-qt5.spec
+index ada6aea..59b7beb 100644
+--- a/rpm/voicecall-qt5.spec
++++ b/rpm/voicecall-qt5.spec
+@@ -167,3 +167,4 @@ fi
+ /opt/tests/voicecall/filter
+ /opt/tests/voicecall/cellbroadcast
+ /opt/tests/voicecall/manager
++/opt/tests/voicecall/ofono
+diff --git a/tests/fakes/ofono/fake_qofono.h b/tests/fakes/ofono/fake_qofono.h
+new file mode 100644
+index 0000000..0987eb2
+--- /dev/null
++++ b/tests/fakes/ofono/fake_qofono.h
+@@ -0,0 +1,186 @@
++/*
++ * This file is a part of the Voice Call Manager project
++ *
++ * Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ */
++#ifndef FAKE_QOFONO_H
++#define FAKE_QOFONO_H
++
++/*
++ * Stand-ins for the parts of libqofono the ofono provider uses. Each object
++ * registers itself under its D-Bus path so a test can find the instance the
++ * provider created and drive it; "requests" records what was asked of it.
++ */
++
++#include <QHash>
++#include <QObject>
++#include <QStringList>
++
++class QOfonoVoiceCall : public QObject
++{
++    Q_OBJECT
++
++public:
++    explicit QOfonoVoiceCall(QObject *parent = 0) : QObject(parent) {}
++    ~QOfonoVoiceCall() { instances().remove(m_path); }
++
++    // Calls whose properties are known before the object is created
++    static QHash<QString, QString> &presetStates()
++    {
++        static QHash<QString, QString> states;
++        return states;
++    }
++    static QHash<QString, QOfonoVoiceCall *> &instances()
++    {
++        static QHash<QString, QOfonoVoiceCall *> calls;
++        return calls;
++    }
++
++    void setVoiceCallPath(const QString &path)
++    {
++        m_path = path;
++        instances().insert(path, this);
++        if (presetStates().contains(path)) {
++            m_state = presetStates().value(path);
++            m_valid = true;
++        }
++    }
++    QString voiceCallPath() const { return m_path; }
++    bool isValid() const { return m_valid; }
++    QString state() const { return m_state; }
++    QString lineIdentification() const { return QStringLiteral("+358401234567"); }
++    QString startTime() const { return m_startTime; }
++    bool multiparty() const { return multipartyCall; }
++    bool emergency() const { return false; }
++
++    void answer() { requests << QStringLiteral("answer"); }
++    void hangup() { requests << QStringLiteral("hangup"); }
++    void deflect(const QString &) { requests << QStringLiteral("deflect"); }
++
++    // Test controls
++    void becomeValid(const QString &state)
++    {
++        m_state = state;
++        m_valid = true;
++        emit validChanged(true);
++    }
++    void becomeInvalid()
++    {
++        m_valid = false;
++        emit validChanged(false);
++    }
++    void changeState(const QString &state)
++    {
++        m_state = state;
++        emit stateChanged(state);
++    }
++    void changeStartTime(const QString &time)
++    {
++        m_startTime = time;
++        emit startTimeChanged(time);
++    }
++
++    QStringList requests;
++    bool multipartyCall = false;
++
++Q_SIGNALS:
++    void lineIdentificationChanged(const QString &);
++    void emergencyChanged(bool);
++    void multipartyChanged(bool);
++    void stateChanged(const QString &);
++    void validChanged(bool);
++    void startTimeChanged(const QString &);
++
++private:
++    QString m_path;
++    QString m_state;
++    QString m_startTime;
++    bool m_valid = false;
++};
++
++class QOfonoVoiceCallManager : public QObject
++{
++    Q_OBJECT
++
++public:
++    explicit QOfonoVoiceCallManager(QObject *parent = 0) : QObject(parent) { last() = this; }
++    ~QOfonoVoiceCallManager() { if (last() == this) last() = 0; }
++
++    static QOfonoVoiceCallManager *&last()
++    {
++        static QOfonoVoiceCallManager *manager = 0;
++        return manager;
++    }
++
++    void setModemPath(const QString &path) { m_path = path; }
++    bool isValid() const { return true; }
++    QStringList getCalls() const { return calls; }
++    QString errorMessage() const { return error; }
++
++    void dial(const QString &number, const QString &) { requests << QStringLiteral("dial:") + number; }
++    void holdAndAnswer() { requests << QStringLiteral("holdAndAnswer"); }
++    void swapCalls() { requests << QStringLiteral("swapCalls"); }
++    void sendTones(const QString &tones) { requests << QStringLiteral("tones:") + tones; }
++    void createMultiparty() { requests << QStringLiteral("createMultiparty"); }
++    void privateChat(const QString &call) { requests << QStringLiteral("privateChat:") + call; }
++
++    QStringList calls;
++    QString error;
++    QStringList requests;
++
++Q_SIGNALS:
++    void callAdded(const QString &call);
++    void callRemoved(const QString &call);
++    void dialComplete(bool status);
++    void createMultipartyComplete(bool status, const QStringList &calls);
++    void privateChatComplete(bool status, const QStringList &calls);
++
++private:
++    QString m_path;
++};
++
++class QOfonoModem : public QObject
++{
++    Q_OBJECT
++
++public:
++    explicit QOfonoModem(QObject *parent = 0) : QObject(parent) { last() = this; }
++    ~QOfonoModem() { if (last() == this) last() = 0; }
++
++    static QOfonoModem *&last()
++    {
++        static QOfonoModem *modem = 0;
++        return modem;
++    }
++
++    void setModemPath(const QString &path) { m_path = path; }
++    QString modemPath() const { return m_path; }
++    QStringList interfaces() const { return m_interfaces; }
++
++    // Interfaces the next modem starts with
++    static QStringList &initialInterfaces()
++    {
++        static QStringList interfaces;
++        return interfaces;
++    }
++
++    void changeInterfaces(const QStringList &interfaces)
++    {
++        m_interfaces = interfaces;
++        emit interfacesChanged(interfaces);
++    }
++
++Q_SIGNALS:
++    void interfacesChanged(const QStringList &interfaces);
++
++private:
++    QString m_path;
++    QStringList m_interfaces = initialInterfaces();
++};
++
++#endif // FAKE_QOFONO_H
+diff --git a/tests/fakes/ofono/qofonomodem.h b/tests/fakes/ofono/qofonomodem.h
+new file mode 100644
+index 0000000..8873f73
+--- /dev/null
++++ b/tests/fakes/ofono/qofonomodem.h
+@@ -0,0 +1,2 @@
++// Test stand-in, see fake_qofono.h
++#include "fake_qofono.h"
+diff --git a/tests/fakes/ofono/qofonovoicecall.h b/tests/fakes/ofono/qofonovoicecall.h
+new file mode 100644
+index 0000000..8873f73
+--- /dev/null
++++ b/tests/fakes/ofono/qofonovoicecall.h
+@@ -0,0 +1,2 @@
++// Test stand-in, see fake_qofono.h
++#include "fake_qofono.h"
+diff --git a/tests/fakes/ofono/qofonovoicecallmanager.h b/tests/fakes/ofono/qofonovoicecallmanager.h
+new file mode 100644
+index 0000000..8873f73
+--- /dev/null
++++ b/tests/fakes/ofono/qofonovoicecallmanager.h
+@@ -0,0 +1,2 @@
++// Test stand-in, see fake_qofono.h
++#include "fake_qofono.h"
+diff --git a/tests/ofono.pro b/tests/ofono.pro
+new file mode 100644
+index 0000000..92711f2
+--- /dev/null
++++ b/tests/ofono.pro
+@@ -0,0 +1,33 @@
++TEMPLATE = app
++TARGET = tst_ofonoprovider
++QT += core testlib
++QT -= gui
++
++OBJECTS_DIR = $$OUT_PWD/.obj/ofono
++MOC_DIR = $$OUT_PWD/.moc/ofono
++
++PROVIDER = ../plugins/providers/ofono/src
++
++# fakes/ofono stands in for libqofono
++INCLUDEPATH += fakes/ofono fakes ../src ../lib/src $$PROVIDER
++
++HEADERS += \
++    fakes/ofono/fake_qofono.h \
++    ../lib/src/abstractvoicecallhandler.h \
++    ../lib/src/abstractvoicecallprovider.h \
++    ../lib/src/voicecallmanagerinterface.h \
++    ../src/voicecallmanager.h \
++    $$PROVIDER/ofonovoicecallhandler.h \
++    $$PROVIDER/ofonovoicecallprovider.h
++
++SOURCES += \
++    tst_ofonoprovider.cpp \
++    ../lib/src/abstractvoicecallhandler.cpp \
++    ../lib/src/common.cpp \
++    ../src/voicecallmanager.cpp \
++    $$PROVIDER/ofonovoicecallhandler.cpp \
++    $$PROVIDER/ofonovoicecallprovider.cpp
++
++target.path = /opt/tests/voicecall/ofono
++
++INSTALLS += target
+diff --git a/tests/tests.pro b/tests/tests.pro
+index 6d6b84f..212b661 100644
+--- a/tests/tests.pro
++++ b/tests/tests.pro
+@@ -3,8 +3,9 @@ TEMPLATE = subdirs
+ store.file = store.pro
+ controller.file = controller.pro
+ manager.file = manager.pro
++ofono.file = ofono.pro
+ 
+-SUBDIRS += store controller manager
++SUBDIRS += store controller manager ofono
+ 
+ tests_xml.path = /opt/tests/voicecall/cellbroadcast
+ tests_xml.files = tests.xml
+diff --git a/tests/tests.xml b/tests/tests.xml
+index f0464d9..8f15643 100644
+--- a/tests/tests.xml
++++ b/tests/tests.xml
+@@ -19,6 +19,9 @@
+       <case manual="false" name="manager">
+         <step>/opt/tests/voicecall/manager/tst_voicecallmanager</step>
+       </case>
++      <case manual="false" name="ofono-provider">
++        <step>/opt/tests/voicecall/ofono/tst_ofonoprovider</step>
++      </case>
+     </set>
+   </suite>
+ </testdefinition>
+diff --git a/tests/tst_ofonoprovider.cpp b/tests/tst_ofonoprovider.cpp
+new file mode 100644
+index 0000000..43e38c4
+--- /dev/null
++++ b/tests/tst_ofonoprovider.cpp
+@@ -0,0 +1,298 @@
++/*
++ * This file is a part of the Voice Call Manager project
++ *
++ * Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ */
++
++// The ofono provider and call handler against fake libqofono objects.
++
++#include "ofonovoicecallhandler.h"
++#include "ofonovoicecallprovider.h"
++#include "voicecallmanager.h"
++
++#include "fake_qofono.h"
++
++#include <QPointer>
++#include <QSignalSpy>
++#include <QTimeZone>
++#include <QtTest>
++
++typedef AbstractVoiceCallHandler H;
++
++static const char ModemPath[] = "/ril_0";
++
++class tst_OfonoProvider : public QObject
++{
++    Q_OBJECT
++
++private Q_SLOTS:
++    void init();
++    void cleanup();
++
++    void incomingCallWaitsForFilter();
++    void continuedCallEndsDisconnected();
++    void rejectedCallStaysRejected();
++    void waitingCallIsIncoming();
++    void directionSurvivesReconnect();
++    void durationInSeconds();
++    void startTimeParsed();
++    void startTimeParsed_data();
++    void dialFailureReported();
++    void duplicateCallAddedIgnored();
++    void interfaceLossDeletesPendingCalls();
++    void callValidAtCreationAnnounced();
++
++private:
++    OfonoVoiceCallProvider *createProvider();
++    OfonoVoiceCallHandler *addValidCall(const QString &path, const QString &state);
++
++    VoiceCallManager *m_manager = 0;
++    OfonoVoiceCallProvider *m_provider = 0;
++};
++
++void tst_OfonoProvider::init()
++{
++    QOfonoModem::initialInterfaces() = QStringList() << QStringLiteral("org.ofono.VoiceCallManager");
++    QOfonoVoiceCall::presetStates().clear();
++    m_manager = new VoiceCallManager;
++    m_provider = createProvider();
++}
++
++void tst_OfonoProvider::cleanup()
++{
++    delete m_provider;
++    m_provider = 0;
++    delete m_manager;
++    m_manager = 0;
++}
++
++OfonoVoiceCallProvider *tst_OfonoProvider::createProvider()
++{
++    OfonoVoiceCallProvider *provider = new OfonoVoiceCallProvider(QLatin1String(ModemPath), m_manager);
++    m_manager->appendProvider(provider);
++    return provider;
++}
++
++OfonoVoiceCallHandler *tst_OfonoProvider::addValidCall(const QString &path, const QString &state)
++{
++    emit QOfonoVoiceCallManager::last()->callAdded(path);
++    QOfonoVoiceCall *call = QOfonoVoiceCall::instances().value(path);
++    if (!call)
++        return 0;
++    call->becomeValid(state);
++    foreach (AbstractVoiceCallHandler *handler, m_provider->voiceCalls()) {
++        OfonoVoiceCallHandler *ofonoHandler = qobject_cast<OfonoVoiceCallHandler *>(handler);
++        if (ofonoHandler && ofonoHandler->path() == path)
++            return ofonoHandler;
++    }
++    return 0;
++}
++
++void tst_OfonoProvider::incomingCallWaitsForFilter()
++{
++    m_manager->setCallFiltering(true);
++    OfonoVoiceCallHandler *handler = addValidCall(QStringLiteral("/ril_0/voicecall01"),
++                                                  QStringLiteral("incoming"));
++    QVERIFY(handler);
++    QVERIFY(handler->isIncoming());
++    QCOMPARE(handler->status(), H::STATUS_NULL);
++
++    handler->filter(H::ACTION_CONTINUE);
++    QCOMPARE(handler->status(), H::STATUS_INCOMING);
++}
++
++// A call the filter let through used to report STATUS_INCOMING again when
++// it ended, so plugins saw it ringing instead of disconnected.
++void tst_OfonoProvider::continuedCallEndsDisconnected()
++{
++    OfonoVoiceCallHandler *handler = addValidCall(QStringLiteral("/ril_0/voicecall01"),
++                                                  QStringLiteral("incoming"));
++    QVERIFY(handler);
++    // No call filtering: the manager released the call
++    QCOMPARE(handler->status(), H::STATUS_INCOMING);
++
++    QOfonoVoiceCall *call = QOfonoVoiceCall::instances().value(QStringLiteral("/ril_0/voicecall01"));
++    QList<H::VoiceCallStatus> reported;
++    connect(handler, &H::statusChanged, this, [&reported](H::VoiceCallStatus status) {
++        reported << status;
++    });
++    call->changeState(QStringLiteral("active"));
++    QCOMPARE(handler->status(), H::STATUS_ACTIVE);
++    call->changeState(QStringLiteral("disconnected"));
++    QCOMPARE(handler->status(), H::STATUS_DISCONNECTED);
++    QCOMPARE(reported, QList<H::VoiceCallStatus>() << H::STATUS_ACTIVE << H::STATUS_DISCONNECTED);
++}
++
++void tst_OfonoProvider::rejectedCallStaysRejected()
++{
++    m_manager->setCallFiltering(true);
++    OfonoVoiceCallHandler *handler = addValidCall(QStringLiteral("/ril_0/voicecall01"),
++                                                  QStringLiteral("incoming"));
++    QVERIFY(handler);
++    handler->filter(H::ACTION_REJECT);
++    QOfonoVoiceCall *call = QOfonoVoiceCall::instances().value(QStringLiteral("/ril_0/voicecall01"));
++    QCOMPARE(call->requests, QStringList() << QStringLiteral("hangup"));
++    QCOMPARE(handler->status(), H::STATUS_REJECTED);
++    call->changeState(QStringLiteral("disconnected"));
++    QCOMPARE(handler->status(), H::STATUS_REJECTED);
++}
++
++// A call waiting behind another one is mobile terminated: it was logged as
++// outgoing and counted as dialled.
++void tst_OfonoProvider::waitingCallIsIncoming()
++{
++    addValidCall(QStringLiteral("/ril_0/voicecall01"), QStringLiteral("active"));
++    OfonoVoiceCallHandler *waiting = addValidCall(QStringLiteral("/ril_0/voicecall02"),
++                                                  QStringLiteral("waiting"));
++    QVERIFY(waiting);
++    QVERIFY(waiting->isIncoming());
++    QCOMPARE(waiting->status(), H::STATUS_WAITING);
++
++    // Answering a waiting call holds the other one
++    waiting->answer();
++    QCOMPARE(QOfonoVoiceCallManager::last()->requests, QStringList() << QStringLiteral("holdAndAnswer"));
++}
++
++void tst_OfonoProvider::directionSurvivesReconnect()
++{
++    OfonoVoiceCallHandler *handler = addValidCall(QStringLiteral("/ril_0/voicecall01"),
++                                                  QStringLiteral("incoming"));
++    QVERIFY(handler);
++    QOfonoVoiceCall *call = QOfonoVoiceCall::instances().value(QStringLiteral("/ril_0/voicecall01"));
++    call->changeState(QStringLiteral("active"));
++    // ofono restarting mid-call: valid again, now in state "active"
++    call->becomeInvalid();
++    call->becomeValid(QStringLiteral("active"));
++    QVERIFY(handler->isIncoming());
++}
++
++// durationChanged() carried milliseconds while duration() is in seconds.
++void tst_OfonoProvider::durationInSeconds()
++{
++    OfonoVoiceCallHandler *handler = addValidCall(QStringLiteral("/ril_0/voicecall01"),
++                                                  QStringLiteral("dialing"));
++    QVERIFY(handler);
++    QSignalSpy duration(handler, SIGNAL(durationChanged(int)));
++    QOfonoVoiceCall::instances().value(QStringLiteral("/ril_0/voicecall01"))
++            ->changeState(QStringLiteral("active"));
++    QTRY_VERIFY_WITH_TIMEOUT(duration.count() >= 1, 3000);
++    const int reported = duration.first().at(0).toInt();
++    QVERIFY2(reported >= 0 && reported <= 2, qPrintable(QString::number(reported)));
++    QCOMPARE(reported, handler->duration());
++}
++
++void tst_OfonoProvider::startTimeParsed_data()
++{
++    QTest::addColumn<QString>("startTime");
++    QTest::addColumn<QDateTime>("expected");
++
++    QTest::newRow("east") << QStringLiteral("2024-05-01T12:00:00+0300")
++                          << QDateTime(QDate(2024, 5, 1), QTime(9, 0), QTimeZone::utc());
++    QTest::newRow("west") << QStringLiteral("2024-05-01T12:00:00-0130")
++                          << QDateTime(QDate(2024, 5, 1), QTime(13, 30), QTimeZone::utc());
++    QTest::newRow("utc") << QStringLiteral("2024-05-01T12:00:00+0000")
++                         << QDateTime(QDate(2024, 5, 1), QTime(12, 0), QTimeZone::utc());
++    QTest::newRow("empty") << QString() << QDateTime();
++    QTest::newRow("garbage") << QStringLiteral("yesterday") << QDateTime();
++}
++
++// startedAt() parsed with an empty format and was always invalid.
++void tst_OfonoProvider::startTimeParsed()
++{
++    QFETCH(QString, startTime);
++    QFETCH(QDateTime, expected);
++
++    const QDateTime parsed = OfonoVoiceCallHandler::parseStartTime(startTime);
++    QCOMPARE(parsed.isValid(), expected.isValid());
++    if (expected.isValid())
++        QCOMPARE(parsed.toUTC(), expected);
++
++    OfonoVoiceCallHandler *handler = addValidCall(QStringLiteral("/ril_0/voicecall01"),
++                                                  QStringLiteral("active"));
++    QVERIFY(handler);
++    QSignalSpy started(handler, SIGNAL(startedAtChanged(QDateTime)));
++    QOfonoVoiceCall::instances().value(QStringLiteral("/ril_0/voicecall01"))->changeStartTime(startTime);
++    QCOMPARE(started.count(), 1);
++    QCOMPARE(handler->startedAt().isValid(), expected.isValid());
++}
++
++// Asynchronous dial failures were never reported.
++void tst_OfonoProvider::dialFailureReported()
++{
++    QSignalSpy providerError(m_provider, SIGNAL(error(QString)));
++    QSignalSpy managerError(m_manager, SIGNAL(error(QString)));
++    QVERIFY(m_provider->dial(QStringLiteral("12345")));
++    QOfonoVoiceCallManager::last()->error = QStringLiteral("org.ofono.Error.InvalidFormat");
++    emit QOfonoVoiceCallManager::last()->dialComplete(false);
++    QCOMPARE(providerError.count(), 1);
++    QCOMPARE(providerError.first().at(0).toString(), QStringLiteral("org.ofono.Error.InvalidFormat"));
++    QCOMPARE(managerError.count(), 1);
++
++    emit QOfonoVoiceCallManager::last()->dialComplete(true);
++    QCOMPARE(providerError.count(), 1);
++}
++
++void tst_OfonoProvider::duplicateCallAddedIgnored()
++{
++    const QString path = QStringLiteral("/ril_0/voicecall01");
++    emit QOfonoVoiceCallManager::last()->callAdded(path);
++    QPointer<QOfonoVoiceCall> first = QOfonoVoiceCall::instances().value(path);
++    emit QOfonoVoiceCallManager::last()->callAdded(path);
++    // Still the same, single call object
++    QCOMPARE(QOfonoVoiceCall::instances().value(path), first.data());
++    first->becomeValid(QStringLiteral("dialing"));
++    QCOMPARE(m_provider->voiceCalls().count(), 1);
++}
++
++// A call still waiting for its properties outlived the VoiceCallManager it
++// pointed at.
++void tst_OfonoProvider::interfaceLossDeletesPendingCalls()
++{
++    addValidCall(QStringLiteral("/ril_0/voicecall01"), QStringLiteral("active"));
++    emit QOfonoVoiceCallManager::last()->callAdded(QStringLiteral("/ril_0/voicecall02"));
++    QPointer<QOfonoVoiceCall> pending = QOfonoVoiceCall::instances().value(QStringLiteral("/ril_0/voicecall02"));
++    QVERIFY(pending);
++
++    QSignalSpy removed(m_manager, SIGNAL(voiceCallRemoved(QString)));
++    QOfonoModem::last()->changeInterfaces(QStringList());
++    QCOMPARE(removed.count(), 1);
++    QVERIFY(!pending);
++    QVERIFY(!QOfonoVoiceCallManager::last());
++
++    // The modem gets the interface back, with the call still pending there
++    QOfonoModem::last()->changeInterfaces(QStringList() << QStringLiteral("org.ofono.VoiceCallManager"));
++    QVERIFY(QOfonoVoiceCallManager::last());
++    QCoreApplication::sendPostedEvents(Q_NULLPTR, QEvent::DeferredDelete);
++    QVERIFY(m_provider->voiceCalls().isEmpty());
++}
++
++// A call whose properties were already known never got announced.
++void tst_OfonoProvider::callValidAtCreationAnnounced()
++{
++    const QString path = QStringLiteral("/ril_0/voicecall07");
++    QOfonoVoiceCall::presetStates().insert(path, QStringLiteral("incoming"));
++    QSignalSpy added(m_manager, SIGNAL(voiceCallAdded(AbstractVoiceCallHandler*)));
++    emit QOfonoVoiceCallManager::last()->callAdded(path);
++    QCOMPARE(added.count(), 1);
++    QCOMPARE(m_provider->voiceCalls().count(), 1);
++    QVERIFY(m_provider->voiceCalls().first()->isIncoming());
++}
++
++QTEST_GUILESS_MAIN(tst_OfonoProvider)
++
++#include "tst_ofonoprovider.moc"
