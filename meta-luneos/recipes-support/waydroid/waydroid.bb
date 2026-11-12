@@ -16,7 +16,7 @@ PV = "${SPV}"
 # Bumped whenever the shipped patches or helper scripts change: they alter what
 # the package contains without moving SRCREV or PV, so without this an already
 # installed waydroid stays at the previous build. Reset at the 1.6.3 move.
-PR = "r21"
+PR = "r22"
 
 # Pre-installed images, for machines whose system/vendor pairing is frozen.
 #
@@ -143,6 +143,10 @@ SRC_URI = "git://github.com/waydroid/waydroid.git;branch=main;protocol=https \
     file://0012-data-pass-SAM-s-launch-parameters-on-to-the-LuneOS-l.patch \
     file://0013-notification_manager-leave-Android-s-own-system-noti.patch \
     file://0014-user_manager-ask-SAM-to-rescan-changed-apps-instead-.patch \
+    file://0015-drivers-take-the-first-binder-node-that-exists.patch \
+    file://0016-upgrader-pick-the-binder-nodes-again-on-upgrade.patch \
+    file://0017-images-do-not-bind-the-host-s-EGL-over-a-MAINLINE-ve.patch \
+    file://0018-images-use-ANGLE-on-lavapipe-when-the-vendor-has-no-.patch \
     file://waydroid-luneos-prepare.sh \
     file://waydroid-luneos-prepare.service \
     file://waydroid-luneos-session.sh \

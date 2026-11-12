@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 12 Nov 2026 06:14:06 +0100
+Subject: [PATCH] upgrader: pick the binder nodes again on upgrade
+
+The nodes are chosen only by "waydroid init". "waydroid upgrade"
+reloads them from waydroid.cfg, so a config written while the MAINLINE
+branch let the last match win keeps the host's /dev/binder forever, and
+on a Halium host that container never boots.
+
+For MAINLINE, pick them again on upgrade and save the result when it
+differs. If no node is found, keep the configured ones rather than fail
+the upgrade.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ tools/actions/upgrader.py | 23 +++++++++++++++++++++++
+ 1 file changed, 23 insertions(+)
+
+diff --git a/tools/actions/upgrader.py b/tools/actions/upgrader.py
+index eb97123..888a5f4 100644
+--- a/tools/actions/upgrader.py
++++ b/tools/actions/upgrader.py
+@@ -31,6 +31,28 @@ def migration(args):
+     except Exception as e:
+         logging.debug("Error during migration: %s", e)
+ 
++def reselect_binder_nodes(args):
++    # "waydroid init" is the only place the nodes are picked, so a config
++    # written while MAINLINE took the last match rather than the first keeps
++    # the host's /dev/binder for good - on a Halium host a container that never
++    # boots. Pick again and keep the result if it differs.
++    if args.vendor_type != "MAINLINE":
++        return
++    old = (args.BINDER_DRIVER, args.VNDBINDER_DRIVER, args.HWBINDER_DRIVER)
++    try:
++        helpers.drivers.setupBinderNodes(args)
++    except OSError as e:
++        logging.debug("Keeping the configured binder nodes: %s", e)
++        args.BINDER_DRIVER, args.VNDBINDER_DRIVER, args.HWBINDER_DRIVER = old
++        return
++    new = (args.BINDER_DRIVER, args.VNDBINDER_DRIVER, args.HWBINDER_DRIVER)
++    if new == old:
++        return
++    logging.info("Binder nodes changed from {} to {}".format(", ".join(old), ", ".join(new)))
++    cfg = tools.config.load(args)
++    cfg["waydroid"]["binder"], cfg["waydroid"]["vndbinder"], cfg["waydroid"]["hwbinder"] = new
++    tools.config.save(args, cfg)
++
+ def upgrade(args):
+     get_config(args)
+     status = "STOPPED"
+@@ -47,6 +69,7 @@ def upgrade(args):
+             tools.actions.container_manager.stop(args)
+     migration(args)
+     helpers.drivers.loadBinderNodes(args)
++    reselect_binder_nodes(args)
+     if not args.offline:
+         if args.images_path not in tools.config.defaults["preinstalled_images_paths"]:
+             helpers.images.get(args)
+-- 
+2.53.0
+
