@@ -15,11 +15,11 @@ LIC_FILES_CHKSUM = " \
 # qtbase-native, gated on the wayland DISTRO_FEATURE which LuneOS sets.
 DEPENDS = "qtwayland webos-wayland-extensions libxkbcommon qt-features-webos wayland-native qtbase-native wayland-protocols"
 
-SRCREV = "02f519fcd5f734ca0ebbac8f1491327efeabf9c5"
+SRCREV = "d65022ac8ff2413af652706e4a50422bf5312f5c"
 
 PV = "6.0.0-95"
 
-PR = "r26"
+PR = "r28"
 
 #QT_BUILD_SYSTEM ?= "${@ 'cmake' if d.getVar('QT_VERSION')[0] == '6' else 'qmake' }"
 #Force qmake for now since cmake gives build errors

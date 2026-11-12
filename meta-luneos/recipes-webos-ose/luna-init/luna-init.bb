@@ -12,7 +12,7 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "tzdata python3-pytz-native"
 
-SRCREV = "a2b13bfefffe2d92ac87c78f3a68b34da1aac093"
+SRCREV = "24eb8b39876af44f642c0d85abca7fd1b4f09b4c"
 
 PR = "r24"
 

@@ -9,7 +9,9 @@ RDEPENDS:${PN} += "sleepd com.webos.service.battery luna-authmanager"
 PV = "1.0.0+git"
 PR = "r12"
 
-SRCREV = "0ee6c66211a691db149065f627b8a0e1dc7a9050"
+# master, which has pull request #14 (unlock over the bus only with
+# authmanager's token).
+SRCREV = "fec7d019b83905904b32955a5b26a63efc8410ad"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 

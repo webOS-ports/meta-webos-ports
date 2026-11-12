@@ -35,7 +35,7 @@ RRECOMMENDS:${PN} += "avahi-daemon"
 RRECOMMENDS:${PN} += "cups-filters"
 
 PV = "0.1.0-1+git"
-SRCREV = "bbda833ba359016803e032e6319f114f345376e0"
+SRCREV = "f465df4082437246ee5871d4a356cde97b62b8f1"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths

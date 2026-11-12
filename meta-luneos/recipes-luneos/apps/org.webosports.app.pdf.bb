@@ -4,8 +4,9 @@ LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=db37b6ead2dec60580595736ff983452"
 
 PV = "2.0.0+git"
+PE = "1"
 PR = "r1"
-SRCREV = "768915a0cba9e2d45c3a55473d50aaa997127685"
+SRCREV = "15ee51fd8efede392ebc84524fb4711de7a3ddc4"
 
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native poppler"
 
