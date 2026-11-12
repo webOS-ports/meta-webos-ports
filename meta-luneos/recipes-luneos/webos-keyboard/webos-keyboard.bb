@@ -1,14 +1,17 @@
 SUMMARY = "webOS on-screen keyboard based on the Ubuntu Touch keyboard"
 HOMEPAGE = "https://launchpad.net/ubuntu-keyboard"
-LICENSE = "LGPL-3.0-only & BSD-3-Clause & Apache-2.0 & CC-BY-3.0 & CC-BY-2.0 & Unicode-3.0"
+LICENSE = "LGPL-3.0-only & BSD-3-Clause & Apache-2.0 & CC-BY-3.0 & CC-BY-2.0"
 LIC_FILES_CHKSUM = " \
     file://COPYING;md5=6a6a8e020838b23406c81b19c1d46df6 \
     file://COPYING.BSD;md5=9b2310382ed07cfdae9c4953c8d29078 \
     file://COPYING.Apache-2.0;beginline=37;endline=212;md5=0c4ad33a0fa7b32f42fd54ed3710d7eb \
     file://COPYING.CC-BY;md5=c14dd4d440694f070fc6520d9c9a65eb \
     file://plugins/CORPORA.md;md5=a6c8dc2742b00f66707c53ed5c95bb34 \
-    file://data/pre/README.md;beginline=16;endline=18;md5=0a2beda967c8ffe730a4393d309ddf2b \
 "
+# The Pre keyboard data (Unicode-3.0) is on herrie/pre-keyboard, not yet on
+# master; enable these once it is merged.
+#LICENSE:append = " & Unicode-3.0"
+#LIC_FILES_CHKSUM:append = " file://data/pre/README.md;beginline=16;endline=18;md5=0a2beda967c8ffe730a4393d309ddf2b"
 
 inherit qt6-qmake
 inherit webos_ports_repo
@@ -25,8 +28,8 @@ RDEPENDS:${PN} += "maliit-framework-webos qtsvg-plugins qtmultimedia-qmlplugins"
 RRECOMMENDS:${PN} += "hunspell-dictionaries"
 
 
-SRCREV = "e4d37e786d333f9ac2d4e3c1ba53ea7ff2710241"
-PE = "1"
+SRCREV = "0cfafafa734eaa81aed8633b969c20f4b4e71e7f"
+PE = "2"
 PV = "0.99.2+git"
 PR = "r34"
 
