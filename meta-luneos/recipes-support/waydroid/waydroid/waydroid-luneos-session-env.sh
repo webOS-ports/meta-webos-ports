@@ -25,8 +25,24 @@ waydroid_luneos_session_env() {
     # even the shell running this. Its environment has no session in it, or
     # the process is already gone, and the waits below then ran out their
     # whole timeout and failed the session unit.
+    #
+    # Nor by its comm, which is what "pgrep -x" matches: that is the main
+    # thread's name, and the process can rename it. On the BraX3 the Android
+    # binder thread pool that hwcomposer brings in renames surface-manager's
+    # main thread to "binder:<pid>_2", so pgrep -x never found it and every
+    # launch gave up after 60s with "no surface-manager". The executable it
+    # runs cannot be renamed, so match /proc/<pid>/exe instead. "pgrep -f"
+    # only narrows the candidates - reading every process's exe costs about
+    # 3s on the BraX3 - and the exe check then drops the systemctl and
+    # journalctl command lines it also matches.
     _compositor_pid() {
-        pgrep -x "$WAYDROID_COMPOSITOR" | head -n 1
+        for _c in $(pgrep -f "$WAYDROID_COMPOSITOR"); do
+            _e=$(readlink "/proc/$_c/exe" 2>/dev/null) || continue
+            _e=${_e% (deleted)}
+            [ "${_e##*/}" = "$WAYDROID_COMPOSITOR" ] || continue
+            echo "$_c"
+            return 0
+        done
     }
 
     # The process exists well before it is serving, so wait for the socket too.
