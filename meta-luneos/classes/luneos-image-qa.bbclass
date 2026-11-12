@@ -41,7 +41,7 @@ LUNEOS_IMAGE_QA_SYSTEM_DIRS ?= "usr etc lib lib32 lib64 bin sbin"
 
 # :append so that it runs after every other postprocess command, including
 # those the image recipes add with +=.
-ROOTFS_POSTPROCESS_COMMAND:append = " luneos_image_qa;"
+ROOTFS_POSTPROCESS_COMMAND:append = " luneos_image_qa"
 
 python luneos_image_qa () {
     # Called by their full names, so that bitbake's signature of this task
