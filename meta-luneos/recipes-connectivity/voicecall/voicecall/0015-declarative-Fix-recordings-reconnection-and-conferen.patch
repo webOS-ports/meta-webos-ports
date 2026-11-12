@@ -1,0 +1,861 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 07:28:21 +0100
+Subject: [PATCH] [declarative] Fix recordings, reconnection and conference
+ state.
+
+Call recorder:
+- The remote party's name and id became part of the file name as they
+  were, so a name holding '/' or ".." wrote the recording elsewhere or
+  failed, and a long name exceeded NAME_MAX. Replace separators and
+  control characters, no leading dots, and cap each part in UTF-8 bytes.
+- deleteRecording() took any path relative to the recordings directory,
+  "../" included. Accept plain file names only.
+- The WAV header said 16-bit PCM while unsigned samples were requested,
+  and described the requested format rather than the one the device
+  gave. Ask for signed samples and write the header from the actual
+  format, with 64-bit length math, refusing data that does not fit.
+- The rename of the finished file was not checked, so callRecorded()
+  named a file that might not exist. An empty recording left a 44-byte
+  file behind; remove it.
+- stop() emits stateChanged(StoppedState), which re-entered
+  terminateRecording() while it tore the input down. Disconnect first.
+
+Manager and call handler:
+- initialize() retried every two seconds with the same QDBusInterface,
+  which never becomes valid once introspection failed, so a QML client
+  started before voicecall-manager never connected; and each retry
+  created another Ngf client. Recreate the interface, create the Ngf
+  client once.
+- The active call was looked up before the call model was filled, and
+  kept as a raw pointer the model could delete. Fill the model first,
+  hold it in a QPointer.
+- remoteHeld changes emitted the property getter's name instead of
+  remoteHeldChanged().
+- A call that became a conference after setup never got a model of its
+  members.
+- Watchers of successful pending calls were never deleted.
+
+recordingfile.h holds the name and header handling so that
+tst_recordingfile can test it without audio or D-Bus.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ plugins/declarative/src/recordingfile.h       | 133 ++++++++++++
+ plugins/declarative/src/src.pro               |   1 +
+ .../src/voicecallaudiorecorder.cpp            |  85 +++++---
+ plugins/declarative/src/voicecallhandler.cpp  |  51 +++--
+ plugins/declarative/src/voicecallhandler.h    |   3 +
+ plugins/declarative/src/voicecallmanager.cpp  |  40 +++-
+ plugins/declarative/src/voicecallmanager.h    |   2 +
+ rpm/voicecall-qt5.spec                        |   1 +
+ tests/recordingfile.pro                       |  16 ++
+ tests/tests.pro                               |   3 +-
+ tests/tests.xml                               |   3 +
+ tests/tst_recordingfile.cpp                   | 189 ++++++++++++++++++
+ 12 files changed, 469 insertions(+), 58 deletions(-)
+ create mode 100644 plugins/declarative/src/recordingfile.h
+ create mode 100644 tests/recordingfile.pro
+ create mode 100644 tests/tst_recordingfile.cpp
+
+diff --git a/plugins/declarative/src/recordingfile.h b/plugins/declarative/src/recordingfile.h
+new file mode 100644
+index 0000000..194631d
+--- /dev/null
++++ b/plugins/declarative/src/recordingfile.h
+@@ -0,0 +1,133 @@
++/*
++ * This file is a part of the Voice Call Manager project
++ *
++ * Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ * You may use this file under the terms of the BSD license as follows:
++ *
++ * "Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions are
++ * met:
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above copyright
++ *     notice, this list of conditions and the following disclaimer in
++ *     the documentation and/or other materials provided with the
++ *     distribution.
++ *   * The names of its contributors may NOT be used to endorse or promote
++ *     products derived from this software without specific prior written
++ *     permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++ * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE."
++ */
++#ifndef RECORDINGFILE_H
++#define RECORDINGFILE_H
++
++/*
++ * File name and WAV header handling for call recordings, kept free of audio
++ * and D-Bus so that it can be tested on its own.
++ */
++
++#include <QByteArray>
++#include <QDataStream>
++#include <QIODevice>
++#include <QString>
++#include <QtGlobal>
++
++namespace RecordingFile {
++
++const int HeaderLength = 44;
++
++// Longest name component in UTF-8 bytes. Two of them, the timestamp,
++// direction and ".wav.tmp" stay below NAME_MAX (255 bytes).
++const int MaxComponentBytes = 96;
++
++// The remote party's name and id end up in a file name. They come from the
++// network or the address book and may hold anything, '/' and ".." included.
++inline QString component(const QString &value)
++{
++    QString result;
++    int bytes = 0;
++    for (int i = 0; i < value.length(); ++i) {
++        const QChar c = value.at(i);
++        if (c.isHighSurrogate() && i + 1 < value.length() && value.at(i + 1).isLowSurrogate()) {
++            // A character outside the BMP, 4 bytes in UTF-8, kept whole
++            if (bytes + 4 > MaxComponentBytes)
++                break;
++            result.append(c).append(value.at(++i));
++            bytes += 4;
++            continue;
++        }
++        const ushort u = c.unicode();
++        const int size = u < 0x80 ? 1 : u < 0x800 ? 2 : 3;
++        if (bytes + size > MaxComponentBytes)
++            break;
++        if (c == QLatin1Char('/') || c == QLatin1Char('\\') || u < 0x20 || u == 0x7f
++                || c.isSurrogate()) {
++            // Path separators, control characters and unpaired surrogates
++            result.append(QLatin1Char('_'));
++        } else {
++            result.append(c);
++        }
++        bytes += size;
++    }
++    // No hidden files, and nothing that is "." or ".."
++    for (int i = 0; i < result.length() && result.at(i) == QLatin1Char('.'); ++i)
++        result[i] = QLatin1Char('_');
++    return result;
++}
++
++// A recording's file name as passed in from QML: a plain name in the
++// recordings directory, never a path.
++inline bool isPlainFileName(const QString &fileName)
++{
++    return !fileName.isEmpty()
++            && fileName != QLatin1String(".")
++            && fileName != QLatin1String("..")
++            && !fileName.contains(QLatin1Char('/'))
++            && !fileName.contains(QChar(0));
++}
++
++// RIFF/WAVE header for PCM data of dataLength bytes. Returns an empty array
++// when the data does not fit a WAV file.
++inline QByteArray waveHeader(int channels, int sampleRate, int sampleBits, qint64 dataLength)
++{
++    const qint64 maxData = qint64(0xffffffffu) - (HeaderLength - 8);
++    if (channels <= 0 || sampleRate <= 0 || sampleBits <= 0 || sampleBits % 8
++            || dataLength < 0 || dataLength > maxData)
++        return QByteArray();
++
++    const quint32 blockAlign = quint32(channels) * quint32(sampleBits / 8);
++    QByteArray header;
++    QDataStream os(&header, QIODevice::WriteOnly);
++    os.setByteOrder(QDataStream::LittleEndian);
++
++    os.writeRawData("RIFF", 4);
++    os << quint32(dataLength + HeaderLength - 8);
++    os.writeRawData("WAVE", 4);
++    os.writeRawData("fmt ", 4);
++    os << quint32(16);              // fmt chunk length
++    os << quint16(1);               // PCM
++    os << quint16(channels);
++    os << quint32(sampleRate);
++    os << quint32(sampleRate) * blockAlign; // byte rate
++    os << quint16(blockAlign);
++    os << quint16(sampleBits);
++    os.writeRawData("data", 4);
++    os << quint32(dataLength);
++    return header;
++}
++
++}
++
++#endif // RECORDINGFILE_H
+diff --git a/plugins/declarative/src/src.pro b/plugins/declarative/src/src.pro
+index 69b2dc1..0d5c8aa 100644
+--- a/plugins/declarative/src/src.pro
++++ b/plugins/declarative/src/src.pro
+@@ -14,6 +14,7 @@ enable-ngf {
+ }
+ 
+ HEADERS += \
++    recordingfile.h \
+     voicecallaudiorecorder.h \
+     voicecallhandler.h \
+     voicecallmanager.h \
+diff --git a/plugins/declarative/src/voicecallaudiorecorder.cpp b/plugins/declarative/src/voicecallaudiorecorder.cpp
+index a938c04..bcafd22 100644
+--- a/plugins/declarative/src/voicecallaudiorecorder.cpp
++++ b/plugins/declarative/src/voicecallaudiorecorder.cpp
+@@ -33,6 +33,7 @@
+  */
+ 
+ #include "voicecallaudiorecorder.h"
++#include "recordingfile.h"
+ 
+ #include <QDateTime>
+ #include <QDBusConnection>
+@@ -62,11 +63,11 @@ const QString CallRecordingsDirPath = QStringLiteral("%1/system/privileged/Phone
+         .arg(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation))
+         .arg(RecordingsDir);
+ 
+-const quint16 ChannelCount = 1;
+-const quint16 SampleRate = 8000;
+-const quint16 SampleBits = 16;
+-const quint32 WaveHeaderLength = 44;
+-const quint16 WavePCMFormat = 1;
++const int ChannelCount = 1;
++const int SampleRate = 8000;
++#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
++const int SampleBits = 16;
++#endif
+ 
+ const QString RouteManagerService("org.nemomobile.Route.Manager");
+ const QString RouteManagerPath("/org/nemomobile/Route/Manager");
+@@ -87,15 +88,24 @@ QAudioFormat getRecordingFormat()
+     const QAudioDevice info = QMediaDevices::defaultAudioInput();
+     if (!info.isFormatSupported(format)) {
+         format = info.preferredFormat();
++        // The header written for the recording says integer PCM
++        if (format.sampleFormat() == QAudioFormat::Float) {
++            qWarning() << "Recording format does not match WAV PCM:" << format;
++        }
+ #else
+     format.setSampleSize(SampleBits);
+     format.setCodec(QStringLiteral("audio/pcm"));
+     format.setByteOrder(QAudioFormat::LittleEndian);
+-    format.setSampleType(QAudioFormat::UnSignedInt);
++    // 16-bit WAV PCM is signed
++    format.setSampleType(QAudioFormat::SignedInt);
+ 
+     QAudioDeviceInfo info(QAudioDeviceInfo::defaultInputDevice());
+     if (!info.isFormatSupported(format)) {
+         format = info.nearestFormat(format);
++        if (format.byteOrder() != QAudioFormat::LittleEndian
++                || (format.sampleSize() == 8) != (format.sampleType() == QAudioFormat::UnSignedInt)) {
++            qWarning() << "Recording format does not match WAV PCM:" << format;
++        }
+ #endif
+     }
+ 
+@@ -195,7 +205,9 @@ void VoiceCallAudioRecorder::startRecording(const QString &name, const QString &
+     }
+ 
+     const QString timestamp(QLocale::c().toString(QDateTime::currentDateTime(), QStringLiteral("yyyyMMdd-HHmmsszzz")));
+-    const QString fileName(QString("%1.%2.%3.%4").arg(name, uid, timestamp, QString::number(incoming ? 1 : 0)));
++    const QString fileName(QString("%1.%2.%3.%4").arg(RecordingFile::component(name),
++                                                      RecordingFile::component(uid),
++                                                      timestamp, QString::number(incoming ? 1 : 0)));
+ 
+     if (initiateRecording(fileName)) {
+         label = name;
+@@ -224,6 +236,11 @@ QString VoiceCallAudioRecorder::decodeRecordingFileName(const QString &fileName)
+ 
+ bool VoiceCallAudioRecorder::deleteRecording(const QString &fileName)
+ {
++    if (!RecordingFile::isPlainFileName(fileName)) {
++        qWarning() << "Not a recording file name:" << fileName;
++        return false;
++    }
++
+     QDir outputDir(CallRecordingsDirPath);
+     if (outputDir.exists(fileName)) {
+         if (outputDir.remove(fileName)) {
+@@ -306,7 +323,7 @@ bool VoiceCallAudioRecorder::initiateRecording(const QString &fileName)
+     }
+ 
+     // Leave space for the header to be placed later
+-    const QByteArray emptyBytes(WaveHeaderLength, '\0');
++    const QByteArray emptyBytes(RecordingFile::HeaderLength, '\0');
+     if (file->write(emptyBytes) == -1) {
+         qWarning() << "Unable to write header space to file:" << filePath;
+         emit recordingError(FileCreation);
+@@ -341,6 +358,9 @@ bool VoiceCallAudioRecorder::initiateRecording(const QString &fileName)
+ void VoiceCallAudioRecorder::terminateRecording()
+ {
+     if (input) {
++        // stop() emits stateChanged(StoppedState), which would come back
++        // here while input is half torn down.
++        disconnect(input.data(), Q_NULLPTR, this, Q_NULLPTR);
+         input->stop();
+         input.reset();
+ 
+@@ -351,33 +371,25 @@ void VoiceCallAudioRecorder::terminateRecording()
+     }
+     if (output) {
+         bool success = false;
++        bool empty = false;
+ 
+         // We need to write the header to the file
+-        const quint32 fileLength = output->size();
+-        const quint32 dataLength = fileLength - WaveHeaderLength;
+-
+-        if (dataLength > 0) {
+-            QByteArray waveHeader;
+-            {
+-                QDataStream os(&waveHeader, QIODevice::WriteOnly);
+-                os.setByteOrder(QDataStream::LittleEndian);
+-
+-                os.writeRawData("RIFF", 4);
+-                os << quint32(fileLength - 8);  // Total data length
+-                os.writeRawData("WAVE", 4);
+-                os.writeRawData("fmt ", 4);
+-                os << quint32(16);              // fmt header length
+-                os << quint16(WavePCMFormat);
+-                os << quint16(ChannelCount);
+-                os << quint32(SampleRate);
+-                os << quint32(SampleRate * ChannelCount * (SampleBits / CHAR_BIT)); // data rate
+-                os << quint16(SampleBits/ CHAR_BIT); // bytes per sample
+-                os << quint16(SampleBits);
+-                os.writeRawData("data", 4);
+-                os << quint32(dataLength);
+-            }
++        const qint64 dataLength = output->size() - RecordingFile::HeaderLength;
+ 
+-            if (output->seek(0) && output->write(waveHeader) == waveHeader.length()) {
++        if (dataLength <= 0) {
++            empty = true;
++        } else {
++            const QByteArray waveHeader(RecordingFile::waveHeader(recordingFormat.channelCount(),
++                                                                  recordingFormat.sampleRate(),
++#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
++                                                                  recordingFormat.bytesPerSample() * 8,
++#else
++                                                                  recordingFormat.sampleSize(),
++#endif
++                                                                  dataLength));
++            if (!waveHeader.isEmpty() && output->seek(0)
++                    && output->write(waveHeader) == waveHeader.length()
++                    && output->flush()) {
+                 success = true;
+             } else {
+                 qWarning() << "Unable to write header to file:" << output->fileName();
+@@ -389,9 +401,16 @@ void VoiceCallAudioRecorder::terminateRecording()
+             fileName.chop(4);
+         } else {
+             qWarning() << "Unexpected file name after recording";
++            success = false;
+         }
+ 
+-        output->rename(fileName);
++        if (empty) {
++            // Nothing was recorded: leave no header-only file behind
++            output->remove();
++        } else if (success && !output->rename(fileName)) {
++            qWarning() << "Unable to store recording:" << fileName << output->errorString();
++            success = false;
++        }
+         output.reset();
+ 
+         if (success) {
+diff --git a/plugins/declarative/src/voicecallhandler.cpp b/plugins/declarative/src/voicecallhandler.cpp
+index 3fccad5..c6d50cc 100644
+--- a/plugins/declarative/src/voicecallhandler.cpp
++++ b/plugins/declarative/src/voicecallhandler.cpp
+@@ -68,11 +68,7 @@ VoiceCallHandler::VoiceCallHandler(const QString &handlerId, QObject *parent)
+     TRACE
+     Q_D(VoiceCallHandler);
+     DEBUG_T("Creating D-Bus interface to: %s", qPrintable(handlerId));
+-    d->interface = new QDBusInterface("org.nemomobile.voicecall",
+-                                      "/calls/" + handlerId,
+-                                      "org.nemomobile.voicecall.VoiceCall",
+-                                      QDBusConnection::sessionBus(),
+-                                      this);
++    d->interface = createInterface();
+ 
+     QTimer::singleShot(0, this, SLOT(initialize()));
+ }
+@@ -91,12 +87,29 @@ QDBusInterface* VoiceCallHandler::interface() const
+     return d->interface;
+ }
+ 
++QDBusInterface *VoiceCallHandler::createInterface()
++{
++    Q_D(VoiceCallHandler);
++    return new QDBusInterface("org.nemomobile.voicecall",
++                              "/calls/" + d->handlerId,
++                              "org.nemomobile.voicecall.VoiceCall",
++                              QDBusConnection::sessionBus(),
++                              this);
++}
++
+ void VoiceCallHandler::initialize()
+ {
+     TRACE
+     Q_D(VoiceCallHandler);
+     bool success = false;
+ 
++    // A QDBusInterface whose introspection failed never becomes valid, so
++    // retrying with the same one could not succeed.
++    if (!d->interface->isValid()) {
++        delete d->interface;
++        d->interface = createInterface();
++    }
++
+     if (d->interface->isValid()) {
+         success = true;
+         success &= (bool)QObject::connect(d->interface, SIGNAL(error(QString)), SIGNAL(error(QString)));
+@@ -155,16 +168,13 @@ void VoiceCallHandler::onGetPropertiesFinished(QDBusPendingCallWatcher *watcher)
+         if (d->forwarded)
+             emit forwardedChanged();
+         if (d->remoteHeld)
+-            emit isRemoteHeld();
++            emit remoteHeldChanged();
+         if (!d->parentHandlerId.isEmpty()) {
+             d->parentCall = VoiceCallManager::getCallHandler(d->parentHandlerId);
+             emit parentCallChanged();
+         }
+-        if (d->multiparty) {
+-            d->childCalls = new VoiceCallModel(this);
+-            emit childCallsListChanged();
+-            emit childCallsChanged();
+-        }
++        if (d->multiparty)
++            ensureChildCalls();
+     }
+ }
+ 
+@@ -214,6 +224,20 @@ void VoiceCallHandler::onMultipartyChanged(bool multiparty)
+     Q_D(VoiceCallHandler);
+     d->multiparty = multiparty;
+     emit multipartyChanged();
++    // A call that becomes a conference after it was set up needs the model
++    // of its members as well.
++    if (multiparty)
++        ensureChildCalls();
++}
++
++void VoiceCallHandler::ensureChildCalls()
++{
++    Q_D(VoiceCallHandler);
++    if (d->childCalls)
++        return;
++    d->childCalls = new VoiceCallModel(this);
++    emit childCallsListChanged();
++    emit childCallsChanged();
+ }
+ 
+ void VoiceCallHandler::onForwardedChanged(bool forwarded)
+@@ -471,10 +495,11 @@ void VoiceCallHandler::onPendingCallFinished(QDBusPendingCallWatcher *watcher)
+         WARNING_T("Received error reply for member: %s (%s)",
+                   qPrintable(reply.reply().member()), qPrintable(reply.error().message()));
+         emit this->error(reply.error().message());
+-        watcher->deleteLater();
+     } else {
+         DEBUG_T("Received successful reply for member: %s", qPrintable(reply.reply().member()));
+     }
++    // Successful calls' watchers were kept until the call ended
++    watcher->deleteLater();
+ }
+ 
+ void VoiceCallHandler::onPendingVoidCallFinished(QDBusPendingCallWatcher *watcher)
+@@ -486,8 +511,8 @@ void VoiceCallHandler::onPendingVoidCallFinished(QDBusPendingCallWatcher *watche
+         WARNING_T("Received error reply for member: %s (%s)",
+                   qPrintable(reply.reply().member()), qPrintable(reply.error().message()));
+         emit this->error(reply.error().message());
+-        watcher->deleteLater();
+     } else {
+         DEBUG_T("Received successful reply for member: %s", qPrintable(reply.reply().member()));
+     }
++    watcher->deleteLater();
+ }
+diff --git a/plugins/declarative/src/voicecallhandler.h b/plugins/declarative/src/voicecallhandler.h
+index 067650b..4b2b555 100644
+--- a/plugins/declarative/src/voicecallhandler.h
++++ b/plugins/declarative/src/voicecallhandler.h
+@@ -109,6 +109,9 @@ private Q_SLOTS:
+     void onGetPropertiesFinished(QDBusPendingCallWatcher *watcher);
+ 
+ private:
++    QDBusInterface *createInterface();
++    void ensureChildCalls();
++
+     class VoiceCallHandlerPrivate *d_ptr;
+ 
+     Q_DISABLE_COPY(VoiceCallHandler)
+diff --git a/plugins/declarative/src/voicecallmanager.cpp b/plugins/declarative/src/voicecallmanager.cpp
+index 50f1e6e..33e21cb 100644
+--- a/plugins/declarative/src/voicecallmanager.cpp
++++ b/plugins/declarative/src/voicecallmanager.cpp
+@@ -10,6 +10,7 @@
+ #include <QTimer>
+ #include <QDBusInterface>
+ #include <QDBusPendingReply>
++#include <QPointer>
+ #include <QSharedPointer>
+ #include <QGlobalStatic>
+ 
+@@ -36,7 +37,9 @@ public:
+     QDBusInterface *interface;
+     VoiceCallModel *voicecalls;
+     VoiceCallProviderModel *providers;
+-    VoiceCallHandler* activeVoiceCall;
++    // The model owns the handlers and may drop one before the daemon's
++    // activeVoiceCallChanged arrives.
++    QPointer<VoiceCallHandler> activeVoiceCall;
+ 
+ #ifdef WITH_NGF
+     Ngf::Client *ngf;
+@@ -52,15 +55,18 @@ VoiceCallManager::VoiceCallManager(QObject *parent)
+ {
+     TRACE
+     Q_D(VoiceCallManager);
+-    d->interface = new QDBusInterface("org.nemomobile.voicecall",
+-                                      "/",
+-                                      "org.nemomobile.voicecall.VoiceCallManager",
+-                                      QDBusConnection::sessionBus(),
+-                                      this);
++    d->interface = createInterface();
+ 
+     d->voicecalls = new VoiceCallModel(this);
+     d->providers = new VoiceCallProviderModel(this);
+ 
++#ifdef WITH_NGF
++    // Once: initialize() runs again every two seconds until the manager
++    // service is reachable.
++    d->ngf = new Ngf::Client(this);
++    d->ngf->connect();
++#endif
++
+     this->initialize();
+ }
+ 
+@@ -77,10 +83,12 @@ void VoiceCallManager::initialize()
+     Q_D(VoiceCallManager);
+     bool success = false;
+ 
+-#ifdef WITH_NGF
+-    d->ngf = new Ngf::Client(this);
+-    d->ngf->connect();
+-#endif
++    // A QDBusInterface whose introspection failed (voicecall-manager not
++    // running yet) never becomes valid; retry with a new one.
++    if (!d->interface->isValid()) {
++        delete d->interface;
++        d->interface = createInterface();
++    }
+ 
+     if (d->interface->isValid()) {
+         success = true;
+@@ -93,8 +101,9 @@ void VoiceCallManager::initialize()
+         success &= (bool)QObject::connect(d->interface, SIGNAL(microphoneMutedChanged()), SIGNAL(microphoneMutedChanged()));
+         success &= (bool)QObject::connect(d->interface, SIGNAL(speakerMutedChanged()), SIGNAL(speakerMutedChanged()));
+ 
+-        onActiveVoiceCallChanged();
++        // The calls first: the active call is looked up in the model.
+         onVoiceCallsChanged();
++        onActiveVoiceCallChanged();
+     }
+ 
+     if (!(d->connected = success)) {
+@@ -102,6 +111,15 @@ void VoiceCallManager::initialize()
+     }
+ }
+ 
++QDBusInterface *VoiceCallManager::createInterface()
++{
++    return new QDBusInterface("org.nemomobile.voicecall",
++                              "/",
++                              "org.nemomobile.voicecall.VoiceCallManager",
++                              QDBusConnection::sessionBus(),
++                              this);
++}
++
+ QDBusInterface* VoiceCallManager::interface() const
+ {
+     Q_D(const VoiceCallManager);
+diff --git a/plugins/declarative/src/voicecallmanager.h b/plugins/declarative/src/voicecallmanager.h
+index 382e44d..921f86f 100644
+--- a/plugins/declarative/src/voicecallmanager.h
++++ b/plugins/declarative/src/voicecallmanager.h
+@@ -95,6 +95,8 @@ protected Q_SLOTS:
+     void onPendingVoidCallFinished(QDBusPendingCallWatcher *watcher);
+ 
+ private:
++    QDBusInterface *createInterface();
++
+     class VoiceCallManagerPrivate *d_ptr;
+ 
+     Q_DISABLE_COPY(VoiceCallManager)
+diff --git a/rpm/voicecall-qt5.spec b/rpm/voicecall-qt5.spec
+index 7718b65..2c0bd42 100644
+--- a/rpm/voicecall-qt5.spec
++++ b/rpm/voicecall-qt5.spec
+@@ -169,3 +169,4 @@ fi
+ /opt/tests/voicecall/manager
+ /opt/tests/voicecall/ofono
+ /opt/tests/voicecall/telepathy
++/opt/tests/voicecall/declarative
+diff --git a/tests/recordingfile.pro b/tests/recordingfile.pro
+new file mode 100644
+index 0000000..8e18804
+--- /dev/null
++++ b/tests/recordingfile.pro
+@@ -0,0 +1,16 @@
++TEMPLATE = app
++TARGET = tst_recordingfile
++QT += core testlib
++QT -= gui
++
++OBJECTS_DIR = $$OUT_PWD/.obj/recordingfile
++MOC_DIR = $$OUT_PWD/.moc/recordingfile
++
++INCLUDEPATH += ../plugins/declarative/src
++
++HEADERS += ../plugins/declarative/src/recordingfile.h
++SOURCES += tst_recordingfile.cpp
++
++target.path = /opt/tests/voicecall/declarative
++
++INSTALLS += target
+diff --git a/tests/tests.pro b/tests/tests.pro
+index 5ba9cbe..7d3156d 100644
+--- a/tests/tests.pro
++++ b/tests/tests.pro
+@@ -5,8 +5,9 @@ controller.file = controller.pro
+ manager.file = manager.pro
+ ofono.file = ofono.pro
+ dtmf.file = dtmf.pro
++recordingfile.file = recordingfile.pro
+ 
+-SUBDIRS += store controller manager ofono dtmf
++SUBDIRS += store controller manager ofono dtmf recordingfile
+ 
+ tests_xml.path = /opt/tests/voicecall/cellbroadcast
+ tests_xml.files = tests.xml
+diff --git a/tests/tests.xml b/tests/tests.xml
+index 5e81e7b..1cf3b50 100644
+--- a/tests/tests.xml
++++ b/tests/tests.xml
+@@ -25,6 +25,9 @@
+       <case manual="false" name="telepathy-dtmf">
+         <step>/opt/tests/voicecall/telepathy/tst_dtmf</step>
+       </case>
++      <case manual="false" name="declarative-recordingfile">
++        <step>/opt/tests/voicecall/declarative/tst_recordingfile</step>
++      </case>
+     </set>
+   </suite>
+ </testdefinition>
+diff --git a/tests/tst_recordingfile.cpp b/tests/tst_recordingfile.cpp
+new file mode 100644
+index 0000000..21086be
+--- /dev/null
++++ b/tests/tst_recordingfile.cpp
+@@ -0,0 +1,189 @@
++/*
++ * This file is a part of the Voice Call Manager project
++ *
++ * Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ */
++#include "recordingfile.h"
++
++#include <QtEndian>
++#include <QtTest>
++
++class tst_RecordingFile : public QObject
++{
++    Q_OBJECT
++
++private Q_SLOTS:
++    void component_data();
++    void component();
++    void componentLength();
++    void plainFileName_data();
++    void plainFileName();
++    void header();
++    void headerLargeData();
++    void headerRejectsBadInput_data();
++    void headerRejectsBadInput();
++};
++
++void tst_RecordingFile::component_data()
++{
++    QTest::addColumn<QString>("value");
++    QTest::addColumn<QString>("expected");
++
++    QTest::newRow("plain") << "Alice" << "Alice";
++    QTest::newRow("number") << "+31201234567" << "+31201234567";
++    QTest::newRow("slash") << "AC/DC" << "AC_DC";
++    QTest::newRow("traversal") << "../../.config/x" << "___.._.config_x";
++    QTest::newRow("dotdot") << ".." << "__";
++    QTest::newRow("hidden") << ".profile" << "_profile";
++    QTest::newRow("backslash") << "a\\b" << "a_b";
++    QTest::newRow("newline") << "a\nb" << "a_b";
++    QTest::newRow("nul") << QString::fromUtf8("a\0b", 3) << "a_b";
++    QTest::newRow("unicode") << QString::fromUtf8("Zoë 李") << QString::fromUtf8("Zoë 李");
++}
++
++void tst_RecordingFile::component()
++{
++    QFETCH(QString, value);
++    QFETCH(QString, expected);
++    const QString result = RecordingFile::component(value);
++    QCOMPARE(result, expected);
++    QVERIFY(RecordingFile::isPlainFileName(result) || result.isEmpty());
++}
++
++void tst_RecordingFile::componentLength()
++{
++    const QString cjk(1000, QChar(0x674e));         // 3 bytes each in UTF-8
++    const QString ascii(1000, QLatin1Char('a'));
++    QString emoji;                                   // 4 bytes, a surrogate pair
++    for (int i = 0; i < 300; ++i)
++        emoji += QString::fromUtf8("\xf0\x9f\x93\x9e");
++
++    for (const QString &name : { cjk, ascii, emoji }) {
++        const QString result = RecordingFile::component(name);
++        QVERIFY(result.toUtf8().size() <= RecordingFile::MaxComponentBytes);
++        QVERIFY(result.toUtf8().size() > RecordingFile::MaxComponentBytes - 4);
++        // Nothing cut in half
++        QCOMPARE(QString::fromUtf8(result.toUtf8()), result);
++        QVERIFY(!result.contains(QLatin1Char('_')));
++
++        // Two components, the timestamp, direction and suffix fit NAME_MAX
++        const QString fileName = QStringLiteral("%1.%2.20260101-120000000.1.wav.tmp")
++                .arg(result, result);
++        QVERIFY(fileName.toUtf8().size() <= 255);
++    }
++
++    // An unpaired surrogate is replaced, not passed on
++    QCOMPARE(RecordingFile::component(QString(QChar(0xd83d))), QStringLiteral("_"));
++}
++
++void tst_RecordingFile::plainFileName_data()
++{
++    QTest::addColumn<QString>("fileName");
++    QTest::addColumn<bool>("plain");
++
++    QTest::newRow("recording") << "Alice.123.20260101-120000000.1.wav" << true;
++    QTest::newRow("empty") << "" << false;
++    QTest::newRow("dot") << "." << false;
++    QTest::newRow("dotdot") << ".." << false;
++    QTest::newRow("parent") << "../x.wav" << false;
++    QTest::newRow("absolute") << "/etc/passwd" << false;
++    QTest::newRow("subdir") << "a/b.wav" << false;
++    QTest::newRow("nul") << QString::fromUtf8("a\0b", 3) << false;
++}
++
++void tst_RecordingFile::plainFileName()
++{
++    QFETCH(QString, fileName);
++    QFETCH(bool, plain);
++    QCOMPARE(RecordingFile::isPlainFileName(fileName), plain);
++}
++
++static quint32 u32(const QByteArray &h, int offset)
++{
++    return qFromLittleEndian<quint32>(reinterpret_cast<const uchar *>(h.constData() + offset));
++}
++
++static quint16 u16(const QByteArray &h, int offset)
++{
++    return qFromLittleEndian<quint16>(reinterpret_cast<const uchar *>(h.constData() + offset));
++}
++
++void tst_RecordingFile::header()
++{
++    const QByteArray h = RecordingFile::waveHeader(1, 8000, 16, 16000);
++    QCOMPARE(h.size(), RecordingFile::HeaderLength);
++    QCOMPARE(h.mid(0, 4), QByteArray("RIFF"));
++    QCOMPARE(u32(h, 4), quint32(16000 + 36));
++    QCOMPARE(h.mid(8, 8), QByteArray("WAVEfmt "));
++    QCOMPARE(u32(h, 16), quint32(16));
++    QCOMPARE(u16(h, 20), quint16(1));
++    QCOMPARE(u16(h, 22), quint16(1));
++    QCOMPARE(u32(h, 24), quint32(8000));
++    QCOMPARE(u32(h, 28), quint32(16000));   // byte rate
++    QCOMPARE(u16(h, 32), quint16(2));       // block align
++    QCOMPARE(u16(h, 34), quint16(16));
++    QCOMPARE(h.mid(36, 4), QByteArray("data"));
++    QCOMPARE(u32(h, 40), quint32(16000));
++
++    // A format other than the one asked for is described as it is
++    const QByteArray s = RecordingFile::waveHeader(2, 16000, 16, 64000);
++    QCOMPARE(u16(s, 22), quint16(2));
++    QCOMPARE(u32(s, 24), quint32(16000));
++    QCOMPARE(u32(s, 28), quint32(64000));
++    QCOMPARE(u16(s, 32), quint16(4));
++}
++
++void tst_RecordingFile::headerLargeData()
++{
++    // Above 2 GiB the old int arithmetic went negative
++    const qint64 big = Q_INT64_C(3000000000);
++    const QByteArray h = RecordingFile::waveHeader(1, 8000, 16, big);
++    QCOMPARE(h.size(), RecordingFile::HeaderLength);
++    QCOMPARE(u32(h, 40), quint32(big));
++    QCOMPARE(u32(h, 4), quint32(big + 36));
++
++    const qint64 max = Q_INT64_C(0xffffffff) - 36;
++    QCOMPARE(RecordingFile::waveHeader(1, 8000, 16, max).size(), RecordingFile::HeaderLength);
++    QVERIFY(RecordingFile::waveHeader(1, 8000, 16, max + 1).isEmpty());
++}
++
++void tst_RecordingFile::headerRejectsBadInput_data()
++{
++    QTest::addColumn<int>("channels");
++    QTest::addColumn<int>("rate");
++    QTest::addColumn<int>("bits");
++    QTest::addColumn<qint64>("length");
++
++    QTest::newRow("no channels") << 0 << 8000 << 16 << qint64(2);
++    QTest::newRow("no rate") << 1 << 0 << 16 << qint64(2);
++    QTest::newRow("odd bits") << 1 << 8000 << 12 << qint64(2);
++    QTest::newRow("negative") << 1 << 8000 << 16 << qint64(-1);
++}
++
++void tst_RecordingFile::headerRejectsBadInput()
++{
++    QFETCH(int, channels);
++    QFETCH(int, rate);
++    QFETCH(int, bits);
++    QFETCH(qint64, length);
++    QVERIFY(RecordingFile::waveHeader(channels, rate, bits, length).isEmpty());
++}
++
++QTEST_GUILESS_MAIN(tst_RecordingFile)
++
++#include "tst_recordingfile.moc"

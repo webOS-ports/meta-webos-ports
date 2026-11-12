@@ -1,0 +1,165 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 11:36:19 +0100
+Subject: [PATCH] [voicecall] Build warning-clean against Qt 6.
+
+Clang and GCC warned in our code against Qt 6.12:
+
+- Q_ENUMS is deprecated; Q_ENUM, after the enum, does the same and has
+  been there since Qt 5.5.
+- QScopedPointer::swap() and take() are deprecated; the recorder opens
+  its file through a std::unique_ptr and hands it over with release().
+- The cell broadcast store test's QDateTime::fromMSecsSinceEpoch(...,
+  Qt::UTC) is deprecated; pass QTimeZone::utc(), which Qt 5 has as well.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ lib/src/abstractvoicecallhandler.h                 | 5 ++---
+ plugins/declarative/src/voicecallaudiorecorder.cpp | 6 ++++--
+ plugins/declarative/src/voicecallaudiorecorder.h   | 2 +-
+ plugins/declarative/src/voicecallhandler.h         | 3 +--
+ tests/tst_cellbroadcaststore.cpp                   | 8 ++++----
+ 5 files changed, 12 insertions(+), 12 deletions(-)
+
+diff --git a/lib/src/abstractvoicecallhandler.h b/lib/src/abstractvoicecallhandler.h
+index 6245e5b..2c950a0 100644
+--- a/lib/src/abstractvoicecallhandler.h
++++ b/lib/src/abstractvoicecallhandler.h
+@@ -37,9 +37,6 @@ class AbstractVoiceCallHandler : public QObject
+ {
+     Q_OBJECT
+ 
+-    Q_ENUMS(VoiceCallStatus)
+-    Q_ENUMS(VoiceCallFilterAction)
+-
+     Q_PROPERTY(QString handlerId READ handlerId CONSTANT)
+     Q_PROPERTY(AbstractVoiceCallProvider* provider READ provider)
+     Q_PROPERTY(VoiceCallStatus status READ status NOTIFY statusChanged)
+@@ -68,12 +65,14 @@ public:
+         STATUS_REJECTED,
+         STATUS_IGNORED
+     };
++    Q_ENUM(VoiceCallStatus)
+ 
+     enum VoiceCallFilterAction {
+         ACTION_CONTINUE,
+         ACTION_IGNORE,
+         ACTION_REJECT
+     };
++    Q_ENUM(VoiceCallFilterAction)
+ 
+     explicit AbstractVoiceCallHandler(QObject *parent = 0) : QObject(parent) {/* ... */}
+     virtual ~AbstractVoiceCallHandler() {/* ... */}
+diff --git a/plugins/declarative/src/voicecallaudiorecorder.cpp b/plugins/declarative/src/voicecallaudiorecorder.cpp
+index b324c79..a938c04 100644
+--- a/plugins/declarative/src/voicecallaudiorecorder.cpp
++++ b/plugins/declarative/src/voicecallaudiorecorder.cpp
+@@ -51,6 +51,8 @@
+ #include <QAudioDeviceInfo>
+ #endif
+ 
++#include <memory>
++
+ #include <unistd.h>
+ 
+ namespace {
+@@ -296,7 +298,7 @@ bool VoiceCallAudioRecorder::initiateRecording(const QString &fileName)
+ 
+     filePath.append(QStringLiteral(".tmp"));
+ 
+-    QScopedPointer<QFile> file(new QFile(filePath));
++    std::unique_ptr<QFile> file(new QFile(filePath));
+     if (!file->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+         qWarning() << "Unable to open file for write:" << filePath;
+         emit recordingError(FileCreation);
+@@ -319,7 +321,7 @@ bool VoiceCallAudioRecorder::initiateRecording(const QString &fileName)
+         return false;
+     }
+ 
+-    output.swap(file);
++    output.reset(file.release());
+ 
+ #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+     input.reset(new QAudioSource(recordingFormat));
+diff --git a/plugins/declarative/src/voicecallaudiorecorder.h b/plugins/declarative/src/voicecallaudiorecorder.h
+index 6a4c563..575ca00 100644
+--- a/plugins/declarative/src/voicecallaudiorecorder.h
++++ b/plugins/declarative/src/voicecallaudiorecorder.h
+@@ -50,7 +50,6 @@ class VoiceCallAudioRecorder : public QObject
+     Q_OBJECT
+     Q_DISABLE_COPY(VoiceCallAudioRecorder)
+ 
+-    Q_ENUMS(ErrorCondition)
+ 
+     Q_PROPERTY(bool available READ available NOTIFY availableChanged)
+     Q_PROPERTY(bool recording READ recording NOTIFY recordingChanged)
+@@ -62,6 +61,7 @@ public:
+         FileStorage,
+         AudioRouting,
+     };
++    Q_ENUM(ErrorCondition)
+ 
+     explicit VoiceCallAudioRecorder(QObject *parent);
+     ~VoiceCallAudioRecorder();
+diff --git a/plugins/declarative/src/voicecallhandler.h b/plugins/declarative/src/voicecallhandler.h
+index 431c2e2..067650b 100644
+--- a/plugins/declarative/src/voicecallhandler.h
++++ b/plugins/declarative/src/voicecallhandler.h
+@@ -20,8 +20,6 @@ class VoiceCallHandler : public QObject
+ {
+     Q_OBJECT
+ 
+-    Q_ENUMS(VoiceCallStatus)
+-
+     Q_PROPERTY(QString handlerId READ handlerId CONSTANT)
+     Q_PROPERTY(QString providerId READ providerId CONSTANT)
+     Q_PROPERTY(int status READ status NOTIFY statusChanged)
+@@ -48,6 +46,7 @@ public:
+         STATUS_WAITING,
+         STATUS_DISCONNECTED
+     };
++    Q_ENUM(VoiceCallStatus)
+ 
+     explicit VoiceCallHandler(const QString &handlerId, QObject *parent = 0);
+     ~VoiceCallHandler();
+diff --git a/tests/tst_cellbroadcaststore.cpp b/tests/tst_cellbroadcaststore.cpp
+index d105cce..b9ccd7e 100644
+--- a/tests/tst_cellbroadcaststore.cpp
++++ b/tests/tst_cellbroadcaststore.cpp
+@@ -1851,7 +1851,7 @@ void TestCellBroadcastStore::ignoresStaleLocation()
+ 
+     QGeoPositionInfo staleOutside(
+                 QGeoCoordinate(-30.0, 140.0),
+-                QDateTime::fromMSecsSinceEpoch(now - 1000, Qt::UTC));
++                QDateTime::fromMSecsSinceEpoch(now - 1000, QTimeZone::utc()));
+     staleOutside.setAttribute(QGeoPositionInfo::HorizontalAccuracy, 10.0);
+     source.sendPosition(staleOutside);
+     QCOMPARE(resolved.count(), 0);
+@@ -1859,7 +1859,7 @@ void TestCellBroadcastStore::ignoresStaleLocation()
+     QGeoPositionInfo freshOutside(
+                 QGeoCoordinate(-30.0, 140.0),
+                 QDateTime::fromMSecsSinceEpoch(
+-                    QDateTime::currentMSecsSinceEpoch() + 1, Qt::UTC));
++                    QDateTime::currentMSecsSinceEpoch() + 1, QTimeZone::utc()));
+     freshOutside.setAttribute(QGeoPositionInfo::HorizontalAccuracy, 10.0);
+     source.sendPosition(freshOutside);
+     QCOMPARE(resolved.count(), 1);
+@@ -1882,7 +1882,7 @@ void TestCellBroadcastStore::preservesFreshnessForRepeatedGeoFenceRequest()
+ 
+     QGeoPositionInfo freshOutside(
+                 QGeoCoordinate(-30.0, 140.0),
+-                QDateTime::fromMSecsSinceEpoch(positionTime, Qt::UTC));
++                QDateTime::fromMSecsSinceEpoch(positionTime, QTimeZone::utc()));
+     freshOutside.setAttribute(QGeoPositionInfo::HorizontalAccuracy, 10.0);
+     source.sendPosition(freshOutside);
+     QCOMPARE(resolved.count(), 1);
+@@ -1901,7 +1901,7 @@ void TestCellBroadcastStore::cancelsObsoleteGeoFenceRequest()
+ 
+     QGeoPositionInfo freshOutside(
+                 QGeoCoordinate(-30.0, 140.0),
+-                QDateTime::fromMSecsSinceEpoch(now + 1, Qt::UTC));
++                QDateTime::fromMSecsSinceEpoch(now + 1, QTimeZone::utc()));
+     freshOutside.setAttribute(QGeoPositionInfo::HorizontalAccuracy, 10.0);
+     source.sendPosition(freshOutside);
+     QCOMPARE(resolved.count(), 0);

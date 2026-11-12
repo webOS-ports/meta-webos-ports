@@ -1,0 +1,371 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 12 Nov 2026 07:27:19 +0100
+Subject: [PATCH] [voicecall] Keep an ended call on D-Bus until its last status
+ is out.
+
+QtDBus relays an adaptor's signals through a queued connection and
+looks the object's path up only when the relay runs. Unregistering
+/calls/<id> straight from voiceCallRemoved therefore dropped the
+statusChanged("disconnected") that was still queued, so clients
+intermittently never saw the call end after a local hang-up.
+
+Leave the object registered while its handler lives (Qt's own
+destroyed-cleanup is ordered after the queued relays), and for a
+handler that is kept alive, unregister it a second later unless the
+call came back in the meantime.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/dbus/voicecallmanagerdbusservice.cpp |  52 ++++++-
+ tests/dbus.pro                           |  34 +++++
+ tests/tests.pro                          |   3 +-
+ tests/tests.xml                          |   3 +
+ tests/tst_dbusservice.cpp                | 172 +++++++++++++++++++++++
+ 5 files changed, 261 insertions(+), 3 deletions(-)
+ create mode 100644 tests/dbus.pro
+ create mode 100644 tests/tst_dbusservice.cpp
+
+diff --git a/src/dbus/voicecallmanagerdbusservice.cpp b/src/dbus/voicecallmanagerdbusservice.cpp
+index 7e0dbe5..72340ed 100644
+--- a/src/dbus/voicecallmanagerdbusservice.cpp
++++ b/src/dbus/voicecallmanagerdbusservice.cpp
+@@ -29,6 +29,17 @@
+ #include <QDBusError>
+ #include <QDBusConnection>
+ #include <QDBusMetaType>
++#include <QHash>
++#include <QPointer>
++#include <QSet>
++#include <QTimer>
++
++/*
++ * How long a removed call stays on the bus when its provider keeps the
++ * handler alive. Calls whose handler is deleted (the ofono provider) leave
++ * as soon as it is; see onVoiceCallRemoved().
++ */
++static const int RemovedCallUnregisterDelay = 1000;
+ 
+ class VoiceCallManagerDBusServicePrivate
+ {
+@@ -43,6 +54,11 @@ public:
+ 
+     VoiceCallManagerInterface *manager;
+     VoiceCallManagerDBusAdapter *managerAdapter;
++
++    // Handlers registered at /calls/<handlerId>, and those of them removed
++    // from the manager but still registered.
++    QHash<QString, QPointer<AbstractVoiceCallHandler> > registered;
++    QSet<QString> removing;
+ };
+ 
+ VoiceCallManagerDBusService::VoiceCallManagerDBusService(QObject *parent)
+@@ -123,6 +139,7 @@ void VoiceCallManagerDBusService::finalize()
+ void VoiceCallManagerDBusService::onVoiceCallAdded(AbstractVoiceCallHandler *handler)
+ {
+     TRACE
++    Q_D(VoiceCallManagerDBusService);
+ 
+     // A provider that goes away and comes back (a telepathy account going
+     // offline and online again) announces its surviving calls again. Adapt
+@@ -130,16 +147,47 @@ void VoiceCallManagerDBusService::onVoiceCallAdded(AbstractVoiceCallHandler *han
+     if (!handler->findChild<VoiceCallHandlerDBusAdapter *>(QString(), Qt::FindDirectChildrenOnly))
+         new VoiceCallHandlerDBusAdapter(handler);
+ 
+-    if (!QDBusConnection::sessionBus().registerObject("/calls/" + handler->handlerId(), handler)) {
++    const QString handlerId = handler->handlerId();
++    d->removing.remove(handlerId);
++    if (d->registered.value(handlerId) == handler)
++        return;     // back before its removal took effect, still registered
++
++    if (!QDBusConnection::sessionBus().registerObject("/calls/" + handlerId, handler)) {
+         WARNING_T("Failed to register DBus object: %s", qPrintable(QDBusConnection::sessionBus().lastError().message()));
++        return;
+     }
++    d->registered.insert(handlerId, handler);
+ }
+ 
+ void VoiceCallManagerDBusService::onVoiceCallRemoved(const QString &handlerId)
+ {
+     TRACE
++    Q_D(VoiceCallManagerDBusService);
+ 
+-    QDBusConnection::sessionBus().unregisterObject("/calls/" + handlerId);
++    /*
++     * Not unregisterObject() right away. QtDBus relays an adaptor's signal
++     * through a queued call to its own thread, which only then looks up the
++     * paths the object is registered at; unregistered by then, the signal is
++     * dropped. A call that ends announces its last status ("disconnected")
++     * and is removed straight after, so its last statusChanged was often
++     * lost. When the handler is deleted, QtDBus unregisters it itself, through
++     * the same queue and after the signals already in it, so wait for that.
++     * Providers that keep the handler alive get it unregistered a little
++     * later instead.
++     */
++    QPointer<AbstractVoiceCallHandler> handler = d->registered.value(handlerId);
++    if (!handler) {
++        d->registered.remove(handlerId);
++        return;
++    }
++    d->removing.insert(handlerId);
++    QTimer::singleShot(RemovedCallUnregisterDelay, this, [this, handlerId]() {
++        Q_D(VoiceCallManagerDBusService);
++        if (!d->removing.remove(handlerId))
++            return;     // added again in the meantime
++        if (d->registered.take(handlerId))
++            QDBusConnection::sessionBus().unregisterObject("/calls/" + handlerId);
++    });
+ }
+ 
+ void VoiceCallManagerDBusService::onActiveVoiceCallChanged()
+diff --git a/tests/dbus.pro b/tests/dbus.pro
+new file mode 100644
+index 0000000..c2575ac
+--- /dev/null
++++ b/tests/dbus.pro
+@@ -0,0 +1,34 @@
++TEMPLATE = app
++TARGET = tst_dbusservice
++QT += core dbus testlib
++QT -= gui
++
++OBJECTS_DIR = $$OUT_PWD/.obj/dbus
++MOC_DIR = $$OUT_PWD/.moc/dbus
++
++# Needs a session bus: run it under dbus-run-session (it skips without one).
++INCLUDEPATH += fakes ../src ../src/dbus ../lib/src
++
++HEADERS += \
++    fakes/fake_voicecall.h \
++    ../lib/src/abstractvoicecallhandler.h \
++    ../lib/src/abstractvoicecallprovider.h \
++    ../lib/src/abstractvoicecallmanagerplugin.h \
++    ../lib/src/voicecallmanagerinterface.h \
++    ../src/voicecallmanager.h \
++    ../src/dbus/voicecallmanagerdbusservice.h \
++    ../src/dbus/voicecallmanagerdbusadapter.h \
++    ../src/dbus/voicecallhandlerdbusadapter.h
++
++SOURCES += \
++    tst_dbusservice.cpp \
++    ../lib/src/abstractvoicecallhandler.cpp \
++    ../lib/src/common.cpp \
++    ../src/voicecallmanager.cpp \
++    ../src/dbus/voicecallmanagerdbusservice.cpp \
++    ../src/dbus/voicecallmanagerdbusadapter.cpp \
++    ../src/dbus/voicecallhandlerdbusadapter.cpp
++
++target.path = /opt/tests/voicecall/dbus
++
++INSTALLS += target
+diff --git a/tests/tests.pro b/tests/tests.pro
+index 73ff093..928e78e 100644
+--- a/tests/tests.pro
++++ b/tests/tests.pro
+@@ -6,8 +6,9 @@ manager.file = manager.pro
+ ofono.file = ofono.pro
+ dtmf.file = dtmf.pro
+ recordingfile.file = recordingfile.pro
++dbus.file = dbus.pro
+ 
+-SUBDIRS += store controller manager ofono dtmf recordingfile
++SUBDIRS += store controller manager ofono dtmf recordingfile dbus
+ 
+ tests_xml.path = /opt/tests/voicecall/cellbroadcast
+ tests_xml.files = tests.xml
+diff --git a/tests/tests.xml b/tests/tests.xml
+index 1cf3b50..a339f27 100644
+--- a/tests/tests.xml
++++ b/tests/tests.xml
+@@ -22,6 +22,9 @@
+       <case manual="false" name="ofono-provider">
+         <step>/opt/tests/voicecall/ofono/tst_ofonoprovider</step>
+       </case>
++      <case manual="false" name="dbus-service">
++        <step>/opt/tests/voicecall/dbus/tst_dbusservice</step>
++      </case>
+       <case manual="false" name="telepathy-dtmf">
+         <step>/opt/tests/voicecall/telepathy/tst_dtmf</step>
+       </case>
+diff --git a/tests/tst_dbusservice.cpp b/tests/tst_dbusservice.cpp
+new file mode 100644
+index 0000000..4c56eb0
+--- /dev/null
++++ b/tests/tst_dbusservice.cpp
+@@ -0,0 +1,172 @@
++/*
++ * This file is a part of the Voice Call Manager project
++ *
++ * Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ */
++
++// The calls on the session bus, as a client on its own connection sees them.
++
++#include "voicecallmanager.h"
++#include "voicecallmanagerdbusservice.h"
++
++#include "fake_voicecall.h"
++
++#include <QDBusConnection>
++#include <QDBusConnectionInterface>
++#include <QtTest>
++
++typedef AbstractVoiceCallHandler H;
++
++static const char CallInterface[] = "org.nemomobile.voicecall.VoiceCall";
++
++class StatusListener : public QObject
++{
++    Q_OBJECT
++
++public:
++    QStringList statuses;
++
++public Q_SLOTS:
++    void onStatusChanged(int, const QString &status) { statuses << status; }
++};
++
++class tst_DBusService : public QObject
++{
++    Q_OBJECT
++
++private Q_SLOTS:
++    void initTestCase();
++    void init();
++    void cleanup();
++
++    void lastStatusReachesClients();
++    void removedCallLeavesWithItsHandler();
++    void keptHandlerLeavesLater();
++    void callBackBeforeItLeftStays();
++
++private:
++    static bool registered(const QString &id)
++    {
++        return QDBusConnection::sessionBus().objectRegisteredAt(QStringLiteral("/calls/") + id);
++    }
++
++    QDBusConnection m_client = QDBusConnection(QString());
++    VoiceCallManager *m_manager = 0;
++    VoiceCallManagerDBusService *m_service = 0;
++    FakeVoiceCallProvider *m_provider = 0;
++};
++
++void tst_DBusService::initTestCase()
++{
++    if (!QDBusConnection::sessionBus().isConnected())
++        QSKIP("No session bus; run under dbus-run-session");
++    m_client = QDBusConnection::connectToBus(QDBusConnection::SessionBus,
++                                             QStringLiteral("tst_dbusservice_client"));
++    QVERIFY(m_client.isConnected());
++}
++
++void tst_DBusService::init()
++{
++    m_manager = new VoiceCallManager;
++    m_service = new VoiceCallManagerDBusService;
++    QVERIFY(m_service->initialize());
++    // configure() would also take org.nemomobile.voicecall, which the running
++    // voicecall-manager owns on a device; the calls need only these two.
++    QVERIFY(connect(m_manager, SIGNAL(voiceCallAdded(AbstractVoiceCallHandler*)),
++                    m_service, SLOT(onVoiceCallAdded(AbstractVoiceCallHandler*))));
++    QVERIFY(connect(m_manager, SIGNAL(voiceCallRemoved(QString)),
++                    m_service, SLOT(onVoiceCallRemoved(QString))));
++    m_provider = new FakeVoiceCallProvider(QStringLiteral("p1"));
++    m_manager->appendProvider(m_provider);
++}
++
++void tst_DBusService::cleanup()
++{
++    m_manager->removeProvider(m_provider);
++    delete m_provider;
++    m_provider = 0;
++    delete m_service;
++    m_service = 0;
++    delete m_manager;
++    m_manager = 0;
++    QCoreApplication::sendPostedEvents(Q_NULLPTR, QEvent::DeferredDelete);
++}
++
++// A call that ends reports "disconnected" and is removed straight after.
++// QtDBus sends an adaptor's signal from its own thread, finding the object's
++// path only then: unregistered at removal, the last status was often lost.
++// Many calls, as losing it depended on timing.
++void tst_DBusService::lastStatusReachesClients()
++{
++    const QString sender = QDBusConnection::sessionBus().baseService();
++    for (int i = 0; i < 50; ++i) {
++        const QString id = QStringLiteral("call%1").arg(i);
++        const QString path = QStringLiteral("/calls/") + id;
++        FakeVoiceCallHandler *call = m_provider->addCall(id, false, H::STATUS_ACTIVE);
++        StatusListener listener;
++        QVERIFY(m_client.connect(sender, path, QLatin1String(CallInterface),
++                                 QStringLiteral("statusChanged"),
++                                 &listener, SLOT(onStatusChanged(int,QString))));
++        // A round trip on the client connection: the bus has its match rule.
++        QVERIFY(m_client.interface()->isServiceRegistered(sender).value());
++
++        call->setStatus(H::STATUS_DISCONNECTED);
++        m_provider->removeCall(call);
++        QCoreApplication::sendPostedEvents(Q_NULLPTR, QEvent::DeferredDelete);
++
++        QTRY_COMPARE_WITH_TIMEOUT(listener.statuses,
++                                  QStringList() << QStringLiteral("disconnected"), 3000);
++        m_client.disconnect(sender, path, QLatin1String(CallInterface),
++                            QStringLiteral("statusChanged"),
++                            &listener, SLOT(onStatusChanged(int,QString)));
++    }
++}
++
++void tst_DBusService::removedCallLeavesWithItsHandler()
++{
++    FakeVoiceCallHandler *call = m_provider->addCall(QStringLiteral("a"), false, H::STATUS_ACTIVE);
++    QVERIFY(registered(QStringLiteral("a")));
++    m_provider->removeCall(call);
++    QVERIFY(registered(QStringLiteral("a")));
++    QCoreApplication::sendPostedEvents(Q_NULLPTR, QEvent::DeferredDelete);
++    QVERIFY(!registered(QStringLiteral("a")));
++}
++
++// A provider that goes away takes its calls off the manager without deleting
++// them (removeProvider()); the provider may keep them.
++void tst_DBusService::keptHandlerLeavesLater()
++{
++    m_provider->addCall(QStringLiteral("kept"), false, H::STATUS_ACTIVE);
++    m_manager->removeProvider(m_provider);
++    QVERIFY(registered(QStringLiteral("kept")));
++    QTRY_VERIFY_WITH_TIMEOUT(!registered(QStringLiteral("kept")), 5000);
++}
++
++// ... and comes back with them before they left (a reconnecting account)
++void tst_DBusService::callBackBeforeItLeftStays()
++{
++    m_provider->addCall(QStringLiteral("back"), false, H::STATUS_HELD);
++    m_manager->removeProvider(m_provider);
++    m_manager->appendProvider(m_provider);
++    QTest::qWait(1500);
++    QVERIFY(registered(QStringLiteral("back")));
++}
++
++QTEST_GUILESS_MAIN(tst_DBusService)
++
++#include "tst_dbusservice.moc"
+-- 
+2.53.0
+

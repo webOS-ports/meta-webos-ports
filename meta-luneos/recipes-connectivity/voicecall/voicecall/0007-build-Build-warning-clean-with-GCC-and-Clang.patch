@@ -1,0 +1,464 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 07:03:21 +0100
+Subject: [PATCH] [build] Build warning-clean with GCC and Clang.
+
+Builds of the whole tree with GCC 15 and Clang 21 for armv7, aarch64 and
+x86-64 against Qt 5.15 warned in our own code, and Clang could not build
+the telepathy plugin at all:
+
+- Add the missing override to the handler and manager classes. Some of
+  their members were already marked, so Clang warned for every other one
+  (-Winconsistent-missing-override).
+- Drop two unused Q_D in the D-Bus service, and rename locals that shadow
+  others (-Wshadow). The telepathy provider's ready() lambda also gets
+  the provider as context object, so it can't run after the provider is
+  gone.
+- TelepathyQt 0.9.8's shared-ptr.h uses the 'register' storage class,
+  which C++17 removed. Clang rejects it, and compilers now default to
+  C++17, so build the telepathy plugin as C++14.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ .../ofono/src/ofonovoicecallhandler.h         | 40 ++++++------
+ .../ofono/src/ofonovoicecallprovider.cpp      |  6 +-
+ .../telepathy/src/basechannelhandler.h        |  2 +-
+ .../telepathy/src/callchannelhandler.h        | 40 ++++++------
+ plugins/providers/telepathy/src/src.pro       |  5 ++
+ .../telepathy/src/streamchannelhandler.cpp    | 10 +--
+ .../telepathy/src/streamchannelhandler.h      | 40 ++++++------
+ .../telepathy/src/telepathyprovider.cpp       |  9 +--
+ src/cellbroadcaststore.cpp                    |  6 +-
+ src/dbus/voicecallmanagerdbusservice.cpp      |  2 -
+ src/voicecallmanager.h                        | 62 +++++++++----------
+ 11 files changed, 113 insertions(+), 109 deletions(-)
+
+diff --git a/plugins/providers/ofono/src/ofonovoicecallhandler.h b/plugins/providers/ofono/src/ofonovoicecallhandler.h
+index 9844338..0af5415 100644
+--- a/plugins/providers/ofono/src/ofonovoicecallhandler.h
++++ b/plugins/providers/ofono/src/ofonovoicecallhandler.h
+@@ -39,35 +39,35 @@ public:
+ 
+     QString path() const;
+ 
+-    AbstractVoiceCallProvider* provider() const;
++    AbstractVoiceCallProvider* provider() const override;
+ 
+-    QString handlerId() const;
+-    QString lineId() const;
++    QString handlerId() const override;
++    QString lineId() const override;
+     QString subscriberId() const override;
+-    QDateTime startedAt() const;
+-    int duration() const;
+-    bool isIncoming() const;
+-    bool isMultiparty() const;
+-    bool isEmergency() const;
+-    bool isForwarded() const;
+-    bool isRemoteHeld() const;
++    QDateTime startedAt() const override;
++    int duration() const override;
++    bool isIncoming() const override;
++    bool isMultiparty() const override;
++    bool isEmergency() const override;
++    bool isForwarded() const override;
++    bool isRemoteHeld() const override;
+ 
+     // TODO: unimplemented - JB#35997
+-    QString parentHandlerId() const { return QString(); }
+-    QList<AbstractVoiceCallHandler*> childCalls() const { return QList<AbstractVoiceCallHandler*>(); }
++    QString parentHandlerId() const override { return QString(); }
++    QList<AbstractVoiceCallHandler*> childCalls() const override { return QList<AbstractVoiceCallHandler*>(); }
+ 
+-    VoiceCallStatus status() const;
++    VoiceCallStatus status() const override;
+ 
+ Q_SIGNALS:
+     void validChanged(bool valid);
+ 
+ public Q_SLOTS:
+-    void answer();
+-    void hangup();
+-    void hold(bool on = true);
+-    void deflect(const QString &target);
+-    void sendDtmf(const QString &tones);
+-    void filter(VoiceCallFilterAction action);
++    void answer() override;
++    void hangup() override;
++    void hold(bool on = true) override;
++    void deflect(const QString &target) override;
++    void sendDtmf(const QString &tones) override;
++    void filter(VoiceCallFilterAction action) override;
+     void merge(const QString &callHandle) override;
+     void split() override;
+ 
+@@ -76,7 +76,7 @@ protected Q_SLOTS:
+     void onValidChanged(bool);
+ 
+ protected:
+-    void timerEvent(QTimerEvent *event);
++    void timerEvent(QTimerEvent *event) override;
+ 
+ private:
+     class OfonoVoiceCallHandlerPrivate *d_ptr;
+diff --git a/plugins/providers/ofono/src/ofonovoicecallprovider.cpp b/plugins/providers/ofono/src/ofonovoicecallprovider.cpp
+index a4db2c8..f730738 100644
+--- a/plugins/providers/ofono/src/ofonovoicecallprovider.cpp
++++ b/plugins/providers/ofono/src/ofonovoicecallprovider.cpp
+@@ -46,10 +46,10 @@ public:
+     QHash<QString,OfonoVoiceCallHandler*> invalidVoiceCalls;
+ 
+     QString errorString;
+-    void setError(const QString &errorString)
++    void setError(const QString &message)
+     {
+-        this->errorString = errorString;
+-        debugMessage(errorString);
++        errorString = message;
++        debugMessage(message);
+     }
+ 
+     void debugMessage(const QString &message)
+diff --git a/plugins/providers/telepathy/src/basechannelhandler.h b/plugins/providers/telepathy/src/basechannelhandler.h
+index 920d072..37f14ac 100644
+--- a/plugins/providers/telepathy/src/basechannelhandler.h
++++ b/plugins/providers/telepathy/src/basechannelhandler.h
+@@ -52,7 +52,7 @@ Q_SIGNALS:
+ 
+ public Q_SLOTS:
+     /*** AbstractVoiceCallHandler Implementation ***/
+-    void filter(VoiceCallFilterAction action);
++    void filter(VoiceCallFilterAction action) override;
+ 
+ protected:
+     virtual void setStatus(VoiceCallStatus newStatus) = 0;
+diff --git a/plugins/providers/telepathy/src/callchannelhandler.h b/plugins/providers/telepathy/src/callchannelhandler.h
+index 9ad334b..0510421 100644
+--- a/plugins/providers/telepathy/src/callchannelhandler.h
++++ b/plugins/providers/telepathy/src/callchannelhandler.h
+@@ -37,22 +37,22 @@ public:
+     ~CallChannelHandler();
+ 
+     /*** AbstractVoiceCallHandler Implementation ***/
+-    AbstractVoiceCallProvider* provider() const;
+-    QString handlerId() const;
+-    QString lineId() const;
+-    QDateTime startedAt() const;
+-    int duration() const;
+-    bool isIncoming() const;
+-    bool isMultiparty() const;
+-    bool isEmergency() const;
+-    bool isForwarded() const;
+-    bool isRemoteHeld() const;
++    AbstractVoiceCallProvider* provider() const override;
++    QString handlerId() const override;
++    QString lineId() const override;
++    QDateTime startedAt() const override;
++    int duration() const override;
++    bool isIncoming() const override;
++    bool isMultiparty() const override;
++    bool isEmergency() const override;
++    bool isForwarded() const override;
++    bool isRemoteHeld() const override;
+ 
+     // TODO: unimplemented
+     QString parentHandlerId() const override { return QString(); }
+     QList<AbstractVoiceCallHandler*> childCalls() const override { return QList<AbstractVoiceCallHandler*>(); }
+ 
+-    VoiceCallStatus status() const;
++    VoiceCallStatus status() const override;
+ 
+     /*** BaseChannelHandler Implementation ***/
+     Tp::ChannelPtr channel() const override;
+@@ -62,15 +62,15 @@ public:
+ 
+ public Q_SLOTS:
+     /*** AbstractVoiceCallHandler Implementation ***/
+-    void answer();
+-    void hangup();
+-    void hold(bool on);
+-    void deflect(const QString &target);
+-    void sendDtmf(const QString &tones);
++    void answer() override;
++    void hangup() override;
++    void hold(bool on) override;
++    void deflect(const QString &target) override;
++    void sendDtmf(const QString &tones) override;
+ 
+     // TODO: unimplemented
+-    void merge(const QString &) {}
+-    void split() {}
++    void merge(const QString &)  override{}
++    void split()  override{}
+ 
+ protected Q_SLOTS:
+     void onStatusChanged();
+@@ -91,9 +91,9 @@ protected Q_SLOTS:
+     void onFarstreamCreateChannelFinished(Tp::PendingOperation *op);
+ 
+ protected:
+-    void setStatus(VoiceCallStatus newStatus);
++    void setStatus(VoiceCallStatus newStatus) override;
+ 
+-    void timerEvent(QTimerEvent *event);
++    void timerEvent(QTimerEvent *event) override;
+ 
+     // TODO: unimplemented
+     void addChildCall(BaseChannelHandler */*handler*/) override {}
+diff --git a/plugins/providers/telepathy/src/src.pro b/plugins/providers/telepathy/src/src.pro
+index b4cf4f6..de2ef04 100644
+--- a/plugins/providers/telepathy/src/src.pro
++++ b/plugins/providers/telepathy/src/src.pro
+@@ -3,6 +3,11 @@ TARGET = voicecall-telepathy-plugin
+ 
+ PKGCONFIG += TelepathyQt5 TelepathyQt5Farstream
+ 
++# TelepathyQt 0.9.8's shared-ptr.h still uses the 'register' storage class,
++# which C++17 removed and Clang rejects. Compilers that default to C++17
++# (GCC 11+, Clang 16+) would otherwise fail on the TelepathyQt headers.
++CONFIG += c++14
++
+ #DEFINES += WANT_TRACE
+ 
+ HEADERS += \
+diff --git a/plugins/providers/telepathy/src/streamchannelhandler.cpp b/plugins/providers/telepathy/src/streamchannelhandler.cpp
+index da9c9af..9525b3a 100644
+--- a/plugins/providers/telepathy/src/streamchannelhandler.cpp
++++ b/plugins/providers/telepathy/src/streamchannelhandler.cpp
+@@ -290,12 +290,12 @@ void StreamChannelHandler::getHoldState()
+     QDBusPendingReply<uint, uint> reply = holdIface->GetHoldState();
+     QDBusPendingCallWatcher *watcher = new QDBusPendingCallWatcher(reply, this);
+     QObject::connect(watcher, &QDBusPendingCallWatcher::finished,
+-                     this, [this](QDBusPendingCallWatcher *watcher) {
+-        QDBusPendingReply<uint, uint> reply = *watcher;
+-        if (!reply.isError()) {
+-            onStreamedMediaChannelHoldStateChanged(reply.argumentAt(0).toUInt(), reply.argumentAt(1).toUInt());
++                     this, [this](QDBusPendingCallWatcher *finished) {
++        QDBusPendingReply<uint, uint> holdState = *finished;
++        if (!holdState.isError()) {
++            onStreamedMediaChannelHoldStateChanged(holdState.argumentAt(0).toUInt(), holdState.argumentAt(1).toUInt());
+         }
+-        watcher->deleteLater();
++        finished->deleteLater();
+     });
+ }
+ 
+diff --git a/plugins/providers/telepathy/src/streamchannelhandler.h b/plugins/providers/telepathy/src/streamchannelhandler.h
+index fc2a39f..8aa3882 100644
+--- a/plugins/providers/telepathy/src/streamchannelhandler.h
++++ b/plugins/providers/telepathy/src/streamchannelhandler.h
+@@ -36,20 +36,20 @@ public:
+     ~StreamChannelHandler();
+ 
+     /*** AbstractVoiceCallHandler Implementation ***/
+-    AbstractVoiceCallProvider* provider() const;
+-    QString handlerId() const;
+-    QString lineId() const;
+-    QDateTime startedAt() const;
+-    int duration() const;
+-    bool isIncoming() const;
+-    bool isMultiparty() const;
+-    bool isEmergency() const;
+-    bool isForwarded() const;
+-    bool isRemoteHeld() const;
++    AbstractVoiceCallProvider* provider() const override;
++    QString handlerId() const override;
++    QString lineId() const override;
++    QDateTime startedAt() const override;
++    int duration() const override;
++    bool isIncoming() const override;
++    bool isMultiparty() const override;
++    bool isEmergency() const override;
++    bool isForwarded() const override;
++    bool isRemoteHeld() const override;
+     QString parentHandlerId() const override;
+     QList<AbstractVoiceCallHandler*> childCalls() const override;
+ 
+-    VoiceCallStatus status() const;
++    VoiceCallStatus status() const override;
+ 
+     /*** BaseChannelHandler Implementation ***/
+     Tp::ChannelPtr channel() const override;
+@@ -60,13 +60,13 @@ public:
+ 
+ public Q_SLOTS:
+     /*** AbstractVoiceCallHandler Implementation ***/
+-    void answer();
+-    void hangup();
+-    void hold(bool on);
+-    void deflect(const QString &target);
+-    void sendDtmf(const QString &tones);
+-    void merge(const QString &callHandle);
+-    void split();
++    void answer() override;
++    void hangup() override;
++    void hold(bool on) override;
++    void deflect(const QString &target) override;
++    void sendDtmf(const QString &tones) override;
++    void merge(const QString &callHandle) override;
++    void split() override;
+ 
+ protected Q_SLOTS:
+     void onStatusChanged();
+@@ -102,9 +102,9 @@ protected Q_SLOTS:
+     void onStreamedMediaChannelConferenceMergeChannelFinished(Tp::PendingOperation *op);
+ 
+ protected:
+-    void setStatus(VoiceCallStatus newStatus);
++    void setStatus(VoiceCallStatus newStatus) override;
+ 
+-    void timerEvent(QTimerEvent *event);
++    void timerEvent(QTimerEvent *event) override;
+     void addChildCall(BaseChannelHandler *handler) override;
+     void removeChildCall(BaseChannelHandler *handler) override;
+ 
+diff --git a/plugins/providers/telepathy/src/telepathyprovider.cpp b/plugins/providers/telepathy/src/telepathyprovider.cpp
+index 96e5f39..c7af1a7 100644
+--- a/plugins/providers/telepathy/src/telepathyprovider.cpp
++++ b/plugins/providers/telepathy/src/telepathyprovider.cpp
+@@ -287,12 +287,13 @@ void TelepathyProvider::createHandler(Tp::ChannelPtr ch, const QDateTime &userAc
+     QObject::connect(handler, SIGNAL(error(QString)), SIGNAL(error(QString)));
+     QObject::connect(handler, SIGNAL(invalidated(QString,QString)), SLOT(onHandlerInvalidated(QString,QString)));
+ 
+-    connect(handler, &BaseChannelHandler::ready,
++    // Context object: the lambda must not outlive the provider.
++    connect(handler, &BaseChannelHandler::ready, this,
+             [this, handler] () {
+-                Q_D(TelepathyProvider);
+-                d->invalidVoiceCalls.remove(handler->handlerId());
++                TelepathyProviderPrivate *priv = d_func();
++                priv->invalidVoiceCalls.remove(handler->handlerId());
+ 
+-                d->voiceCalls.insert(handler->handlerId(), handler);
++                priv->voiceCalls.insert(handler->handlerId(), handler);
+                 emit this->voiceCallAdded(handler);
+                 emit this->voiceCallsChanged();
+             });
+diff --git a/src/cellbroadcaststore.cpp b/src/cellbroadcaststore.cpp
+index c890166..9bb8f47 100644
+--- a/src/cellbroadcaststore.cpp
++++ b/src/cellbroadcaststore.cpp
+@@ -797,9 +797,9 @@ CellBroadcastStore::StoreResult CellBroadcastStore::store(
+             GeoFenceAttentionRequiredProperty
+         };
+         for (const char *keyName : preservedKeys) {
+-            const QString key = QString::fromLatin1(keyName);
+-            if (currentProperties.contains(key)) {
+-                jsonProperties.insert(key, currentProperties.value(key));
++            const QString preservedKey = QString::fromLatin1(keyName);
++            if (currentProperties.contains(preservedKey)) {
++                jsonProperties.insert(preservedKey, currentProperties.value(preservedKey));
+             }
+         }
+     }
+diff --git a/src/dbus/voicecallmanagerdbusservice.cpp b/src/dbus/voicecallmanagerdbusservice.cpp
+index 0a26450..8d80a75 100644
+--- a/src/dbus/voicecallmanagerdbusservice.cpp
++++ b/src/dbus/voicecallmanagerdbusservice.cpp
+@@ -123,7 +123,6 @@ void VoiceCallManagerDBusService::finalize()
+ void VoiceCallManagerDBusService::onVoiceCallAdded(AbstractVoiceCallHandler *handler)
+ {
+     TRACE
+-    Q_D(VoiceCallManagerDBusService);
+ 
+     new VoiceCallHandlerDBusAdapter(handler);
+ 
+@@ -135,7 +134,6 @@ void VoiceCallManagerDBusService::onVoiceCallAdded(AbstractVoiceCallHandler *han
+ void VoiceCallManagerDBusService::onVoiceCallRemoved(const QString &handlerId)
+ {
+     TRACE
+-    Q_D(VoiceCallManagerDBusService);
+ 
+     QDBusConnection::sessionBus().unregisterObject("/calls/" + handlerId);
+ }
+diff --git a/src/voicecallmanager.h b/src/voicecallmanager.h
+index ddacde1..b181ec7 100644
+--- a/src/voicecallmanager.h
++++ b/src/voicecallmanager.h
+@@ -31,54 +31,54 @@ public:
+     explicit VoiceCallManager(QObject *parent = 0);
+     ~VoiceCallManager();
+ 
+-    QList<AbstractVoiceCallProvider*> providers() const;
++    QList<AbstractVoiceCallProvider*> providers() const override;
+ 
+-    QString generateHandlerId();
++    QString generateHandlerId() override;
+ 
+-    int voiceCallCount() const;
+-    QList<AbstractVoiceCallHandler*> voiceCalls() const;
++    int voiceCallCount() const override;
++    QList<AbstractVoiceCallHandler*> voiceCalls() const override;
+ 
+-    AbstractVoiceCallHandler* activeVoiceCall() const;
++    AbstractVoiceCallHandler* activeVoiceCall() const override;
+ 
+-    QString audioMode() const;
+-    bool isAudioRouted() const;
+-    bool isMicrophoneMuted() const;
+-    bool isSpeakerMuted() const;
++    QString audioMode() const override;
++    bool isAudioRouted() const override;
++    bool isMicrophoneMuted() const override;
++    bool isSpeakerMuted() const override;
+ 
+-    QString errorString() const;
++    QString errorString() const override;
+ 
+-    int totalOutgoingCallDuration() const;
+-    int totalIncomingCallDuration() const;
+-    void resetCallDurationCounters();
++    int totalOutgoingCallDuration() const override;
++    int totalIncomingCallDuration() const override;
++    void resetCallDurationCounters() override;
+ 
+ public Q_SLOTS:
+-    void setError(const QString &errorString);
++    void setError(const QString &errorString) override;
+ 
+-    void appendProvider(AbstractVoiceCallProvider *provider);
+-    void removeProvider(AbstractVoiceCallProvider *provider);
++    void appendProvider(AbstractVoiceCallProvider *provider) override;
++    void removeProvider(AbstractVoiceCallProvider *provider) override;
+ 
+-    bool dial(const QString &providerId, const QString &msisdn);
++    bool dial(const QString &providerId, const QString &msisdn) override;
+ 
+     void setCallFiltering(bool on = true) override;
+ 
+-    void playRingtone(const QString &ringtonePath);
+-    void silenceRingtone();
++    void playRingtone(const QString &ringtonePath) override;
++    void silenceRingtone() override;
+ 
+-    void setAudioMode(const QString &mode);
+-    void setAudioRouted(bool on);
+-    void setMuteMicrophone(bool on);
+-    void setMuteSpeaker(bool on);
++    void setAudioMode(const QString &mode) override;
++    void setAudioRouted(bool on) override;
++    void setMuteMicrophone(bool on) override;
++    void setMuteSpeaker(bool on) override;
+ 
+-    void onAudioModeChanged(const QString &mode);
+-    void onAudioRoutedChanged(bool on);
+-    void onMuteMicrophoneChanged(bool on);
+-    void onMuteSpeakerChanged(bool on);
++    void onAudioModeChanged(const QString &mode) override;
++    void onAudioRoutedChanged(bool on) override;
++    void onMuteMicrophoneChanged(bool on) override;
++    void onMuteSpeakerChanged(bool on) override;
+ 
+-    void startEventTone(ToneType type, int volume);
+-    void stopEventTone();
++    void startEventTone(ToneType type, int volume) override;
++    void stopEventTone() override;
+ 
+-    void startDtmfTone(const QString &tone, int volume);
+-    void stopDtmfTone();
++    void startDtmfTone(const QString &tone, int volume) override;
++    void stopDtmfTone() override;
+ 
+ protected Q_SLOTS:
+     void onVoiceCallAdded(AbstractVoiceCallHandler *handler);

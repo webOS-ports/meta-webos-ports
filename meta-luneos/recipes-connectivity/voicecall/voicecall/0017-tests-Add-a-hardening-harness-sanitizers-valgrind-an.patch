@@ -1,0 +1,821 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 11 Nov 2026 09:35:13 +0100
+Subject: [PATCH] [tests] Add a hardening harness: sanitizers, valgrind and
+ static analysis.
+
+tests/hardening/run builds tests/tests.pro from clean in a shadow build
+directory and runs every test under ASan+UBSan and TSan, with one or more
+compilers, and under valgrind memcheck, failing on any report.
+TEST_RUNNER runs a cross build on the build host through a sysroot's
+loader.
+
+tests/hardening/static-analysis builds the tree with g++ and clang++
+through a wrapper that records the compile commands, then runs gcc
+-fanalyzer (-O0 and -O2), clang --analyze with the alpha checkers,
+clang-tidy, cppcheck and flawfinder over src/, lib/ and plugins/, and
+shellcheck over the scripts run as root at install time. Every -c
+compiler (with -q giving that target's qmake) builds the tree with a
+strict warning set; link errors are ignored so the plugins can be
+checked against header-only dependencies. Findings are compared,
+without line numbers, with a baseline in which every accepted finding
+has the reason it was accepted, so only new ones fail the run.
+
+sparse is not run, it parses C only and there is no C here; nor is
+Coccinelle, whose C++ parser gets through 3 of the 39 sources.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ tests/hardening/.gitignore               |   1 +
+ tests/hardening/README                   |  79 +++++
+ tests/hardening/run                      | 134 ++++++++
+ tests/hardening/static-analysis          | 383 +++++++++++++++++++++++
+ tests/hardening/static-analysis.baseline | 138 ++++++++
+ tests/tests.pro                          |   6 +-
+ 6 files changed, 740 insertions(+), 1 deletion(-)
+ create mode 100644 tests/hardening/.gitignore
+ create mode 100644 tests/hardening/README
+ create mode 100755 tests/hardening/run
+ create mode 100755 tests/hardening/static-analysis
+ create mode 100644 tests/hardening/static-analysis.baseline
+
+diff --git a/tests/hardening/.gitignore b/tests/hardening/.gitignore
+new file mode 100644
+index 0000000..98d8a5a
+--- /dev/null
++++ b/tests/hardening/.gitignore
+@@ -0,0 +1 @@
++logs
+diff --git a/tests/hardening/README b/tests/hardening/README
+new file mode 100644
+index 0000000..5369126
+--- /dev/null
++++ b/tests/hardening/README
+@@ -0,0 +1,79 @@
++Hardening harness
++=================
++
++Two scripts on top of the unit tests, for the checks the plain test
++build alone doesn't do. Both work for a native build and for a cross
++build tested on the build host through a sysroot.
++
++run - runtime checkers
++----------------------
++
++    tests/hardening/run [-c compiler]... [asan|tsan|valgrind]...
++
++Builds tests/tests.pro from clean in a shadow build directory for each
++checker and runs every tst_* binary with:
++
++  asan       AddressSanitizer + UndefinedBehaviorSanitizer, any report
++             is fatal, leaks included
++  tsan       ThreadSanitizer, with ASLR off as TSan needs
++  valgrind   memcheck; fails on any error or definite leak
++
++Pass -c once per C++ compiler to build the sanitizer runs with (GCC and
++Clang find different things), e.g. -c g++ -c clang++. QMAKE selects the
++qmake (default: qmake). Logs go to tests/hardening/logs.
++
++Cross build, run on the build host through the sysroot's loader:
++
++    TEST_RUNNER="$SYSROOT/usr/lib/ld-linux-x86-64.so.2 --library-path $SYSROOT/usr/lib" \
++    QMAKE=<qmake for that sysroot> \
++    tests/hardening/run -c "x86_64-linux-g++ --sysroot=$SYSROOT" \
++        -c "clang++ --target=x86_64-linux-gnu --sysroot=$SYSROOT"
++
++The sysroot needs the sanitizer runtimes (libasan, libubsan, libtsan;
++compiler-rt for Clang).
++
++static-analysis - analyzers and warnings on every target
++--------------------------------------------------------
++
++    tests/hardening/static-analysis [-c name=compiler [-q qmake]]... [-u]
++
++Builds voicecall.pro with g++ and clang++ through a wrapper that records
++the compile commands, and runs over our own sources (src/, lib/,
++plugins/) gcc -fanalyzer (-O0 and -O2), clang --analyze with the alpha
++checkers, clang-tidy, cppcheck (exhaustive) and flawfinder, plus
++shellcheck over the scripts in oneshot/, which run as root at install
++time. Every -c compiler then builds the tree with -Wall -Wextra -Wshadow
++-Wformat=2 -Wcast-align -Wpointer-arith -Wvla -Wnon-virtual-dtor
++-Wnull-dereference -Wimplicit-fallthrough; -q after a -c gives the qmake
++for that target. Build with GCC and Clang for each supported target:
++armv7 is 32-bit and catches what the 64-bit targets don't. Link errors
++are ignored, so the plugins can be checked against header-only
++dependencies.
++
++Not run, and why:
++
++  sparse      parses C only; there is no C in this tree.
++  Coccinelle  its C++ support doesn't get through Qt code (Q_OBJECT,
++              signals:, foreach, lambdas): spatch 1.3 parses 3 of the 39
++              sources fully, so a semantic patch would silently skip a
++              third of the code.
++
++Findings are compared, without line numbers, with
++static-analysis.baseline, where every accepted finding carries the
++reason it was accepted. Anything new fails the run; baseline entries
++that went away are listed so they can be dropped. -u regenerates the
++baseline from the current run, keeping the reasons of the entries that
++are still there and marking the new ones "TODO" - review those, fix
++what's real and explain the rest before committing.
++
++Third-party headers (Qt, TelepathyQt, GStreamer, libcommhistory) are
++outside the gate: only diagnostics located in our own files count.
++
++Adding tests
++------------
++
++New unit tests go in tests/ as <name>.pro plus tst_<name>.cpp, and in
++tests/tests.pro, tests/tests.xml and the %files tests section of the
++spec. A test for a fix should fail with the fix reverted; check that
++before relying on it. Tests that use timers or QTest::qWait() need an
++application object: use QTEST_GUILESS_MAIN, not QTEST_APPLESS_MAIN.
+diff --git a/tests/hardening/run b/tests/hardening/run
+new file mode 100755
+index 0000000..6ab058f
+--- /dev/null
++++ b/tests/hardening/run
+@@ -0,0 +1,134 @@
++#!/bin/bash
++#
++# Runs the unit tests under the runtime checkers:
++#
++#   asan       AddressSanitizer + UndefinedBehaviorSanitizer
++#   tsan       ThreadSanitizer (run with ASLR off, as TSan needs)
++#   valgrind   memcheck, failing on any error or definite leak
++#
++#   run [-c compiler]... [check]...
++#
++# With no checks given, all three run. Each -c adds a C++ compiler to
++# build the sanitizer runs with (default: $CXX or g++), e.g. -c g++ -c
++# clang++. Valgrind uses the first one, without instrumentation.
++#
++# Every run builds tests/tests.pro from clean in a shadow build directory
++# under tests/hardening/logs, with the checker's flags added to
++# QMAKE_CXXFLAGS/QMAKE_LFLAGS, and runs every tst_* binary it produced.
++# QMAKE selects the qmake to use (default: qmake). To test a cross build
++# on the build host, point TEST_RUNNER at the sysroot's dynamic loader,
++# e.g.
++#
++#   TEST_RUNNER="$SYSROOT/usr/lib/ld-linux-x86-64.so.2 \
++#       --library-path $SYSROOT/usr/lib" \
++#   QMAKE=$SYSROOT/usr/bin/qmake tests/hardening/run \
++#       -c "x86_64-linux-g++ --sysroot=$SYSROOT"
++#
++# A compiler without the sanitizer runtime fails to link, and that run
++# is reported as failed, not skipped.
++#
++
++set -u
++
++COMPILERS=()
++CHECKS=()
++while [ $# -gt 0 ]; do
++    case "$1" in
++    -c) COMPILERS+=("$2"); shift 2;;
++    asan|tsan|valgrind) CHECKS+=("$1"); shift;;
++    *) echo "Usage: $0 [-c compiler]... [asan|tsan|valgrind]..." >&2; exit 2;;
++    esac
++done
++[ ${#COMPILERS[@]} -gt 0 ] || COMPILERS=("${CXX:-g++}")
++[ ${#CHECKS[@]} -gt 0 ] || CHECKS=(asan tsan valgrind)
++
++TOP_DIR=$(cd "$(dirname "$0")/../.." && pwd)
++LOG_DIR="$TOP_DIR/tests/hardening/logs"
++QMAKE=${QMAKE:-qmake}
++RUNNER=${TEST_RUNNER:-}
++JOBS=${JOBS:-$(nproc 2>/dev/null || echo 4)}
++ASAN_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"
++TSAN_FLAGS="-fsanitize=thread"
++mkdir -p "$LOG_DIR"
++failed=()
++
++# Clang's -fsanitize=function flags calls through Qt's and GLib's
++# function pointer casts (signal/slot thunks, G_CALLBACK); they are fine
++# on every ABI we run on.
++san_flags() {
++    case "$1" in *clang*) echo "$2 -fno-sanitize=function";; *) echo "$2";; esac
++}
++
++qmake_spec() {
++    case "$1" in *clang*) echo linux-clang;; *) echo linux-g++;; esac
++}
++
++# Short name of a compiler command, for the log file name
++cc_name() {
++    local n
++    n=$(basename "${1%% *}")
++    case "$n" in *clang*) echo clang;; *g++*|*gcc*) echo gcc;; *) echo "$n";; esac
++}
++
++# name compiler flags runner [env...]
++check() {
++    local name=$1 cc=$2 flags=$3 runner=$4 log="$LOG_DIR/$1.log"
++    local build="$LOG_DIR/build-$1" t rc=0 count=0
++    shift 4
++    echo "== $name"
++    rm -rf "$build"
++    mkdir -p "$build"
++    {
++        (cd "$build" && "$QMAKE" -spec "$(qmake_spec "$cc")" -r \
++            "QMAKE_CXX=$cc" "QMAKE_LINK=$cc" \
++            "QMAKE_CXXFLAGS+=$flags" "QMAKE_LFLAGS+=$flags" CONFIG+=debug \
++            "$TOP_DIR/tests/tests.pro") &&
++        make -C "$build" -s -j"$JOBS"
++    } > "$log" 2>&1 || rc=1
++    if [ $rc = 0 ]; then
++        for t in $(find "$build" -type f -name 'tst_*' -perm -u+x | sort); do
++            count=$((count + 1))
++            echo "--- $(basename "$t")" >> "$log"
++            # shellcheck disable=SC2086
++            (cd "$(dirname "$t")" && env "$@" QT_LOGGING_RULES="*.debug=false" \
++                $runner "$t") >> "$log" 2>&1 || rc=1
++        done
++        [ $count -gt 0 ] || { echo "no test binaries built" >> "$log"; rc=1; }
++    fi
++    if [ $rc = 0 ]; then
++        echo "   ok ($count test binaries, $(grep -E '^Totals:' "$log" |
++            awk '{n += $2} END {print n + 0}') tests)"
++    else
++        grep -m5 -E "ERROR|runtime error|WARNING: ThreadSanitizer|definitely lost|^FAIL|error:|Error [0-9]" "$log" |
++            sed 's/^/   /'
++        echo "   FAILED, see $log"
++        failed+=("$name")
++    fi
++    rm -rf "$build"
++}
++
++for c in "${CHECKS[@]}"; do
++    case $c in
++    asan)
++        for cc in "${COMPILERS[@]}"; do
++            check "asan-$(cc_name "$cc")" "$cc" "$(san_flags "$cc" "$ASAN_FLAGS")" \
++                "$RUNNER" ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 \
++                UBSAN_OPTIONS=print_stacktrace=1
++        done;;
++    tsan)
++        for cc in "${COMPILERS[@]}"; do
++            check "tsan-$(cc_name "$cc")" "$cc" "$TSAN_FLAGS" \
++                "setarch $(uname -m) -R $RUNNER" TSAN_OPTIONS=halt_on_error=1
++        done;;
++    valgrind)
++        check valgrind "${COMPILERS[0]}" "-O1 -g" "valgrind -q \
++--error-exitcode=99 --leak-check=full --errors-for-leak-kinds=definite \
++--show-possibly-lost=no $RUNNER";;
++    esac
++done
++
++if [ ${#failed[@]} -gt 0 ]; then
++    echo "*** FAILED:" "${failed[@]}"
++    exit 1
++fi
++echo "All checks passed"
+diff --git a/tests/hardening/static-analysis b/tests/hardening/static-analysis
+new file mode 100755
+index 0000000..d848f4c
+--- /dev/null
++++ b/tests/hardening/static-analysis
+@@ -0,0 +1,383 @@
++#!/bin/bash
++#
++# Static analysis gate for the daemon, the library and the plugins.
++#
++#   static-analysis [-c name=compiler [-q qmake]]... [-u]
++#
++# Builds the whole tree (voicecall.pro) once with g++ and once with
++# clang++ through a wrapper that records every compile command, and runs
++# over the recorded commands of our own sources (src/, lib/, plugins/):
++#
++#   gcc -fanalyzer    use after free, double free, leaks, NULL
++#                     dereference; at -O0 and -O2
++#   clang --analyze   the same from a second engine, with the alpha
++#                     core/cplusplus/unix/security checkers
++#   clang-tidy        bugprone-*, cert-*, clang-analyzer-*, misc-*
++#   cppcheck          everything, exhaustive, inconclusive included
++#   flawfinder        race-prone calls (TOCTOU), unsafe string and
++#                     buffer functions
++#   ShellCheck        the scripts run as root at install time (oneshot/)
++#
++# sparse is not run: it parses C only and there is no C in this tree.
++#
++# Every -c compiler then builds the tree with a strict warning set, e.g.
++# -c armv7-gcc="arm-linux-gnueabihf-g++ --sysroot=..." -q <armv7 qmake>
++# -c x86_64-clang="clang++ --target=x86_64-linux-gnu --sysroot=...".
++# -q gives the qmake for the -c before it (default: $QMAKE or qmake). Build
++# all supported targets with both GCC and Clang: armv7 is 32-bit and
++# finds what the 64-bit ones don't. Link errors are ignored, so this works
++# against header-only dependencies as well.
++#
++# Findings are compared, without line numbers, against
++# static-analysis.baseline: the findings that were triaged as false
++# positives or accepted, each with the reason. Anything not in there
++# fails the run. -u rewrites the baseline from this run (review the diff
++# and give every new entry a reason before committing it).
++#
++# Dependencies are found with pkg-config, as the build does; set
++# PKG_CONFIG_LIBDIR for a sysroot. GCC_ANALYZER and CLANG_ANALYZER are the
++# compilers for the recorded builds (default: g++ and clang++), QMAKE_ARGS
++# what else qmake needs (default: the CONFIG of the rpm build). A tool
++# that isn't installed is reported as skipped, not passed.
++#
++# ONLY="clang-analyze cppcheck ..." runs just those of fanalyzer,
++# clang-analyze, clang-tidy, cppcheck, flawfinder and shellcheck (the
++# baseline comparison is then meaningless; use it to look at one tool).
++# KEEP_BUILDS=1 keeps the recorded builds and their compile_commands.json
++# under logs/.
++#
++
++set -u
++
++TOP_DIR=$(cd "$(dirname "$0")/../.." && pwd)
++HERE="$TOP_DIR/tests/hardening"
++BASELINE="$HERE/static-analysis.baseline"
++LOG_DIR="$HERE/logs"
++GCC_ANALYZER=${GCC_ANALYZER:-g++}
++CLANG_ANALYZER=${CLANG_ANALYZER:-clang++}
++DEFAULT_QMAKE=${QMAKE:-qmake}
++JOBS=${JOBS:-$(nproc 2>/dev/null || echo 4)}
++UPDATE=0
++NAMES=()
++declare -A CXX_OF QMAKE_OF
++
++while [ $# -gt 0 ]; do
++    case "$1" in
++    -c) NAMES+=("${2%%=*}"); CXX_OF[${2%%=*}]=${2#*=}; shift 2;;
++    -q) [ ${#NAMES[@]} -gt 0 ] || { echo "-q needs a -c before it" >&2; exit 2; }
++        QMAKE_OF[${NAMES[-1]}]=$2; shift 2;;
++    -u) UPDATE=1; shift;;
++    *) echo "Usage: $0 [-c name=compiler [-q qmake]]... [-u]" >&2; exit 2;;
++    esac
++done
++
++if [ -n "${QMAKE_ARGS+x}" ]; then
++    read -r -a QARGS <<< "$QMAKE_ARGS"
++else
++    QARGS=("CONFIG+=enable-ngf" "CONFIG+=enable-audiopolicy" "CONFIG+=enable-telepathy"
++           "CONFIG+=enable-nemo-devicelock" "CONFIG+=install-servicefiles")
++fi
++WARNINGS="-Wall -Wextra -Wshadow -Wformat=2 -Wcast-align -Wpointer-arith -Wvla \
++-Wnon-virtual-dtor -Wnull-dereference -Wimplicit-fallthrough"
++
++# Idioms of this code base and of Qt that these checks flag everywhere:
++#   bugprone-easily-swappable-parameters   style
++#   misc-include-cleaner                   not about correctness
++#   misc-non-private-member-variables-in-classes   d-pointer privates
++#   misc-const-correctness                 style
++#   misc-use-anonymous-namespace, misc-use-internal-linkage   style
++#   cert-err58-cpp                         static QString constants
++#   bugprone-narrowing-conversions         int/qint64/size conversions
++#                                          of Qt's API (int sizes)
++#   misc-no-recursion                      style
++TIDY_CHECKS="-*,bugprone-*,cert-*,clang-analyzer-*,misc-*,\
++-bugprone-easily-swappable-parameters,-misc-include-cleaner,\
++-misc-non-private-member-variables-in-classes,-misc-const-correctness,\
++-misc-use-anonymous-namespace,-misc-use-internal-linkage,-cert-err58-cpp,\
++-bugprone-narrowing-conversions,-misc-no-recursion"
++
++cd "$TOP_DIR" || exit 2
++mkdir -p "$LOG_DIR"
++FOUND="$LOG_DIR/findings"
++: > "$FOUND"
++skipped=()
++OURS='(src|lib|plugins)/'
++
++want() {
++    [ -z "${ONLY:-}" ] || [[ " $ONLY " == *" $1 "* ]]
++}
++
++have() {
++    command -v "${1%% *}" >/dev/null 2>&1 && return 0
++    echo "== $2: ${1%% *} not installed, skipped"
++    skipped+=("$2")
++    return 1
++}
++
++# Compiler style output to "tool: file: message" for our own files.
++# Paths are absolute, relative to the top or relative to a shadow build
++# directory (any number of ../); moc output and the build directories
++# themselves are not ours.
++collect() {
++    sed -E "s#^$TOP_DIR/##; s#^(\.\./)+##" |
++        sed -nE "s#^(${OURS}[^:]+):[0-9]+:[0-9]+: (warning|error): #$1: \1: #p" |
++        grep -v '/moc_' | sort -u >> "$FOUND"
++}
++
++# Builds the tree in $LOG_DIR/build-<name> with compiler, qmake, flags;
++# with record=1 through the wrapper that writes compile_commands.json.
++# make runs with -k: link errors against stubbed dependencies don't
++# matter here, only what the compiler said.
++build() {
++    local name=$1 cxx=$2 qmake=$3 flags=$4 record=$5 dir="$LOG_DIR/build-$1"
++    local spec=linux-g++ compiler=$2
++    case "$cxx" in *clang*) spec=linux-clang;; esac
++    rm -rf "$dir"
++    mkdir -p "$dir"
++    if [ "$record" = 1 ]; then
++        compiler="$LOG_DIR/record-cxx"
++        : > "$dir/commands.jsonl"
++    fi
++    (
++        cd "$dir" &&
++        RECORD_CXX="$cxx" RECORD_DB="$dir/commands.jsonl" \
++            "$qmake" -spec "$spec" -r "QMAKE_CXX=$compiler" "QMAKE_LINK=$compiler" \
++            "QMAKE_LINK_SHLIB=$compiler" "QMAKE_CXXFLAGS+=$flags" \
++            "${QARGS[@]}" "$TOP_DIR/voicecall.pro" &&
++        RECORD_CXX="$cxx" RECORD_DB="$dir/commands.jsonl" \
++            make -k -j"$JOBS" --output-sync=target
++        # A subdirectory that .depends on one that failed to link was not
++        # entered at all: build every leaf directory on its own as well.
++        find . -name Makefile -printf '%h\n' | sort | while read -r d; do
++            grep -q '^SUBTARGETS' "$d/Makefile" && continue
++            RECORD_CXX="$cxx" RECORD_DB="$dir/commands.jsonl" \
++                make -k -j"$JOBS" --output-sync=target -C "$d"
++        done
++    ) > "$LOG_DIR/build-$name.log" 2>&1
++    if [ "$record" = 1 ]; then
++        python3 -I - "$dir" "$TOP_DIR" <<'EOF'
++import json, os, sys
++d, top = sys.argv[1:3]
++seen, db = set(), []
++for line in open(os.path.join(d, "commands.jsonl")):
++    e = json.loads(line)
++    f = os.path.realpath(os.path.join(e["directory"], e["file"]))
++    rel = os.path.relpath(f, top)
++    if f in seen or not rel.split("/")[0] in ("src", "lib", "plugins"):
++        continue
++    seen.add(f)
++    e["file"] = f
++    db.append(e)
++json.dump(db, open(os.path.join(d, "compile_commands.json"), "w"), indent=1)
++print(len(db))
++EOF
++    fi
++}
++
++# The compile command recorder qmake builds through
++cat > "$LOG_DIR/record-cxx" <<'EOF'
++#!/usr/bin/env python3
++import json, os, shlex, sys
++args = sys.argv[1:]
++real = shlex.split(os.environ["RECORD_CXX"])
++sources = [a for a in args if a.endswith((".cpp", ".cc", ".cxx", ".c"))]
++if "-c" in args and len(sources) == 1:
++    with open(os.environ["RECORD_DB"], "a") as db:
++        db.write(json.dumps({"directory": os.getcwd(),
++                             "arguments": real + args,
++                             "file": sources[0]}) + "\n")
++os.execvp(real[0], real + args)
++EOF
++chmod +x "$LOG_DIR/record-cxx"
++
++# The recorded command for a file, for an analyzer: its build directory,
++# then its arguments without compiler, output, -c, optimisation and the
++# file itself. NUL separated.
++db_files() {
++    python3 -I -c 'import json,sys; [print(e["file"]) for e in json.load(open(sys.argv[1]))]' "$1"
++}
++db_args() {
++    python3 -I - "$1" "$2" <<'EOF'
++import json, sys
++db, f = sys.argv[1:3]
++for e in json.load(open(db)):
++    if e["file"] != f:
++        continue
++    a, out, skip = e["arguments"][1:], [e["directory"]], False
++    for x in a:
++        if skip:
++            skip = False
++        elif x == "-o":
++            skip = True
++        elif x == "-c" or x.startswith("-O") or x == e["file"] or x.endswith(".cpp"):
++            pass
++        else:
++            out.append(x)
++    sys.stdout.write("\0".join(out))
++    break
++EOF
++}
++
++for name in "${NAMES[@]}"; do
++    echo "== $name"
++    build "$name" "${CXX_OF[$name]}" "${QMAKE_OF[$name]:-$DEFAULT_QMAKE}" "$WARNINGS" 0
++    grep -q '^Project ERROR\|^Could not find qmake' "$LOG_DIR/build-$name.log" &&
++        echo "src/BUILD:0:0: error: qmake failed for $name" >> "$LOG_DIR/build-$name.log"
++    collect "$name" < "$LOG_DIR/build-$name.log"
++    rm -rf "$LOG_DIR/build-$name"
++done
++
++GCC_DB='' CLANG_DB=''
++if want fanalyzer || want cppcheck; then
++if have "$GCC_ANALYZER" "gcc -fanalyzer"; then
++    echo "== recording the build with $GCC_ANALYZER: $(build gcc-db "$GCC_ANALYZER" \
++        "$DEFAULT_QMAKE" "" 1) files"
++    GCC_DB="$LOG_DIR/build-gcc-db/compile_commands.json"
++fi
++fi
++if want clang-analyze || want clang-tidy; then
++if have "$CLANG_ANALYZER" "clang --analyze"; then
++    echo "== recording the build with $CLANG_ANALYZER: $(build clang-db "$CLANG_ANALYZER" \
++        "$DEFAULT_QMAKE" "" 1) files"
++    CLANG_DB="$LOG_DIR/build-clang-db/compile_commands.json"
++fi
++fi
++
++if [ -n "$GCC_DB" ] && want fanalyzer; then
++    for o in O0 O2; do
++        echo "== gcc -fanalyzer -$o"
++        for f in $(db_files "$GCC_DB"); do
++            mapfile -d '' args < <(db_args "$GCC_DB" "$f")
++            (cd "${args[0]}" && $GCC_ANALYZER "${args[@]:1}" -$o -fanalyzer \
++                -S "$f" -o /dev/null 2>&1)
++        done | grep -E "\[-Wanalyzer" > "$LOG_DIR/fanalyzer-$o.log"
++        collect "fanalyzer" < "$LOG_DIR/fanalyzer-$o.log"
++    done
++fi
++
++if [ -n "$CLANG_DB" ] && want clang-analyze; then
++    echo "== clang --analyze"
++    # Annex K advice (memcpy, snprintf) is not about these sources
++    for f in $(db_files "$CLANG_DB"); do
++        mapfile -d '' args < <(db_args "$CLANG_DB" "$f")
++        # Text output: the default plist one drops a report whose path
++        # crosses into a header
++        (cd "${args[0]}" && $CLANG_ANALYZER "${args[@]:1}" --analyze \
++            --analyzer-output text \
++            -Xanalyzer -analyzer-checker=core,cplusplus,unix,security,deadcode,\
++nullability,alpha.core,alpha.cplusplus,alpha.unix,alpha.security \
++            -Xanalyzer -analyzer-disable-checker=\
++security.insecureAPI.DeprecatedOrUnsafeBufferHandling \
++            -Xanalyzer -analyzer-config \
++            -Xanalyzer aggressive-binary-operation-simplification=true \
++            "$f" -o /dev/null 2>&1)
++    done > "$LOG_DIR/clang-analyze.log"
++    collect "clang-analyze" < "$LOG_DIR/clang-analyze.log"
++fi
++
++if [ -n "$CLANG_DB" ] && want clang-tidy; then
++    if have clang-tidy clang-tidy; then
++        echo "== clang-tidy"
++        # shellcheck disable=SC2046
++        clang-tidy -quiet -p "$(dirname "$CLANG_DB")" --checks="$TIDY_CHECKS" \
++            $(db_files "$CLANG_DB") > "$LOG_DIR/clang-tidy.log" 2>&1
++        collect "clang-tidy" < "$LOG_DIR/clang-tidy.log"
++    fi
++fi
++
++# cppcheck reads Qt's headers badly (no platform macros, templates it
++# can't parse), and a header it can't parse ends the file silently. It
++# gets the recorded commands without the system include directories and
++# knows Qt from --library=qt instead, the usual setup for Qt code.
++# Style and performance advice is suppressed: const correctness, override,
++# explicit, pass/iterate by reference, static/STL hints, argument names
++# in prototypes, unused functions (QML and D-Bus call them).
++if [ -n "$GCC_DB" ] && want cppcheck && have cppcheck cppcheck; then
++    echo "== cppcheck"
++    python3 -I - "$GCC_DB" "$LOG_DIR/cppcheck-commands.json" <<'EOF2'
++import json, sys
++db = json.load(open(sys.argv[1]))
++for e in db:
++    a, out, skip = e["arguments"], [], False
++    for i, x in enumerate(a):
++        if skip:
++            skip = False
++        elif x in ("-I", "-isystem") and i + 1 < len(a) and a[i + 1].startswith("/usr"):
++            skip = True
++        elif not x.startswith(("-I/usr", "-isystem/usr")):
++            out.append(x)
++    e["arguments"] = out
++json.dump(db, open(sys.argv[2], "w"))
++EOF2
++    mkdir -p "$LOG_DIR/cppcheck-build"
++    cppcheck -q --enable=all --check-level=exhaustive --inconclusive \
++        --project="$LOG_DIR/cppcheck-commands.json" --library=qt -j"$JOBS" \
++        --cppcheck-build-dir="$LOG_DIR/cppcheck-build" \
++        --suppress=missingIncludeSystem --suppress=missingInclude \
++        --suppress=unmatchedSuppression --suppress=checkersReport \
++        --suppress=unusedFunction --suppress=funcArgNamesDifferent \
++        --suppress=constParameterCallback --suppress=constParameterPointer \
++        --suppress=constVariablePointer --suppress=constParameterReference \
++        --suppress=constVariableReference --suppress=returnByReference \
++        --suppress=functionStatic --suppress=functionConst \
++        --suppress=useStlAlgorithm --suppress=shadowFunction \
++        --suppress=iterateByValue --suppress=noExplicitConstructor \
++        --suppress=missingOverride --suppress=passedByValue \
++        --suppress=passedByValueCallback --suppress=redundantCopyLocalConst \
++        --suppress=staticFunction --suppress=variableScope \
++        --suppress=unusedPrivateFunction \
++        --template='{file}:{line}:{column}: warning: {message} [{id}]' \
++        > "$LOG_DIR/cppcheck.log" 2>&1
++    collect "cppcheck" < "$LOG_DIR/cppcheck.log"
++fi
++
++if want flawfinder && have flawfinder flawfinder; then
++    echo "== flawfinder"
++    flawfinder --minlevel=1 --singleline --quiet --dataonly src lib plugins \
++        > "$LOG_DIR/flawfinder.log" 2>&1
++    sed -nE "s#^(${OURS}[^:]+):[0-9]+:([0-9]+:)?  *(\[[0-9]\] \([a-z]+\) [A-Za-z_0-9]+).*#flawfinder: \1: \4#p" \
++        "$LOG_DIR/flawfinder.log" | sort -u >> "$FOUND"
++fi
++
++if want shellcheck && have shellcheck shellcheck; then
++    echo "== shellcheck"
++    shellcheck -f gcc oneshot/* tests/hardening/run tests/hardening/static-analysis \
++        > "$LOG_DIR/shellcheck.log" 2>&1
++    sed -nE 's#^((oneshot|tests)/[^:]+):[0-9]+:[0-9]+: (warning|error|note): #shellcheck: \1: #p' \
++        "$LOG_DIR/shellcheck.log" | sort -u >> "$FOUND"
++fi
++
++[ "${KEEP_BUILDS:-0}" = 1 ] ||
++    rm -rf "$LOG_DIR/build-gcc-db" "$LOG_DIR/build-clang-db" "$LOG_DIR/cppcheck-build" \
++        "$LOG_DIR/cppcheck-commands.json"
++
++sort -u -o "$FOUND" "$FOUND"
++if [ $UPDATE = 1 ]; then
++    # Keep the reasons of the entries that are still there
++    { grep -E '^#' "$BASELINE" 2>/dev/null
++      echo
++      while IFS= read -r line; do
++          reason=$(grep -F -x -A1 -- "$line" "$BASELINE" 2>/dev/null |
++              grep -E '^  why:' | tail -n 1)
++          echo "$line"
++          echo "${reason:-  why: TODO}"
++      done < "$FOUND"; } > "$BASELINE.new"
++    mv "$BASELINE.new" "$BASELINE"
++    echo "Baseline updated: $(wc -l < "$FOUND") findings"
++    exit 0
++fi
++
++grep -vE '^(#|  why:|$)' "$BASELINE" 2>/dev/null | sort -u > "$LOG_DIR/baseline"
++new=$(comm -23 "$FOUND" "$LOG_DIR/baseline")
++gone=$(comm -13 "$FOUND" "$LOG_DIR/baseline")
++if [ -n "$gone" ]; then
++    echo "Baseline entries no longer found (remove them):"
++    printf '%s\n' "$gone" | sed 's/^/  /'
++fi
++[ ${#skipped[@]} -eq 0 ] || echo "Skipped: ${skipped[*]}"
++if [ -n "$new" ]; then
++    echo "*** New findings:"
++    printf '%s\n' "$new" | sed 's/^/  /'
++    exit 1
++fi
++echo "No new findings ($(wc -l < "$FOUND") in the baseline)"
+diff --git a/tests/hardening/static-analysis.baseline b/tests/hardening/static-analysis.baseline
+new file mode 100644
+index 0000000..157aaae
+--- /dev/null
++++ b/tests/hardening/static-analysis.baseline
+@@ -0,0 +1,138 @@
++# Triaged findings of tests/hardening/static-analysis, without line numbers.
++# Each finding is followed by the reason it is accepted. Generated with
++# GCC 15, Clang 21, cppcheck 2.19, flawfinder 2.0.19 and shellcheck 0.11 on
++# armv7, aarch64 and x86-64 against Qt 5.15; other tool and Qt versions
++# may report more or less.
++
++clang-tidy: plugins/declarative/src/voicecallaudiorecorder.cpp: returning a constant reference parameter may cause use-after-free when the parameter is constructed from a temporary [bugprone-return-const-ref-from-parameter]
++  why: QDBusArgument operator>> must return the const QDBusArgument & it was given; Qt's D-Bus marshalling signature
++clang-tidy: plugins/declarative/src/voicecallhandler.cpp: an assignment within an 'if' condition is bug-prone [bugprone-assignment-in-if-condition]
++  why: intentional: 'if (!(d->connected = success))' style, assignment is the point and is parenthesised
++clang-tidy: plugins/declarative/src/voicecallmanager.cpp: an assignment within an 'if' condition is bug-prone [bugprone-assignment-in-if-condition]
++  why: intentional: 'if (!(d->connected = success))' style, assignment is the point and is parenthesised
++clang-tidy: plugins/filter/lib/filter.cpp: repeated branch body in conditional chain [bugprone-branch-clone]
++  why: filter rules are applied in priority order (exact match before pattern match); same action from different rules is the point
++clang-tidy: plugins/providers/telepathy/src/callchannelhandler.cpp: Call to virtual method 'CallChannelHandler::startedAt' during construction bypasses virtual dispatch [clang-analyzer-optin.cplusplus.VirtualCall]
++  why: the handler classes are not subclassed; the call is meant to reach this class's own implementation
++clang-tidy: plugins/providers/telepathy/src/callchannelhandler.cpp: switch has 2 consecutive identical branches [bugprone-branch-clone]
++  why: one case per Tp::CallState kept on purpose, so each telepathy state's mapping is explicit
++clang-tidy: plugins/providers/telepathy/src/farstreamchannel.cpp: an assignment within an 'if' condition is bug-prone [bugprone-assignment-in-if-condition]
++  why: intentional: 'if (!(d->connected = success))' style, assignment is the point and is parenthesised
++clang-tidy: plugins/providers/telepathy/src/farstreamchannel.cpp: do not cast 'FsConference *' (aka '_FsConference *') to 'GstElement *' (aka '_GstElement *') through 'void *'; use reinterpret_cast instead [bugprone-casting-through-void]
++  why: GLib/GStreamer instance cast macros (GST_ELEMENT, G_OBJECT, ...) cast through gpointer by design; checked casts at runtime with G_TYPE_CHECK_INSTANCE_CAST
++clang-tidy: plugins/providers/telepathy/src/farstreamchannel.cpp: do not cast 'GParamSpec *' (aka '_GParamSpec *') to 'GParamSpecDouble *' (aka '_GParamSpecDouble *') through 'void *'; use reinterpret_cast instead [bugprone-casting-through-void]
++  why: GLib/GStreamer instance cast macros (GST_ELEMENT, G_OBJECT, ...) cast through gpointer by design; checked casts at runtime with G_TYPE_CHECK_INSTANCE_CAST
++clang-tidy: plugins/providers/telepathy/src/farstreamchannel.cpp: do not cast 'GstBin *' (aka '_GstBin *') to 'GstElement *' (aka '_GstElement *') through 'void *'; use reinterpret_cast instead [bugprone-casting-through-void]
++  why: GLib/GStreamer instance cast macros (GST_ELEMENT, G_OBJECT, ...) cast through gpointer by design; checked casts at runtime with G_TYPE_CHECK_INSTANCE_CAST
++clang-tidy: plugins/providers/telepathy/src/farstreamchannel.cpp: do not cast 'GstElement *' (aka '_GstElement *') to 'GObject *' (aka '_GObject *') through 'void *'; use reinterpret_cast instead [bugprone-casting-through-void]
++  why: GLib/GStreamer instance cast macros (GST_ELEMENT, G_OBJECT, ...) cast through gpointer by design; checked casts at runtime with G_TYPE_CHECK_INSTANCE_CAST
++clang-tidy: plugins/providers/telepathy/src/farstreamchannel.cpp: do not cast 'GstElement *' (aka '_GstElement *') to 'GstBin *' (aka '_GstBin *') through 'void *'; use reinterpret_cast instead [bugprone-casting-through-void]
++  why: GLib/GStreamer instance cast macros (GST_ELEMENT, G_OBJECT, ...) cast through gpointer by design; checked casts at runtime with G_TYPE_CHECK_INSTANCE_CAST
++clang-tidy: plugins/providers/telepathy/src/farstreamchannel.cpp: do not cast 'GstElement *' (aka '_GstElement *') to 'GstElement *' through 'void *'; use reinterpret_cast instead [bugprone-casting-through-void]
++  why: GLib/GStreamer instance cast macros (GST_ELEMENT, G_OBJECT, ...) cast through gpointer by design; checked casts at runtime with G_TYPE_CHECK_INSTANCE_CAST
++clang-tidy: plugins/providers/telepathy/src/farstreamchannel.cpp: do not cast 'GstElement *' (aka '_GstElement *') to 'GstObject *' (aka '_GstObject *') through 'void *'; use reinterpret_cast instead [bugprone-casting-through-void]
++  why: GLib/GStreamer instance cast macros (GST_ELEMENT, G_OBJECT, ...) cast through gpointer by design; checked casts at runtime with G_TYPE_CHECK_INSTANCE_CAST
++clang-tidy: plugins/providers/telepathy/src/farstreamchannel.cpp: do not cast 'GstElement *' (aka '_GstElement *') to 'GstPipeline *' (aka '_GstPipeline *') through 'void *'; use reinterpret_cast instead [bugprone-casting-through-void]
++  why: GLib/GStreamer instance cast macros (GST_ELEMENT, G_OBJECT, ...) cast through gpointer by design; checked casts at runtime with G_TYPE_CHECK_INSTANCE_CAST
++clang-tidy: plugins/providers/telepathy/src/farstreamchannel.cpp: do not cast 'GstElement *const' (aka '_GstElement *const') to 'GObject *' (aka '_GObject *') through 'void *'; use reinterpret_cast instead [bugprone-casting-through-void]
++  why: GLib/GStreamer instance cast macros (GST_ELEMENT, G_OBJECT, ...) cast through gpointer by design; checked casts at runtime with G_TYPE_CHECK_INSTANCE_CAST
++clang-tidy: plugins/providers/telepathy/src/farstreamchannel.cpp: do not cast 'GstPad *' (aka '_GstPad *') to 'GstGhostPad *' (aka '_GstGhostPad *') through 'void *'; use reinterpret_cast instead [bugprone-casting-through-void]
++  why: GLib/GStreamer instance cast macros (GST_ELEMENT, G_OBJECT, ...) cast through gpointer by design; checked casts at runtime with G_TYPE_CHECK_INSTANCE_CAST
++clang-tidy: plugins/providers/telepathy/src/farstreamchannel.cpp: function 'strcmp' is called without explicitly comparing result [bugprone-suspicious-string-compare]
++  why: compares compile-time element names (AUDIO_SINK_ELEMENT); '!strcmp' idiom
++clang-tidy: plugins/providers/telepathy/src/streamchannelhandler.cpp: Call to virtual method 'StreamChannelHandler::startedAt' during construction bypasses virtual dispatch [clang-analyzer-optin.cplusplus.VirtualCall]
++  why: the handler classes are not subclassed; the call is meant to reach this class's own implementation
++clang-tidy: plugins/providers/telepathy/src/streamchannelhandler.cpp: switching on non-enum value without default case may not cover all cases [bugprone-switch-missing-default-case]
++  why: Tp::LocalHoldState: the pending states need no action, only held/unheld change the status
++clang-tidy: src/cellbroadcaststore.cpp: repeated branch body in conditional chain [bugprone-branch-clone]
++  why: two different conditions (geo check no longer needed / first presentable) lead to the same presentation state; kept separate for readability
++clang-tidy: src/dbus/voicecallhandlerdbusadapter.cpp: The value '3' provided to the cast expression is not in the valid range of values for 'VoiceCallFilterAction' [clang-analyzer-optin.core.EnumCastOutOfRange]
++  why: deliberate: unknown D-Bus integers map to 3, inside the enumeration's value range ([dcl.enum]/8, two bits) but no action, so filter() rejects it
++clang-tidy: src/dbus/voicecallhandlerdbusadapter.cpp: returning a constant reference parameter may cause use-after-free when the parameter is constructed from a temporary [bugprone-return-const-ref-from-parameter]
++  why: QDBusArgument operator>> must return the const QDBusArgument & it was given; Qt's D-Bus marshalling signature
++cppcheck: plugins/providers/ofono/src/ofonovoicecallhandler.h: Virtual function 'status' is called from constructor 'OfonoVoiceCallHandler(const QString&handlerId,const QString&path,OfonoVoiceCallProvider*provider,QOfonoVoiceCallManager*manager)' at line 74. Dynamic binding is not used. [virtualCallInConstructor]
++  why: the handler classes are not subclassed; the call is meant to reach this class's own implementation
++cppcheck: plugins/providers/ofono/src/ofonovoicecallprovider.cpp: Condition '!d->ofonoManager->isValid()' is always false [knownConditionTrueFalse]
++  why: false positive: QOfonoManager::isValid() is only declared in the header, cppcheck guesses its value
++cppcheck: plugins/providers/ofono/src/ofonovoicecallproviderfactory.cpp: Pointer expression 'this' converted to bool is always true. [knownPointerToBool]
++  why: false positive: 'new QOfonoManager(this)' passes the parent, nothing is converted to bool
++cppcheck: plugins/providers/telepathy/src/callchannelhandler.h: Virtual function 'lineId' is called from constructor 'CallChannelHandler(const QString&id,Tp::CallChannelPtr channel,const QDateTime&userActionTime,TelepathyProvider*provider=0)' at line 103. Dynamic binding is not used. [virtualCallInConstructor]
++  why: the handler classes are not subclassed; the call is meant to reach this class's own implementation
++cppcheck: plugins/providers/telepathy/src/callchannelhandler.h: Virtual function 'setStatus' is called from constructor 'CallChannelHandler(const QString&id,Tp::CallChannelPtr channel,const QDateTime&userActionTime,TelepathyProvider*provider=0)' at line 107. Dynamic binding is not used. [virtualCallInConstructor]
++  why: the handler classes are not subclassed; the call is meant to reach this class's own implementation
++cppcheck: plugins/providers/telepathy/src/callchannelhandler.h: Virtual function 'startedAt' is called from constructor 'CallChannelHandler(const QString&id,Tp::CallChannelPtr channel,const QDateTime&userActionTime,TelepathyProvider*provider=0)' at line 109. Dynamic binding is not used. [virtualCallInConstructor]
++  why: the handler classes are not subclassed; the call is meant to reach this class's own implementation
++cppcheck: plugins/providers/telepathy/src/streamchannelhandler.h: Virtual function 'lineId' is called from constructor 'StreamChannelHandler(const QString&id,Tp::StreamedMediaChannelPtr channel,const QDateTime&userActionTime,TelepathyProvider*provider=0)' at line 105. Dynamic binding is not used. [virtualCallInConstructor]
++  why: the handler classes are not subclassed; the call is meant to reach this class's own implementation
++cppcheck: plugins/providers/telepathy/src/streamchannelhandler.h: Virtual function 'setStatus' is called from constructor 'StreamChannelHandler(const QString&id,Tp::StreamedMediaChannelPtr channel,const QDateTime&userActionTime,TelepathyProvider*provider=0)' at line 109. Dynamic binding is not used. [virtualCallInConstructor]
++  why: the handler classes are not subclassed; the call is meant to reach this class's own implementation
++cppcheck: plugins/providers/telepathy/src/streamchannelhandler.h: Virtual function 'startedAt' is called from constructor 'StreamChannelHandler(const QString&id,Tp::StreamedMediaChannelPtr channel,const QDateTime&userActionTime,TelepathyProvider*provider=0)' at line 111. Dynamic binding is not used. [virtualCallInConstructor]
++  why: the handler classes are not subclassed; the call is meant to reach this class's own implementation
++cppcheck: src/audiocallpolicyproxy.cpp: The class 'AudioCallPolicyProxy' defines member function with name 'statusText' also defined in its parent class 'AbstractVoiceCallHandler'. [duplInheritedMember]
++  why: AudioCallPolicyProxy::statusText hides the non-virtual base one; both derive the text from the virtual status(), so either gives the same result
++cppcheck: src/audiocallpolicyproxy.h: The class 'AudioCallPolicyProxy' defines member function with name 'statusText' also defined in its parent class 'AbstractVoiceCallHandler'. [duplInheritedMember]
++  why: AudioCallPolicyProxy::statusText hides the non-virtual base one; both derive the text from the virtual status(), so either gives the same result
++cppcheck: src/cellbroadcaststore.cpp: Error code from the return value of function acknowledge.prepare() is not used. [ignoredReturnErrorCode]
++  why: a failed prepare() makes the following exec() fail, and every exec() result is checked
++cppcheck: src/cellbroadcaststore.cpp: Error code from the return value of function active.prepare() is not used. [ignoredReturnErrorCode]
++  why: a failed prepare() makes the following exec() fail, and every exec() result is checked
++cppcheck: src/cellbroadcaststore.cpp: Error code from the return value of function archive.prepare() is not used. [ignoredReturnErrorCode]
++  why: a failed prepare() makes the following exec() fail, and every exec() result is checked
++cppcheck: src/cellbroadcaststore.cpp: Error code from the return value of function archiveAlert.prepare() is not used. [ignoredReturnErrorCode]
++  why: a failed prepare() makes the following exec() fail, and every exec() result is checked
++cppcheck: src/cellbroadcaststore.cpp: Error code from the return value of function archiveMessages.prepare() is not used. [ignoredReturnErrorCode]
++  why: a failed prepare() makes the following exec() fail, and every exec() result is checked
++cppcheck: src/cellbroadcaststore.cpp: Error code from the return value of function current.prepare() is not used. [ignoredReturnErrorCode]
++  why: a failed prepare() makes the following exec() fail, and every exec() result is checked
++cppcheck: src/cellbroadcaststore.cpp: Error code from the return value of function database.rollback() is not used. [ignoredReturnErrorCode]
++  why: rollback() on a path that already failed; there is nothing left to do if it fails too, the transaction ends with the connection
++cppcheck: src/cellbroadcaststore.cpp: Error code from the return value of function duplicate.prepare() is not used. [ignoredReturnErrorCode]
++  why: a failed prepare() makes the following exec() fail, and every exec() result is checked
++cppcheck: src/cellbroadcaststore.cpp: Error code from the return value of function existing.prepare() is not used. [ignoredReturnErrorCode]
++  why: a failed prepare() makes the following exec() fail, and every exec() result is checked
++cppcheck: src/cellbroadcaststore.cpp: Error code from the return value of function insertAlert.prepare() is not used. [ignoredReturnErrorCode]
++  why: a failed prepare() makes the following exec() fail, and every exec() result is checked
++cppcheck: src/cellbroadcaststore.cpp: Error code from the return value of function insertMessage.prepare() is not used. [ignoredReturnErrorCode]
++  why: a failed prepare() makes the following exec() fail, and every exec() result is checked
++cppcheck: src/cellbroadcaststore.cpp: Error code from the return value of function promote.prepare() is not used. [ignoredReturnErrorCode]
++  why: a failed prepare() makes the following exec() fail, and every exec() result is checked
++cppcheck: src/cellbroadcaststore.cpp: Error code from the return value of function query.prepare() is not used. [ignoredReturnErrorCode]
++  why: a failed prepare() makes the following exec() fail, and every exec() result is checked
++cppcheck: src/cellbroadcaststore.cpp: Error code from the return value of function selectProperties.prepare() is not used. [ignoredReturnErrorCode]
++  why: a failed prepare() makes the following exec() fail, and every exec() result is checked
++cppcheck: src/cellbroadcaststore.cpp: Error code from the return value of function update.prepare() is not used. [ignoredReturnErrorCode]
++  why: a failed prepare() makes the following exec() fail, and every exec() result is checked
++cppcheck: src/cellbroadcaststore.cpp: Error code from the return value of function updateAlert.prepare() is not used. [ignoredReturnErrorCode]
++  why: a failed prepare() makes the following exec() fail, and every exec() result is checked
++cppcheck: src/cellbroadcaststore.cpp: Error code from the return value of function updateMessage.prepare() is not used. [ignoredReturnErrorCode]
++  why: a failed prepare() makes the following exec() fail, and every exec() result is checked
++cppcheck: src/voicecallmanager.cpp: The one definition rule is violated, different classes/structs have the same name 'VoiceCallManagerPrivate' [ctuOneDefinitionRuleViolation]
++  why: VoiceCallManagerPrivate of the daemon and of the QML plugin live in different binaries and are never linked together
++fanalyzer: lib/src/abstractvoicecallhandler.cpp: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]
++  why: false positive of GCC 15's experimental C++ analyzer on Qt implicitly shared temporaries (QString from a literal, QList/QHash copies); the reported paths end in Qt's reference counting
++fanalyzer: plugins/declarative/src/voicecallaudiorecorder.cpp: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]
++  why: false positive of GCC 15's experimental C++ analyzer on Qt implicitly shared temporaries (QString from a literal, QList/QHash copies); the reported paths end in Qt's reference counting
++fanalyzer: plugins/filter/lib/filter.cpp: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]
++  why: false positive of GCC 15's experimental C++ analyzer on Qt implicitly shared temporaries (QString from a literal, QList/QHash copies); the reported paths end in Qt's reference counting
++fanalyzer: plugins/filter/lib/filterlist.cpp: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]
++  why: false positive of GCC 15's experimental C++ analyzer on Qt implicitly shared temporaries (QString from a literal, QList/QHash copies); the reported paths end in Qt's reference counting
++fanalyzer: plugins/filter/tests/tst_filter.cpp: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]
++  why: false positive of GCC 15's experimental C++ analyzer on Qt implicitly shared temporaries (QString from a literal, QList/QHash copies); the reported paths end in Qt's reference counting
++fanalyzer: plugins/providers/ofono/src/ofonovoicecallhandler.cpp: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]
++  why: false positive of GCC 15's experimental C++ analyzer on Qt implicitly shared temporaries (QString from a literal, QList/QHash copies); the reported paths end in Qt's reference counting
++fanalyzer: src/dbus/voicecallhandlerdbusadapter.cpp: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]
++  why: false positive of GCC 15's experimental C++ analyzer on Qt implicitly shared temporaries (QString from a literal, QList/QHash copies); the reported paths end in Qt's reference counting
++fanalyzer: src/dbus/voicecallmanagerdbusadapter.cpp: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]
++  why: false positive of GCC 15's experimental C++ analyzer on Qt implicitly shared temporaries (QString from a literal, QList/QHash copies); the reported paths end in Qt's reference counting
++fanalyzer: src/dbus/voicecallmanagerdbusservice.cpp: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]
++  why: false positive of GCC 15's experimental C++ analyzer on Qt implicitly shared temporaries (QString from a literal, QList/QHash copies); the reported paths end in Qt's reference counting
++flawfinder: plugins/declarative/src/voicecallaudiorecorder.cpp: [2] (misc) open
++  why: QFile/QSqlDatabase::open(), not open(2): the files are the catalog (root-owned), the database and recordings in the user's own private directory, with sanitised names
++flawfinder: src/cellbroadcastcatalog.cpp: [2] (misc) open
++  why: QFile/QSqlDatabase::open(), not open(2): the files are the catalog (root-owned), the database and recordings in the user's own private directory, with sanitised names
++flawfinder: src/cellbroadcaststore.cpp: [2] (misc) open
++  why: QFile/QSqlDatabase::open(), not open(2): the files are the catalog (root-owned), the database and recordings in the user's own private directory, with sanitised names
++flawfinder: src/cellbroadcaststore.cpp: [4] (shell) system
++  why: QLocale::system(), not system(3)
++flawfinder: src/cellbroadcaststore.h: [2] (misc) open
++  why: QFile/QSqlDatabase::open(), not open(2): the files are the catalog (root-owned), the database and recordings in the user's own private directory, with sanitised names
+diff --git a/tests/tests.pro b/tests/tests.pro
+index 7d3156d..73ff093 100644
+--- a/tests/tests.pro
++++ b/tests/tests.pro
+@@ -14,4 +14,8 @@ tests_xml.files = tests.xml
+ 
+ INSTALLS += tests_xml
+ 
+-OTHER_FILES += tests.xml
++OTHER_FILES += tests.xml \
++    hardening/README \
++    hardening/run \
++    hardening/static-analysis \
++    hardening/static-analysis.baseline
