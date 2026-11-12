@@ -7,7 +7,10 @@ SECTION = "libs"
 LICENSE = "BSD-3-Clause"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=5adf4792c949a00013ce25d476a2abc0"
 
-SRC_URI = "git://github.com/OpenMathLib/OpenBLAS.git;protocol=https;branch=develop;tag=v${PV}"
+SRC_URI = " \
+    git://github.com/OpenMathLib/OpenBLAS.git;protocol=https;branch=develop;tag=v${PV} \
+    file://0001-Makefile.arm-let-NO_ARCH_FLAGS-leave-the-architecture.patch \
+"
 SRCREV = "e0166008be8e466242aa76b2ff75ce3f0fbf574a"
 
 # OpenBLAS's TARGET (TargetList.txt) for each machine. 32-bit ARM's ARMV7
@@ -25,6 +28,7 @@ OPENBLAS_BINARY = "32"
 OPENBLAS_BINARY:aarch64 = "64"
 OPENBLAS_BINARY:x86-64 = "64"
 
+# NO_ARCH_FLAGS: the toolchain's -mcpu/-mfpu choose the architecture.
 # Single-threaded with locking, as Vosk's own builds use it: the
 # recogniser's matrices are small, and the caller's threads stay safe.
 EXTRA_OEMAKE = " \
@@ -43,6 +47,7 @@ EXTRA_OEMAKE = " \
     USE_OPENMP=0 \
     USE_LOCKING=1 \
     NO_STATIC=1 \
+    NO_ARCH_FLAGS=1 \
     COMMON_OPT='${CFLAGS}' \
 "
 
