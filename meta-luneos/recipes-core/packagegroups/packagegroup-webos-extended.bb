@@ -21,8 +21,9 @@ VIRTUAL-RUNTIME_webos-ime ?= ""
 VIRTUAL-RUNTIME_novacomd ?= "novacomd"
 VIRTUAL-RUNTIME_com.webos.app.browser ?= "org.webosports.app.atlas"
 # com.webos.service.camera (luna://com.webos.service.camera2) serves the
-# webruntime camera block behind WebRTC getUserMedia, so com.webos.app.videocall
-# needs it. It is not Halium-only: the package carries
+# webruntime camera block behind WebRTC getUserMedia, so any web app that asks
+# for the camera needs it (luneos-faced also reads frames from it). It is not
+# Halium-only: the package carries
 # both HAL plugins - libhal-droid, which reaches droidcamsrc, and libhal-v4l2 for
 # /dev/video* - and finds the latter's devices through VIRTUAL-RUNTIME_pdm below.
 # Nothing pulls it in on its own (g-camera-pipeline only build-depends on it, and
@@ -56,10 +57,6 @@ VIRTUAL-RUNTIME_unifiedsearch ?= "luna-applauncher luna-universalsearchmgr"
 # .bbappend in meta-<distro> to do PR/PRINC/PR_append bump anyway so it's easier
 # to change this variable in .bbappend together with bump.
 #
-
-WEBOS_PACKAGESET_TESTAPPS = " \
-    com.webos.app.test.youtube \
-"
 
 # Enyo 1 and related framework packages
 WEBOS_PACKAGESET_ENYO_1 = " \
@@ -118,10 +115,6 @@ WEBOS_PACKAGESET_UI = " \
     ${VIRTUAL-RUNTIME_com.webos.app.notification} \
     ${VIRTUAL-RUNTIME_com.webos.app.volume} \
     ${VIRTUAL-RUNTIME_com.webos.app.statusbar} \
-"
-
-WEBOS_PACKAGESET_ENACTAPPS = " \
-    com.webos.app.videocall \
 "
 
 WEBOS_PACKAGESET_MEDIA = " \
@@ -198,8 +191,6 @@ RDEPENDS:${PN} = " \
     ${WEBOS_FOSS_MISSING_FROM_RDEPENDS} \
     ${WEBOS_PACKAGESET_SYSTEMAPPS} \
     ${WEBOS_PACKAGESET_UI} \
-    ${WEBOS_PACKAGESET_TESTAPPS} \
-    ${WEBOS_PACKAGESET_ENACTAPPS} \
     ${WEBOS_PACKAGESET_MEDIA} \
 "
 
