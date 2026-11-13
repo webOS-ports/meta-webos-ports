@@ -68,6 +68,43 @@ WLAN_TESTMODE=${WLAN_TESTMODE:-never}
 MDTIM=${MDTIM:-3}
 IW=${IW:-/usr/sbin/iw}
 
+# Take the station interface down once the display has been off this long, on
+# chips where staying associated across suspend costs too much to keep up all
+# night. "auto" picks 900 s where the "any" WoWLAN trigger is armed and 0 (off)
+# elsewhere, a number of seconds sets the delay, "never" or 0 turns it off.
+#
+# "any" is what luneos-wowlan-arm arms on MediaTek connectivity-chip Wi-Fi
+# (Titan, Titan Pocket), which offers no magic-packet trigger: without a trigger
+# cfg80211 drops the association on every suspend and the reconnects keep the
+# phone awake. With "any" the phones sleep, but the chip stays powered for it.
+# Measured 13 Nov 2026, unplugged, display off, both phones 98-99.5% asleep:
+#
+#                   associated ("any")   Wi-Fi off (wlan0 down)
+#   Titan           ~70 mA (126 min)     ~30 mA (166 min)
+#   Titan Pocket   ~117 mA (126 min)     ~23 mA (181 min)
+#
+# so the association alone is 40-95 mA, more than half the Pocket's battery a
+# day. Android makes the same trade with "keep Wi-Fi on during sleep: never".
+# The delay keeps short screen-offs connected; the down is plain "ip link set
+# down", which connman takes as "disconnected" without touching its own Wi-Fi
+# setting (Powered stays true, so nothing persists and the UI is unchanged), and
+# the display coming on brings it back up; connman was online again 4 s later.
+#
+# A plain sleep would not do as the timer: CLOCK_MONOTONIC stops in suspend and
+# 15 minutes would take hours. Nor would a systemd OnActiveSec= timer, even
+# with WakeSystem=true: systemd counts it from the monotonic clock and converts
+# to boottime afresh after every resume, so the deadline slid back by exactly
+# the time spent suspended (measured on the Titan Pocket, 13 Nov 2026: 108 s
+# in 3 minutes). An OnCalendar= time is absolute, and with WakeSystem=true
+# systemd arms it as CLOCK_REALTIME_ALARM, which wakes the phone.
+#
+# Nothing is taken down while the phone is not really sleeping - on a charger,
+# or when less than half of the delay was spent in suspend, which is what a
+# stream or download holding the phone awake looks like. The check is made
+# again one delay later.
+WLAN_SLEEP_OFF=${WLAN_SLEEP_OFF:-auto}
+SLEEPMARK=/run/wlan-suspend-mode.sleepoff
+
 driver_layout() {
     # SIOCDEVPRIVATE+1 (0x89F1). Qualcomm: hdd_priv_data_t {u8 *buf; int used_len;
     # int total_len}. MediaTek gen4m: priv_driver_cmd_s {char buf[512]; int used_len;
@@ -277,10 +314,109 @@ undo_iface_down() {
     fi
 }
 
+sleep_off_delay() {
+    case "$WLAN_SLEEP_OFF" in
+        never) echo 0 ;;
+        auto)
+            if "$IW" phy "$(iface_phy)" wowlan show 2>/dev/null | grep -q "any"; then
+                echo 900
+            else
+                echo 0
+            fi ;;
+        ''|*[!0-9]*) echo 0 ;;
+        *) echo "$WLAN_SLEEP_OFF" ;;
+    esac
+}
+
+# Seconds since boot, and how many of them were spent in suspend.
+clocks() {
+    python3 -c 'import time; b = time.clock_gettime(time.CLOCK_BOOTTIME); print("%d %d" % (b, b - time.clock_gettime(time.CLOCK_MONOTONIC)))'
+}
+
+on_charger() {
+    for d in /sys/class/power_supply/*/; do
+        case "$(cat "$d/type" 2>/dev/null)" in
+            Mains|USB|USB_PD|USB_PD_DRP|USB_TYPE_C) ;;
+            *) continue ;;
+        esac
+        [ "$(cat "$d/online" 2>/dev/null)" = 1 ] && return 0
+    done
+    return 1
+}
+
+cancel_sleep_off() {
+    systemctl stop 'wlan-sleep-off-*.timer' 2>/dev/null
+    rm -f $SLEEPMARK
+}
+
+# A new unit name each time: the re-arm runs from inside the service the last
+# timer started, and that unit name is still taken while it runs.
+arm_sleep_off() {
+    delay=$(sleep_off_delay)
+    [ "$delay" -gt 0 ] || return 0
+    cancel_sleep_off
+    clocks > $SLEEPMARK
+    # The timer's service is started by systemd, not by us: hand it the
+    # settings this instance runs with, or a re-arm from there falls back to
+    # the defaults.
+    now=$(date +%s)
+    at=$(date -u -d "@$((now + delay))" "+%Y-%m-%d %H:%M:%S UTC")
+    if systemd-run --quiet --collect --unit="wlan-sleep-off-$now" \
+        --setenv=IF="$IF" --setenv=WLAN_SLEEP_OFF="$WLAN_SLEEP_OFF" \
+        --on-calendar="$at" --timer-property=WakeSystem=true \
+        --timer-property=AccuracySec=10s \
+        /usr/sbin/wlan-suspend-mode sleep-off 2>/dev/null; then
+        log "$1 -> $IF goes down in ${delay}s if the display stays off"
+    else
+        log "$1 -> could not arm the ${delay}s Wi-Fi sleep timer"
+    fi
+}
+
+sleep_off() {
+    if [ "$cur" != suspendmode ]; then
+        log "sleep timer -> display is on, nothing to do"; return 0
+    fi
+    if [ -e "$DOWNMARK" ] || [ "$(iface_state)" != up ]; then
+        # Already down: ours, or Wi-Fi switched off - neither is ours to undo.
+        log "sleep timer -> $IF not up, leaving it"; rm -f $SLEEPMARK; return 0
+    fi
+    if on_charger; then
+        log "sleep timer -> on a charger, keeping $IF up"
+        arm_sleep_off "sleep timer"; return 0
+    fi
+    # Split on purpose: "<boot> <asleep>" at display-off, then the same now.
+    # shellcheck disable=SC2046
+    set -- $(cat $SLEEPMARK 2>/dev/null) $(clocks)
+    if [ $# = 4 ] && [ "$3" -gt "$1" ]; then
+        pct=$(( ($4 - $2) * 100 / ($3 - $1) ))
+        if [ "$pct" -lt 50 ]; then
+            log "sleep timer -> only ${pct}% asleep since the display went off, something is using the phone: keeping $IF up"
+            arm_sleep_off "sleep timer"; return 0
+        fi
+    fi
+    if ip link set "$IF" down 2>/dev/null; then
+        : > $DOWNMARK; rm -f $SLEEPMARK
+        log "sleep timer -> display off for $(sleep_off_delay)s, $IF down until it comes on (state=$(iface_state))"
+    else
+        log "sleep timer -> $IF could not be brought down"
+    fi
+}
+
 apply() {  # $1 = suspendmode|normal, $2 = reason
+    if [ "$1" = normal ]; then
+        # Before anything else, and also when already normal: the sleep timer
+        # downs the interface from its own process, behind this one's back.
+        cancel_sleep_off
+        undo_iface_down "$2"
+    fi
     if [ "$1" = "$cur" ]; then log "$2 -> already $1"; return; fi
     if [ "$1" = suspendmode ]; then n=1; else n=0; fi
-    if [ "$n" = 1 ] && [ "$(driver_layout)" = mtk ] && [ "$MDTIM" -gt 1 ]; then
+    # Not on gen3 (Titan, Titan Pocket): it has no SET_MDTIM, and its private
+    # command handler logs "Unknown driver command ... - ignored" and still
+    # returns success (gl_wext_priv.c, priv_driver_cmds), so sending it there
+    # only put a false "ok" in this log.
+    if [ "$n" = 1 ] && [ "$(driver_layout)" = mtk ] && [ "$MDTIM" -gt 1 ] &&
+       [ ! -d /sys/module/wlan_drv_gen3 ]; then
         if drvcmd "SET_MDTIM 0 $MDTIM"; then
             log "$2 -> SET_MDTIM 0 $MDTIM ok"
         else
@@ -289,6 +425,7 @@ apply() {  # $1 = suspendmode|normal, $2 = reason
     fi
     if err=$(drvcmd "SETSUSPENDMODE $n" 2>&1); then
         cur=$1; echo "$1" > $STATE; log "$2 -> SETSUSPENDMODE $n ok (mode=$1)"
+        [ "$n" = 1 ] && arm_sleep_off "$2"
         [ "$n" = 0 ] && undo_iface_down "$2"
         # return 0, not a bare return: the test above is the last command run,
         # and it is FALSE whenever n is 1, so a bare return hands back 1 from
@@ -334,6 +471,7 @@ apply() {  # $1 = suspendmode|normal, $2 = reason
 
 case "$1" in
     on|normal)       apply normal "manual"; exit ;;
+    sleep-off)       sleep_off; exit ;;
     off|suspendmode) apply suspendmode "manual"; exit ;;
     status)          echo "mode=${cur:-unset}"; exit ;;
 esac
