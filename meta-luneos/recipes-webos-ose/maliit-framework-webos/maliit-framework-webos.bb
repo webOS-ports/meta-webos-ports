@@ -70,6 +70,15 @@ do_install:append() {
     install -m 0644 ${UNPACKDIR}/maliit-server.service ${D}${systemd_unitdir}/system/
     install -m 0644 ${UNPACKDIR}/maliit-server@.service ${D}${systemd_unitdir}/system/
 
+    # maliit-server@0 is PartOf= surface-manager-daemon.service, which passes a
+    # stop or restart of the compositor on to it, but not a start: when the
+    # compositor was stopped and then started again as two steps, the keyboard
+    # went down with it and stayed down (BraX3, 13 Nov 2026). The launcher
+    # cannot help there, it stays active (RemainAfterExit) across the stop. Let
+    # the daemon want the instance itself; its Requires= brings the launcher.
+    install -d ${D}${systemd_unitdir}/system/surface-manager-daemon.service.wants
+    ln -sf ../maliit-server@.service ${D}${systemd_unitdir}/system/surface-manager-daemon.service.wants/maliit-server@0.service
+
     install -d ${D}${systemd_unitdir}/system/scripts
     install -m 0755 ${UNPACKDIR}/maliit-server.sh.in ${D}${systemd_unitdir}/system/scripts/maliit-server.sh
 
