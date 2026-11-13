@@ -1,0 +1,325 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Mon, 7 Sep 2026 12:30:00 +0200
+Subject: [PATCH] face: allow building without the FART backend
+
+the FART backend links libfart, which pulls in OpenCV and TensorFlow Lite.
+add WITH_FACE, defaulting to 1, and with WITH_FACE=0 build a disabled face
+backend instead of the FART backend and drop -lfart.
+
+backends now report their implementation type, the FART backend is
+TYPE_SOFTWARE and the disabled one TYPE_UNKNOWN. the Face interface stays on
+the bus, and when there is no usable backend face.c skips the backend setup
+and answers method calls with NotSupported, so clients can tell face is not
+supported
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/FuriLabs/biomd/pull/1]
+---
+ Makefile                        |  21 +++++--
+ include/face_backend.h          |  22 +++++++
+ include/face_disabled_backend.h |  24 ++++++++
+ src/face.c                      |  19 +++++-
+ src/face_disabled_backend.c     | 106 ++++++++++++++++++++++++++++++++
+ src/face_fart_backend.c         |   8 +++
+ 6 files changed, 195 insertions(+), 5 deletions(-)
+ create mode 100644 include/face_disabled_backend.h
+ create mode 100644 src/face_disabled_backend.c
+
+diff --git a/Makefile b/Makefile
+index 455061b..41ef670 100644
+--- a/Makefile
++++ b/Makefile
+@@ -4,8 +4,22 @@ CC ?= gcc
+ ENV_CFLAGS := $(CFLAGS)
+ ENV_LDFLAGS := $(LDFLAGS)
+ 
+-CFLAGS = $(ENV_CFLAGS) `pkg-config --cflags gio-2.0 glib-2.0 libgbinder sqlite3` -Iinclude
+-LDFLAGS = $(ENV_LDFLAGS) `pkg-config --libs gio-2.0 glib-2.0 libgbinder sqlite3` -lfart -lcrypto
++# WITH_FACE=0 builds without the FART backend, face is then reported as not supported
++WITH_FACE ?= 1
++
++ifeq ($(WITH_FACE),0)
++SOURCES_FACE_BACKEND = src/face_disabled_backend.c
++CFLAGS_FACE = -DFACE_DISABLED
++LDFLAGS_FACE =
++else
++SOURCES_FACE_BACKEND = src/face_fart_backend.c \
++                       src/face_tensorflow_fart.c
++CFLAGS_FACE =
++LDFLAGS_FACE = -lfart
++endif
++
++CFLAGS = $(ENV_CFLAGS) `pkg-config --cflags gio-2.0 glib-2.0 libgbinder sqlite3` -Iinclude $(CFLAGS_FACE)
++LDFLAGS = $(ENV_LDFLAGS) `pkg-config --libs gio-2.0 glib-2.0 libgbinder sqlite3` $(LDFLAGS_FACE) -lcrypto
+ 
+ CFLAGS_SESSION = $(ENV_CFLAGS) `pkg-config --cflags gio-2.0 glib-2.0 gstreamer-1.0` -Iinclude -Iinclude/session
+ LDFLAGS_SESSION = $(ENV_LDFLAGS) `pkg-config --libs gio-2.0 glib-2.0 gstreamer-1.0`
+@@ -26,8 +40,7 @@ SOURCES = src/biomd.c \
+           src/fpd_compat.c \
+           src/face.c \
+           src/face_backend.c \
+-          src/face_fart_backend.c \
+-          src/face_tensorflow_fart.c
++          $(SOURCES_FACE_BACKEND)
+ 
+ SOURCES_SESSION = src/session/biomd_session.c \
+                   src/session/session_face.c \
+diff --git a/include/face_backend.h b/include/face_backend.h
+index 1579ffa..b0001ab 100644
+--- a/include/face_backend.h
++++ b/include/face_backend.h
+@@ -61,6 +61,14 @@ typedef struct {
+      */
+     gboolean (*is_available)(FaceBackend *self);
+ 
++    /**
++     * Get the implementation type of the backend.
++     *
++     * @param self The backend instance
++     * @return TYPE_UNKNOWN if the backend provides no face support
++     */
++    FaceImplementationType (*get_implementation_type)(FaceBackend *self);
++
+     /**
+      * Set up the default configuration for the backend.
+      *
+@@ -175,6 +183,20 @@ face_backend_is_available(FaceBackend *backend)
+     return backend->vtable.is_available(backend);
+ }
+ 
++/**
++ * Get the implementation type of the backend.
++ *
++ * @param backend The backend instance
++ * @return TYPE_UNKNOWN if the backend provides no face support
++ */
++static inline FaceImplementationType
++face_backend_get_implementation_type(FaceBackend *backend)
++{
++    g_return_val_if_fail(backend != NULL, TYPE_UNKNOWN);
++    g_return_val_if_fail(backend->vtable.get_implementation_type != NULL, TYPE_UNKNOWN);
++    return backend->vtable.get_implementation_type(backend);
++}
++
+ /**
+  * Set up the default configuration for the backend.
+  *
+diff --git a/include/face_disabled_backend.h b/include/face_disabled_backend.h
+new file mode 100644
+index 0000000..77412c0
+--- /dev/null
++++ b/include/face_disabled_backend.h
+@@ -0,0 +1,24 @@
++/**
++ * SPDX-License-Identifier: GPL-2.0-only
++ * Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ */
++
++#ifndef FACE_DISABLED_BACKEND_H
++#define FACE_DISABLED_BACKEND_H
++
++#include <glib.h>
++#include "face_backend.h"
++
++/**
++ * Create a new disabled backend instance.
++ *
++ * Used when biomd is built with WITH_FACE=0. This backend is of type
++ * TYPE_UNKNOWN and provides no face support.
++ *
++ * @param callbacks Callback functions to be invoked by the backend
++ * @return A new FaceBackend instance or NULL if creation failed
++ */
++FaceBackend *
++face_disabled_backend_new(FaceBackendCallbacks callbacks);
++
++#endif // FACE_DISABLED_BACKEND_H
+diff --git a/src/face.c b/src/face.c
+index 2b07ef0..2f67843 100644
+--- a/src/face.c
++++ b/src/face.c
+@@ -7,6 +7,7 @@
+ #include "introspect.h"
+ #include "face_backend.h"
+ #include "face_fart_backend.h"
++#include "face_disabled_backend.h"
+ 
+ static GDBusNodeInfo *face_introspection_data = NULL;
+ static GDBusNodeInfo *face_agent_introspection_data = NULL;
+@@ -1237,6 +1238,14 @@ handle_face_method_call(GDBusConnection *connection,
+         return;
+     }
+ 
++    if (self->implementation_type == TYPE_UNKNOWN) {
++        g_dbus_method_invocation_return_error(invocation,
++                                              G_DBUS_ERROR,
++                                              G_DBUS_ERROR_NOT_SUPPORTED,
++                                              "Face is not supported");
++        return;
++    }
++
+     if (g_strcmp0(method_name, "CreateAgent") == 0) {
+         gchar *new_path = make_next_agent_path();
+ 
+@@ -1554,13 +1563,21 @@ face_init(GDBusConnection *connection)
+         .user_data = face_state
+     };
+ 
++#ifdef FACE_DISABLED
++    face_state->backend = face_disabled_backend_new(cb);
++#else
+     face_state->backend = face_fart_backend_new(cb);
++#endif
+     if (!face_state->backend) {
+         g_warning("Failed to create face backend");
+         face_state->implementation_type = TYPE_UNKNOWN;
+         face_state->face_enrolled = FALSE;
++    } else if (face_backend_get_implementation_type(face_state->backend) == TYPE_UNKNOWN) {
++        g_debug("Face backend provides no face support");
++        face_state->implementation_type = TYPE_UNKNOWN;
++        face_state->face_enrolled = FALSE;
+     } else {
+-        face_state->implementation_type = TYPE_SOFTWARE;
++        face_state->implementation_type = face_backend_get_implementation_type(face_state->backend);
+ 
+         if (face_backend_is_available(face_state->backend))
+             face_backend_setup_default(face_state->backend);
+diff --git a/src/face_disabled_backend.c b/src/face_disabled_backend.c
+new file mode 100644
+index 0000000..e2d1710
+--- /dev/null
++++ b/src/face_disabled_backend.c
+@@ -0,0 +1,106 @@
++/**
++ * SPDX-License-Identifier: GPL-2.0-only
++ * Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ */
++
++#include "face_disabled_backend.h"
++
++#include <glib.h>
++
++static gboolean
++disabled_is_available(FaceBackend *self)
++{
++    (void) self;
++    return FALSE;
++}
++
++static FaceImplementationType
++disabled_get_implementation_type(FaceBackend *self)
++{
++    (void) self;
++    return TYPE_UNKNOWN;
++}
++
++static gboolean
++disabled_setup_default(FaceBackend *self)
++{
++    (void) self;
++    return FALSE;
++}
++
++static gboolean
++disabled_start_enrollment(FaceBackend *self)
++{
++    (void) self;
++    return FALSE;
++}
++
++static gboolean
++disabled_start_recognition(FaceBackend *self)
++{
++    (void) self;
++    return FALSE;
++}
++
++static gboolean
++disabled_cancel_operation(FaceBackend *self)
++{
++    (void) self;
++    return FALSE;
++}
++
++static gboolean
++disabled_submit_frame(FaceBackend *self,
++                      gint fd,
++                      gint width,
++                      gint height,
++                      gint channels,
++                      guint32 format)
++{
++    (void) self;
++    (void) fd;
++    (void) width;
++    (void) height;
++    (void) channels;
++    (void) format;
++    return FALSE;
++}
++
++static gboolean
++disabled_is_enrolled(FaceBackend *self)
++{
++    (void) self;
++    return FALSE;
++}
++
++static gboolean
++disabled_remove_face_data(FaceBackend *self)
++{
++    (void) self;
++    return FALSE;
++}
++
++static void
++disabled_cleanup(FaceBackend *self)
++{
++    (void) self;
++}
++
++FaceBackend *
++face_disabled_backend_new(FaceBackendCallbacks callbacks)
++{
++    FaceBackendVTable vtable = {
++        .is_available = disabled_is_available,
++        .get_implementation_type = disabled_get_implementation_type,
++        .setup_default = disabled_setup_default,
++        .start_enrollment = disabled_start_enrollment,
++        .start_recognition = disabled_start_recognition,
++        .cancel_operation = disabled_cancel_operation,
++        .submit_frame = disabled_submit_frame,
++        .is_enrolled = disabled_is_enrolled,
++        .remove_face_data = disabled_remove_face_data,
++        .cleanup = disabled_cleanup
++    };
++
++    return face_backend_new(vtable, callbacks);
++}
+diff --git a/src/face_fart_backend.c b/src/face_fart_backend.c
+index 811ecab..e12e8b5 100644
+--- a/src/face_fart_backend.c
++++ b/src/face_fart_backend.c
+@@ -20,6 +20,13 @@ fart_is_available(FaceBackend *self)
+     return data && data->tf && face_tensorflow_fart_is_available(data->tf);
+ }
+ 
++static FaceImplementationType
++fart_get_implementation_type(FaceBackend *self)
++{
++    (void) self;
++    return TYPE_SOFTWARE;
++}
++
+ static gboolean
+ fart_setup_default(FaceBackend *self)
+ {
+@@ -126,6 +133,7 @@ face_fart_backend_new(FaceBackendCallbacks callbacks)
+ {
+     FaceBackendVTable vtable = {
+         .is_available = fart_is_available,
++        .get_implementation_type = fart_get_implementation_type,
+         .setup_default = fart_setup_default,
+         .start_enrollment = fart_start_enrollment,
+         .start_recognition = fart_start_recognition,
