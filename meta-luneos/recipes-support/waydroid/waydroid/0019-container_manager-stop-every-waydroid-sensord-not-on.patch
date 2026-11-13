@@ -1,0 +1,78 @@
+From 3545ea76fb6060b76f5271c87a0d04fa5c4b1ae6 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 13 Nov 2026 04:29:55 +0100
+Subject: [PATCH] container_manager: stop every waydroid-sensord, not only a
+ lone one
+
+The stop path took "pidof waydroid-sensord" and passed its output to
+kill as one argument. pidof prints all matches on one line, so with two
+daemons running kill was handed "1234 5678", which is not a PID; it
+failed, check=False hid that, and nothing was stopped. From then on
+every container start added one more daemon. A host that runs its own
+copy - LuneOS did, from a systemd unit - is in that state from the
+first start.
+
+On a BraX3 four were left after a day: three from container starts
+that should have died with their containers, each pinging the
+container's servicemanager through anbox-hwbinder once a second (about
+7200 failed binder transactions an hour in the kernel log), one of them
+spinning two cores on a sensorfw socket that had hung up.
+
+Split the PIDs, and kill any leftover before starting a new daemon, so
+a stop that did not run cannot leave two answering ISensors on the same
+node.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ tools/actions/container_manager.py | 20 +++++++++++++++-----
+ 1 file changed, 15 insertions(+), 5 deletions(-)
+
+diff --git a/tools/actions/container_manager.py b/tools/actions/container_manager.py
+index 7b172e9..6e17b0a 100644
+--- a/tools/actions/container_manager.py
++++ b/tools/actions/container_manager.py
+@@ -130,6 +130,17 @@ def start(args):
+         initializer.worker_thread.kill()
+         initializer.worker_thread.join()
+ 
++def kill_sensord(args):
++    # pidof prints every match on one line, separated by spaces. Passed to kill
++    # as a single argument, two or more of them are not a PID, kill fails, and
++    # check=False hides it - so as soon as two daemons were running, none was
++    # ever stopped again and each container start added one more.
++    command = ["pidof", "waydroid-sensord"]
++    pids = tools.helpers.run.user(args, command, check=False, output_return=True).split()
++    if pids:
++        command = ["kill", "-9"] + pids
++        tools.helpers.run.user(args, command, check=False)
++
+ prepared_drivers = False
+ def prepare_drivers_once(args):
+     global prepared_drivers
+@@ -168,6 +179,9 @@ def do_start(args, session):
+ 
+     # Sensors
+     if which("waydroid-sensord"):
++        # One daemon per container: a copy that outlived an earlier container
++        # would answer ISensors on the same node as the new one.
++        kill_sensord(args)
+         tools.helpers.run.user(
+             args, ["waydroid-sensord", "/dev/" + args.HWBINDER_DRIVER], output="background")
+ 
+@@ -233,11 +247,7 @@ def stop(args, quit_session=True):
+ 
+         # Sensors
+         if which("waydroid-sensord"):
+-            command = ["pidof", "waydroid-sensord"]
+-            pid = tools.helpers.run.user(args, command, check=False, output_return=True).strip()
+-            if pid:
+-                command = ["kill", "-9", pid]
+-                tools.helpers.run.user(args, command, check=False)
++            kill_sensord(args)
+ 
+         # Umount rootfs
+         helpers.images.umount_rootfs(args)
+-- 
+2.53.0
+
