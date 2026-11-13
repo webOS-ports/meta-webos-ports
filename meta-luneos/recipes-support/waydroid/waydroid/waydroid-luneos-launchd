@@ -33,6 +33,7 @@
 # alone and Android is free to suspend.
 
 import errno
+import fcntl
 import os
 import sys
 import threading
@@ -90,6 +91,11 @@ class Platform:
 
 
 FREEZER = "/sys/fs/cgroup/freezer/lxc.payload.waydroid/freezer.state"
+# Shared with waydroid-luneos-thaw, which briefly thaws and refreezes a frozen
+# container. Holding it across the check and the unfreeze keeps a launch from
+# reading "thawed" in that window and then running into a container that is
+# frozen again under it.
+FREEZER_LOCK = "/run/waydroid-luneos-freezer.lock"
 
 
 def frozen():
@@ -218,13 +224,23 @@ def main():
         # on this hardware, and the freezer state is a file read away, so
         # asking the cheap question first is worth it: most launches follow
         # another one and the container is already thawed.
-        if frozen():
-            try:
-                import tools.helpers.ipc
-                tools.helpers.ipc.DBusContainerService().Unfreeze()
-            except Exception as e:
-                log("unfreeze failed (%s); launching anyway" % e)
-            log("unfreeze took %.3fs" % (time.time() - t))
+        try:
+            lock = open(FREEZER_LOCK, "a")
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        except OSError as e:
+            log("could not take %s (%s); unfreezing without it" % (FREEZER_LOCK, e))
+            lock = None
+        try:
+            if frozen():
+                try:
+                    import tools.helpers.ipc
+                    tools.helpers.ipc.DBusContainerService().Unfreeze()
+                except Exception as e:
+                    log("unfreeze failed (%s); launching anyway" % e)
+                log("unfreeze took %.3fs" % (time.time() - t))
+        finally:
+            if lock:
+                lock.close()
         # The platform service answers well before Android can start an app,
         # and a launch sent then is dropped without a word. Two things have to
         # have happened first. Android has to have booted, and user 0's
