@@ -345,6 +345,22 @@ echo "adaptation: ${_di:-none} (codename $(luneos-adaptation --codename 2>/dev/n
 [ -n "${deviceinfo_android_skip_services:-}" ] &&
     SKIP_SERVICES="$SKIP_SERVICES $deviceinfo_android_skip_services"
 
+# deviceinfo_android_props="name=value ..." overrides vendor properties before
+# any service below is started, for a vendor default that does not fit LuneOS.
+# The services read them when they start, so this has to come before the start
+# loop; setting them later only takes effect after a service restart.
+for _p in ${deviceinfo_android_props:-}; do
+    case "$_p" in
+        ?*=*) ;;
+        *) echo "deviceinfo_android_props: ignoring \"$_p\", not name=value"; continue ;;
+    esac
+    if setprop "${_p%%=*}" "${_p#*=}"; then
+        echo "set ${_p%%=*}=${_p#*=} from deviceinfo"
+    else
+        echo "could not set ${_p%%=*} from deviceinfo"
+    fi
+done
+
 conflict_match=$DISPLAY_CONFLICT_MATCH
 [ "${deviceinfo_has_camera:-}" = false ] &&
     conflict_match="$conflict_match $NO_CAMERA_MATCH"
