@@ -1,0 +1,88 @@
+From 7f06b3d098ab542a0f6e8f2c610827c2f6d3f6a7 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 13 Nov 2026 18:41:33 +0100
+Subject: [PATCH] callmanager: end every call when the radio is turned off
+
+AT+CFUN=4 only set FUN and answered +CREG: 0 / +CGREG: 0, so calls
+stayed up with the radio off. A real modem drops them, and oFono has
+no way of its own to end them: it waits for the modem to say so.
+
+On a BraX3 a phonesim call that nobody hung up survived airplane mode
+at 12:25 and was still up at 18:03, and the whole time audiod refused
+every suspend because a call was up.
+
+Drop all calls from the network side on any AT+CFUN other than 1, the
+way the GUI's remote hangup does: *ECAV with the ended state and NO
+CARRIER for each, so oFono asks AT+CLCC and removes them. This runs
+after the XML rule has answered the command, because a NO CARRIER
+before the OK would be taken as the final response to AT+CFUN.
+AT+CFUN=? and AT+CFUN? are left alone.
+
+Tested on a BraX3: an outgoing call still alerting and an incoming call
+answered through oFono both ended when the modem was set Online=false;
+oFono dropped them, mediacontroller saw inCall 0 and audiod closed the
+call stream. Taking the modem offline and online with no call works as
+before.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/callmanager.cpp | 20 +++++++++++++++++++-
+ src/callmanager.h   |  3 +++
+ 2 files changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/src/callmanager.cpp b/src/callmanager.cpp
+index 40f9b3b..ff7f7a7 100644
+--- a/src/callmanager.cpp
++++ b/src/callmanager.cpp
+@@ -46,7 +46,19 @@ CallManager::~CallManager()
+ 
+ bool CallManager::command( const QString& cmd )
+ {
+-    if ( cmd.startsWith( "ATD*" ) || cmd.startsWith( "ATD#" ) ) {
++    if ( cmd.startsWith( "AT+CFUN=" ) ) {
++
++        // Turning the radio off ends every call, as it does on a real modem.
++        // The CFUN rule in the XML still answers the command, so the calls
++        // are dropped only once that answer is out: a NO CARRIER before it
++        // would be read as the final response to AT+CFUN.
++        bool ok = false;
++        int fun = cmd.mid( 8 ).section( ',', 0, 0 ).toInt( &ok );
++        if ( ok && fun != 1 && !callList.isEmpty() )
++            QTimer::singleShot( 0, this, &CallManager::dropAllCalls );
++        return false;
++
++    } else if ( cmd.startsWith( "ATD*" ) || cmd.startsWith( "ATD#" ) ) {
+ 
+         // Supplementary service request - just say OK for now.
+         emit send( "OK" );
+@@ -460,6 +472,12 @@ void CallManager::hangupCall( int id )
+     chld1x( id );
+ }
+ 
++void CallManager::dropAllCalls()
++{
++    while ( !callList.isEmpty() )
++        hangupRemote( callList.first().id );
++}
++
+ void CallManager::hangupRemote( int id )
+ {
+     int index = indexForId( id );
+diff --git a/src/callmanager.h b/src/callmanager.h
+index a39f484..460c8e1 100644
+--- a/src/callmanager.h
++++ b/src/callmanager.h
+@@ -144,6 +144,9 @@ private slots:
+     // Hangup the connected call after xx seconds
+     void hangup();
+ 
++    // End every call from the network side, as when the radio goes off.
++    void dropAllCalls();
++
+ private:
+     QList<CallInfo> callList;
+     QTimer *hangupTimer;
+-- 
+2.53.0
+
