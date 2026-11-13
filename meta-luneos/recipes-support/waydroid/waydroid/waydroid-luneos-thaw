@@ -1,0 +1,96 @@
+#!/bin/sh
+# Let a frozen Waydroid container drop the wakelocks it took while freezing.
+#
+# Waydroid freezes Android whenever Android reports itself idle (no app on
+# screen), and Android's system_server watches its alarm timers through epoll
+# with EPOLLWAKEUP. When such a timer fires, the kernel takes a "[timerfd]"
+# wakeup source on the host, which is released only when the process next
+# calls epoll_wait - and a frozen process never does. sleepd's every suspend
+# then fails with "wakeup source still active after 1000 ms:
+# [timerfd],[timerfd]": measured on the BraX3 (13 Nov 2026), 25 minutes on
+# battery with the screen off, asleep 0% of the time.
+#
+# Taking CAP_BLOCK_SUSPEND away from the container is not an option: Android's
+# input reader aborts system_server without it ("Input must be able to block
+# suspend to properly process events"). So watch for the stuck wakeup source
+# and, when the container is frozen, thaw it just long enough for
+# system_server to collect the timer, then freeze it again.
+#
+# The launcher (waydroid-luneos-launchd) takes the same lock around its own
+# unfreeze, so an app launch never lands between our thaw and refreeze.
+
+FREEZER=/sys/fs/cgroup/freezer/lxc.payload.waydroid/freezer.state
+LOCK=/run/waydroid-luneos-freezer.lock
+# How often to look while the host is awake. A suspended host runs nothing,
+# so this costs nothing asleep.
+INTERVAL=${WAYDROID_THAW_INTERVAL:-5}
+# A wakeup source an awake process holds is released within milliseconds; one
+# held this long belongs to a process that cannot run.
+HOLD_MS=${WAYDROID_THAW_HOLD_MS:-2000}
+
+log() { echo "waydroid-thaw: $*"; }
+
+# True if some [timerfd] wakeup source has been active for more than $1 ms.
+# active_time_ms is the time since activation for an active source, 0 for an
+# inactive one.
+timerfd_held() {
+    for w in /sys/class/wakeup/wakeup*; do
+        read -r n < "$w/name" 2>/dev/null || continue
+        [ "$n" = "[timerfd]" ] || continue
+        read -r t < "$w/active_time_ms" 2>/dev/null || continue
+        [ "$t" -gt "$1" ] && return 0
+    done
+    return 1
+}
+
+state() { cat "$FREEZER" 2>/dev/null; }
+
+# Wait up to $1 tenths of a second for the freezer to report $2.
+wait_state() {
+    _i=0
+    while [ "$_i" -lt "$1" ]; do
+        [ "$(state)" = "$2" ] && return 0
+        sleep 0.1
+        _i=$((_i + 1))
+    done
+    return 1
+}
+
+exec 9> "$LOCK"
+backoff=0
+while :; do
+    sleep "$INTERVAL"
+    if [ "$backoff" -gt 0 ]; then
+        backoff=$((backoff - INTERVAL))
+        continue
+    fi
+    [ "$(state)" = FROZEN ] || continue
+    timerfd_held "$HOLD_MS" || continue
+
+    flock 9
+    # The launcher may have thawed it while we waited for the lock.
+    if [ "$(state)" != FROZEN ]; then
+        flock -u 9
+        continue
+    fi
+    echo THAWED > "$FREEZER"
+    wait_state 20 THAWED || log "container still $(state) 2 s after thawing"
+    # Give system_server up to 2 s to collect its timers.
+    i=0
+    while [ $i -lt 40 ] && timerfd_held 0; do
+        sleep 0.05
+        i=$((i + 1))
+    done
+    echo FROZEN > "$FREEZER"
+    wait_state 50 FROZEN || log "container still $(state) 5 s after refreezing"
+    flock -u 9
+
+    if timerfd_held 0; then
+        # Not the container's, or it took a new one at once: do not thaw it
+        # every few seconds for nothing.
+        log "a [timerfd] wakeup source is still held after a thaw; not the container's? backing off 60 s"
+        backoff=60
+    else
+        log "thawed the container for about $((i * 50)) ms to release its [timerfd] wakeup sources"
+    fi
+done

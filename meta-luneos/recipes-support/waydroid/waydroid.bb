@@ -16,7 +16,7 @@ PV = "${SPV}"
 # Bumped whenever the shipped patches or helper scripts change: they alter what
 # the package contains without moving SRCREV or PV, so without this an already
 # installed waydroid stays at the previous build. Reset at the 1.6.3 move.
-PR = "r25"
+PR = "r26"
 
 # Pre-installed images, for machines whose system/vendor pairing is frozen.
 #
@@ -168,6 +168,8 @@ SRC_URI = "git://github.com/waydroid/waydroid.git;branch=main;protocol=https \
     file://waydroid-download-dashboard/qml/main.qml \
     file://waydroid-luneos-launchd \
     file://waydroid-luneos-launchd.service \
+    file://waydroid-luneos-thaw \
+    file://waydroid-luneos-thaw.service \
     file://waydroid-luneos-session.service \
     file://waydroid-luneos.conf.mindphone \
 "
@@ -212,7 +214,7 @@ inherit webos_systemd
 # SRC_URI entry per unit name, so deleting it fails the build at fetch time.
 WEBOS_SYSTEMD_SERVICE = "waydroid-container.service \
     waydroid-luneos-prepare.service waydroid-luneos-session.service \
-    waydroid-luneos-launchd.service"
+    waydroid-luneos-launchd.service waydroid-luneos-thaw.service"
 
 CLEANBROKEN = "1"
 
@@ -237,11 +239,13 @@ do_install() {
     install -m 0755 ${UNPACKDIR}/waydroid-luneos-app.sh ${D}${libexecdir}/waydroid-luneos-app
     install -m 0644 ${UNPACKDIR}/waydroid-luneos-download.sh ${D}${libexecdir}/waydroid-luneos-download
     install -m 0755 ${UNPACKDIR}/waydroid-luneos-launchd ${D}${libexecdir}/waydroid-luneos-launchd
+    install -m 0755 ${UNPACKDIR}/waydroid-luneos-thaw ${D}${libexecdir}/waydroid-luneos-thaw
 
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/waydroid-luneos-prepare.service ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/waydroid-luneos-session.service ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/waydroid-luneos-launchd.service ${D}${systemd_system_unitdir}
+    install -m 0644 ${UNPACKDIR}/waydroid-luneos-thaw.service ${D}${systemd_system_unitdir}
     # Not in WEBOS_SYSTEMD_SERVICE: that would have it enabled, and it is
     # started on demand only. See the unit.
     install -m 0644 ${UNPACKDIR}/waydroid-luneos-init.service ${D}${systemd_system_unitdir}
