@@ -44,6 +44,11 @@ RUNDIR = "/run/waydroid-luneos"
 FIFO = os.path.join(RUNDIR, "launch")
 STATUS = os.path.join(RUNDIR, "active_apps")
 POLL = 5
+# How long a launch waits for sys.boot_completed. The launcher shell script
+# allows 240s for a boot, and a first boot after an image update is that slow.
+BOOT_TIMEOUT = 240
+# After a wait, how long to leave Android to put its launcher up first.
+BOOT_SETTLE = 3
 
 
 def log(msg):
@@ -220,6 +225,38 @@ def main():
             except Exception as e:
                 log("unfreeze failed (%s); launching anyway" % e)
             log("unfreeze took %.3fs" % (time.time() - t))
+        # The platform service answers well before Android can start an app,
+        # and a launch sent then is dropped without a word. Two things have to
+        # have happened first. Android has to have booted, and user 0's
+        # credential-encrypted storage has to be unlocked: until it is, an app
+        # that is not direct-boot aware - nearly all of them, F-Droid among
+        # them - cannot even be resolved, and Android shows FallbackHome in
+        # place of the launcher. On the BraX3 the unlock came a moment after
+        # sys.boot_completed, and a launch sent in between never reached
+        # ActivityTaskManager; Launcher3 then replaced FallbackHome and that
+        # was all the user saw.
+        #
+        # Each read is its own call, so the connection lock is not held across
+        # the sleeps, and a booted container costs two reads.
+        def ready():
+            return platform.call(lambda s: s.getprop(
+                "sys.boot_completed", "") == "1" and s.getprop(
+                "sys.user.0.ce_available", "") == "true")
+
+        t_boot = time.time()
+        if not ready():
+            while time.time() - t_boot < BOOT_TIMEOUT:
+                time.sleep(1)
+                if ready():
+                    # The launcher replaces FallbackHome right after the
+                    # unlock, and an app started before that is put behind it.
+                    time.sleep(BOOT_SETTLE)
+                    log("waited %.1fs for Android to be ready"
+                        % (time.time() - t_boot))
+                    break
+            else:
+                log("Android not ready after %ds; launching %s anyway"
+                    % (BOOT_TIMEOUT, pkg))
         t_calls = time.time()
         ok = platform.call(go)
         if not ok:

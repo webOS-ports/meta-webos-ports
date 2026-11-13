@@ -16,7 +16,7 @@ PV = "${SPV}"
 # Bumped whenever the shipped patches or helper scripts change: they alter what
 # the package contains without moving SRCREV or PV, so without this an already
 # installed waydroid stays at the previous build. Reset at the 1.6.3 move.
-PR = "r24"
+PR = "r25"
 
 # Pre-installed images, for machines whose system/vendor pairing is frozen.
 #
@@ -85,6 +85,10 @@ RRECOMMENDS:${PN} += "luna-downloadmgr"
 # extension. Recommended rather than required, so an image can leave it out
 # with BAD_RECOMMENDATIONS.
 RRECOMMENDS:${PN} += "waydroid-fdroid"
+# Without a GPU render node Android renders through llvmpipe, which overruns
+# gralloc.default's buffers and kills SurfaceFlinger (0020). This is the
+# padded gralloc that stops it; Waydroid uses it only when it is installed.
+RRECOMMENDS:${PN} += "waydroid-gralloc"
 
 # The package varies by machine - WAYDROID_IMAGE_RDEPENDS decides whether it
 # pulls waydroid-data, and mindphone gets a config file nothing else does. That
@@ -152,6 +156,7 @@ SRC_URI = "git://github.com/waydroid/waydroid.git;branch=main;protocol=https \
     file://0017-images-do-not-bind-the-host-s-EGL-over-a-MAINLINE-ve.patch \
     file://0018-images-use-ANGLE-on-lavapipe-when-the-vendor-has-no-.patch \
     file://0019-container_manager-stop-every-waydroid-sensord-not-on.patch \
+    file://0020-images-let-a-padded-gralloc.waydroid-take-over-from-.patch \
     file://waydroid-luneos-prepare.sh \
     file://waydroid-luneos-prepare.service \
     file://waydroid-luneos-session.sh \

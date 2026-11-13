@@ -1,0 +1,58 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 13 Nov 2026 07:53:03 +0100
+Subject: [PATCH] images: let a padded gralloc.waydroid take over from
+ gralloc.default
+
+Without a render node Android renders in software, through ANGLE on
+lavapipe or through Mesa, and either way llvmpipe draws. llvmpipe works
+in 4x4 blocks and assumes its render targets are padded to whole
+blocks. gralloc.default allocates the exact height, rounded to a page.
+Blending a window whose height is 2 more than a multiple of 4 then
+reads past the end of the buffer.
+
+On the BraX3 that covers its full-screen and most app windows: 720x1390,
+720x1462 and 720x1470. SurfaceFlinger died with SEGV_ACCERR in llvmpipe's
+blend code 11 times in a day, taking every open app with it.
+
+A distribution can install a gralloc.waydroid.so into the vendor
+overlay: gralloc.default with those rows allocated, and nothing else
+changed. hw_get_module() loads it only when ro.hardware.gralloc is
+unset, as it then tries gralloc.<ro.board.platform>.so, and that is
+"waydroid". So drop ro.hardware.gralloc=default when that module is
+there. The hwcomposer and stagefright read an unset value as "default",
+and the buffers still are gralloc.default's.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [LuneOS-specific: needs the padded gralloc module LuneOS ships]
+---
+ tools/helpers/images.py | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/tools/helpers/images.py b/tools/helpers/images.py
+index 2c78879..c89cd48 100644
+--- a/tools/helpers/images.py
++++ b/tools/helpers/images.py
+@@ -202,6 +202,19 @@ def make_prop(args, cfg, full_props_path):
+         props.append("ro.hardware.egl=angle")
+         props.append("ro.hardware.vulkan=lvp")
+ 
++    # Software rendering is llvmpipe either way, and llvmpipe works in 4x4
++    # blocks that run past the bottom of a gralloc.default buffer whose height
++    # is not a multiple of 4: SurfaceFlinger dies reading the rows that are not
++    # there. gralloc.waydroid, where a distribution installs it into the vendor
++    # overlay, is gralloc.default with those rows allocated. Android loads it
++    # in place of gralloc.default once ro.hardware.gralloc is unset, as
++    # hw_get_module() then tries gralloc.<ro.board.platform>, which is
++    # "waydroid". The hwcomposer and stagefright read an unset value as
++    # "default", which is what the buffers still are.
++    if "ro.hardware.gralloc=default" in props and \
++            vendor_has("hw/gralloc.waydroid.so"):
++        props.remove("ro.hardware.gralloc=default")
++
+     def add_prop(key, cfg_key):
+         value = cfg[cfg_key]
+         if value != "None":
+-- 
+2.53.0
+
