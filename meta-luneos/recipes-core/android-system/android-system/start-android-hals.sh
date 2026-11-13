@@ -83,8 +83,19 @@ CLASSES="hal core main late_start"
 # does - in front of Android apps; USB storage on the host does not go through
 # it.
 #
+# Also skipped: stp_dump, bt_dump and wifi_dump, MediaTek's connectivity
+# coredump collectors (init_connectivity.rc on the Titan, Titan Pocket and
+# BraX3). Like ss_ramdump they are "disabled" and started only by
+# persist.vendor.connsys.coredump.mode=1 or 2, a debug opt-in nothing sets on
+# LuneOS, so the gated wait below gave up on the unset property and started
+# them anyway. On the Titan Pocket stp_dump3 then spun on a generic-netlink
+# socket it never read - pselect() reporting it readable some 15,000 times a
+# second - and kept a core busy for the whole uptime (13 Nov 2026: 12 minutes
+# of CPU in its first 17; the phone was 97% idle once it was stopped). To
+# collect a coredump: set the property, then "setprop ctl.start stp_dump".
+#
 # deviceinfo_android_skip_services extends this per device.
-SKIP_SERVICES="bootanim bootanimation vendor.qcrild3 ss_ramdump fuse_usbotg"
+SKIP_SERVICES="bootanim bootanimation vendor.qcrild3 ss_ramdump fuse_usbotg stp_dump bt_dump wifi_dump"
 
 # Services with a prerequisite the start loop below cannot see. qcrild reaches
 # the modem over QMI, which needs rmt_storage (the modem's EFS backing store),
