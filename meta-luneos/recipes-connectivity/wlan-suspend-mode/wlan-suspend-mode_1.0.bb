@@ -11,6 +11,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 SRC_URI = " \
     file://wlan-suspend-mode \
     file://wlan-suspend-mode.service \
+    file://mtk-wifi-suspend.c \
 "
 
 # file:// sources land directly in UNPACKDIR; there is no ${BP} subdirectory.
@@ -18,14 +19,20 @@ S = "${UNPACKDIR}"
 
 inherit systemd
 
-PR = "r8"
+PR = "r9"
 
 RDEPENDS:${PN} = "python3-core python3-ctypes python3-fcntl luna-service2 iw iproute2"
 COMPATIBLE_MACHINE = "(tissot|sargo|halium)"
 
+do_compile() {
+    ${CC} ${CFLAGS} ${LDFLAGS} -std=gnu11 -Wall \
+        -o ${WORKDIR}/mtk-wifi-suspend ${UNPACKDIR}/mtk-wifi-suspend.c
+}
+
 do_install() {
     install -d ${D}${sbindir} ${D}${systemd_system_unitdir}
     install -m 0755 ${UNPACKDIR}/wlan-suspend-mode ${D}${sbindir}/wlan-suspend-mode
+    install -m 0755 ${WORKDIR}/mtk-wifi-suspend ${D}${sbindir}/mtk-wifi-suspend
     install -m 0644 ${UNPACKDIR}/wlan-suspend-mode.service ${D}${systemd_system_unitdir}/
 }
 
