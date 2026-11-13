@@ -1,0 +1,308 @@
+From 03c3a169ab57d45c31c0ee5a744887af72fc9fc5 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 13 Nov 2026 04:31:39 +0100
+Subject: [PATCH] sensorfw: reconnect when sensorfw closes the socket, instead
+ of spinning
+
+A socket source reports G_IO_HUP whether or not it was asked for, and
+static_data_recieved() answered it with G_SOURCE_CONTINUE. Once sensorfw
+had closed its end the socket was readable forever - every read returns
+end of file - so the event loop thread polled, read 0 bytes and polled
+again without pause. On a BraX3 that was the accelerometer and
+orientation threads at 100% of a core each, about 7500 syscalls a
+second per thread, for 21 hours until the daemon was killed.
+
+Treat a hang-up as a lost session: drop the source and the connection,
+then - while events are still wanted - load the plugin, request a new
+session and connect again, exactly what the constructor does the first
+time. The retry waits 2 seconds, doubling up to a minute while it keeps
+failing, so a sensorfw that is down costs one attempt a minute rather
+than a slower busy loop. start() goes through the same path when it has
+no connection, where it used to pass a NULL connection to
+g_socket_connection_get_socket() if the constructor never got one.
+
+A sensor sensorfw has a plugin for but no sensor behind - the BraX3's
+pressure sensor, "requested sensor id 'pressuresensor' not registered" -
+used to be kept anyway with an unset session id. sensorfw closed that
+socket at once ("Failed to read valid session ID from client"), and the
+sensor was still offered to Android, so enabling it spun the same way.
+A failed requestSensor, or a negative session id, now fails the
+constructor like a missing plugin does, and SensorFW marks the sensor
+unavailable.
+
+Two smaller fixes on the way: load_plugin() unreffed a NULL result when
+the call failed, and the destructor stopped the stream from the caller's
+thread although every other change to the loop's sources is made on the
+loop thread; it now runs stop() there too, so it cannot race a retry.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ .../include/plugins/sensorfw_common.h         |  16 ++-
+ sensorfw-core/plugins/sensorfw_common.cpp     | 134 +++++++++++++++++-
+ 2 files changed, 141 insertions(+), 9 deletions(-)
+
+diff --git a/sensorfw-core/include/plugins/sensorfw_common.h b/sensorfw-core/include/plugins/sensorfw_common.h
+index 273fe54..63d4399 100644
+--- a/sensorfw-core/include/plugins/sensorfw_common.h
++++ b/sensorfw-core/include/plugins/sensorfw_common.h
+@@ -71,10 +71,17 @@ protected:
+     std::shared_ptr<SocketReader> m_socket;
+ 
+ private:
+-    void request_sensor();
++    bool request_sensor();
+     bool release_sensor();
+     bool load_plugin();
+ 
++    void stop_stream();
++    bool reconnect();
++    void connection_lost();
++    void schedule_retry();
++    void cancel_retry();
++    static gboolean static_retry(gpointer user_data);
++
+     const char* plugin_string() const;
+     const char* plugin_interface() const;
+     const char* plugin_path() const;
+@@ -84,8 +91,13 @@ private:
+     PluginType m_plugin;
+     std::unique_ptr<char, decltype(&free)> m_pluginPath;
+     pid_t m_pid;
+-    int m_sessionid;
++    int m_sessionid = -1;
+     std::unique_ptr<GSource, decltype(&g_source_unref)> m_gsource;
++    // Whether events were asked for: start() sets it, stop() clears it, and
++    // only while it is set does a lost connection get re-established.
++    bool m_wanted = false;
++    GSource* m_retry = nullptr;
++    unsigned m_retry_seconds = 2;
+ };
+ }
+ }
+diff --git a/sensorfw-core/plugins/sensorfw_common.cpp b/sensorfw-core/plugins/sensorfw_common.cpp
+index bb88ba9..6f5d66f 100644
+--- a/sensorfw-core/plugins/sensorfw_common.cpp
++++ b/sensorfw-core/plugins/sensorfw_common.cpp
+@@ -22,6 +22,8 @@
+ 
+ #include <utils/socketreader.h>
+ 
++#include <algorithm>
++
+ namespace
+ {
+ auto const null_handler = [](double){};
+@@ -45,7 +47,14 @@ waydroid::core::Sensorfw::Sensorfw(
+     if (!load_plugin())
+         throw std::runtime_error("Could not create sensorfw backend");
+ 
+-    request_sensor();
++    // sensorfw can have the plugin and still no sensor behind it - on the
++    // BraX3 "requested sensor id 'pressuresensor' not registered". Carrying
++    // on connected with an unset session id: sensorfw closed the socket at
++    // once ("Failed to read valid session ID from client"), and the sensor
++    // was still offered to Android, so enabling it would have spun on that
++    // dead socket. Treat it like a missing plugin.
++    if (!request_sensor())
++        throw std::runtime_error("sensorfw gave no session for this sensor");
+ 
+     char *new_str;
+     if (asprintf(&new_str,"%s/%s", dbus_sensorfw_path, plugin_string()) == -1)
+@@ -64,7 +73,11 @@ waydroid::core::Sensorfw::Sensorfw(
+ 
+ waydroid::core::Sensorfw::~Sensorfw()
+ {
+-    stop();
++    // On the loop thread, like every other change to the sources attached to
++    // its context: a retry firing there must not race this.
++    dbus_event_loop.enqueue([this]{
++        stop();
++    }).get();
+     release_sensor();
+ 
+     dbus_event_loop.enqueue([this]{
+@@ -143,8 +156,8 @@ bool waydroid::core::Sensorfw::load_plugin()
+ 
+     if (err != NULL)
+     {
++        // No result to unref: the call failed, and result is NULL.
+         GINFO("failed to call load_plugin: %s", err->message);
+-        g_variant_unref(result);
+         return false;
+     }
+ 
+@@ -155,7 +168,7 @@ bool waydroid::core::Sensorfw::load_plugin()
+     return the_result;
+ }
+ 
+-void waydroid::core::Sensorfw::request_sensor()
++bool waydroid::core::Sensorfw::request_sensor()
+ {
+     int constexpr timeout_default = 5000;
+     auto const result =  g_dbus_connection_call_sync(
+@@ -174,16 +187,24 @@ void waydroid::core::Sensorfw::request_sensor()
+     if (!result)
+     {
+         GINFO("failed to call request_sensor");
+-        return;
++        return false;
+     }
+ 
+     gint32 the_result;
+     g_variant_get(result, "(i)", &the_result);
+     g_variant_unref(result);
+ 
++    // sensorfw can also answer a request it cannot serve with session -1.
++    if (the_result < 0)
++    {
++        GINFO("sensorfw refused a session for %s", plugin_string());
++        return false;
++    }
++
+     m_sessionid = the_result;
+ 
+     GINFO("Got new plugin for %s with pid %i and session %i", plugin_string(), m_pid, m_sessionid);
++    return true;
+ }
+ 
+ bool waydroid::core::Sensorfw::release_sensor()
+@@ -217,20 +238,111 @@ bool waydroid::core::Sensorfw::release_sensor()
+ 
+ gboolean waydroid::core::Sensorfw::static_data_recieved(GSocket * /* socket */, GIOCondition cond, gpointer user_data)
+ {
++    auto self = reinterpret_cast<Sensorfw *>(user_data);
++
++    // A socket source reports G_IO_HUP and G_IO_ERR whether or not they were
++    // asked for. Once sensorfw has closed its end the socket stays readable
++    // for good - every read returns end of file - so carrying on here was a
++    // busy loop: poll, recv 0 bytes, poll again, two cores' worth on a phone
++    // where sensorfw had dropped the accelerometer and orientation sessions,
++    // for as long as the daemon lived.
++    if (cond & (G_IO_HUP | G_IO_ERR))
++    {
++        self->connection_lost();
++        return G_SOURCE_REMOVE;
++    }
++
+     if (! (cond & G_IO_IN))
+         return G_SOURCE_CONTINUE;
+ 
+-    auto self = reinterpret_cast<Sensorfw *>(user_data);
+     self->data_recived_impl();
+ 
+     return G_SOURCE_CONTINUE;
+ }
+ 
++void waydroid::core::Sensorfw::connection_lost()
++{
++    GINFO("sensorfw closed the %s socket, reconnecting", plugin_string());
++
++    // The dispatch returning G_SOURCE_REMOVE destroys the source; only our
++    // reference is left to drop. The session it belonged to is gone with the
++    // socket, so there is nothing to tell sensorfw to stop.
++    m_gsource.reset();
++    m_socket->dropConnection();
++    schedule_retry();
++}
++
++// A new session on a new socket, which is what the constructor sets up the
++// first time. The old session is released in case sensorfw still holds it -
++// it may have dropped only the socket - and that is allowed to fail.
++bool waydroid::core::Sensorfw::reconnect()
++{
++    m_socket->dropConnection();
++    release_sensor();
++
++    if (!load_plugin() || !request_sensor())
++        return false;
++
++    return m_socket->initiateConnection(m_sessionid);
++}
++
++// Retried rather than reconnected on the spot: if sensorfw is restarting, or
++// keeps closing the session, an immediate retry would just be a slower busy
++// loop. The wait doubles up to a minute, and start() resets it once a
++// stream is running again.
++void waydroid::core::Sensorfw::schedule_retry()
++{
++    unsigned constexpr retry_max_seconds = 60;
++
++    if (m_retry || !m_wanted)
++        return;
++
++    m_retry = g_timeout_source_new_seconds(m_retry_seconds);
++    m_retry_seconds = std::min(m_retry_seconds * 2, retry_max_seconds);
++    g_source_set_callback(m_retry, &Sensorfw::static_retry, this, NULL);
++    g_source_attach(m_retry, g_main_context_get_thread_default());
++}
++
++void waydroid::core::Sensorfw::cancel_retry()
++{
++    if (!m_retry)
++        return;
++
++    g_source_destroy(m_retry);
++    g_source_unref(m_retry);
++    m_retry = nullptr;
++}
++
++gboolean waydroid::core::Sensorfw::static_retry(gpointer user_data)
++{
++    auto self = reinterpret_cast<Sensorfw *>(user_data);
++
++    g_source_unref(self->m_retry);
++    self->m_retry = nullptr;
++
++    if (self->m_wanted)
++        self->start();
++
++    return G_SOURCE_REMOVE;
++}
++
+ void waydroid::core::Sensorfw::start()
+ {
++    m_wanted = true;
++
+     if (m_gsource)
+         return;
+ 
++    // Not connected if sensorfw hung up, or if the constructor never got a
++    // socket at all - in which case the code below would have handed a NULL
++    // connection to g_socket_connection_get_socket().
++    if (!m_socket->isConnected() && !reconnect())
++    {
++        GINFO("could not reach sensorfw for %s, will retry", plugin_string());
++        schedule_retry();
++        return;
++    }
++
+     GSocket *socket = g_socket_connection_get_socket(m_socket->socket());
+     m_gsource = std::unique_ptr<GSource, decltype(&g_source_unref)> {
+         g_socket_create_source(socket, G_IO_IN, /* cancellable */ NULL),
+@@ -264,13 +376,21 @@ void waydroid::core::Sensorfw::start()
+     if (!result)
+     {
+         GINFO("failed to start SensorfwSensor");
+-        stop();
++        stop_stream();
+         return;
+     }
+     g_variant_unref(result);
++    m_retry_seconds = 2;
+ }
+ 
+ void waydroid::core::Sensorfw::stop()
++{
++    m_wanted = false;
++    cancel_retry();
++    stop_stream();
++}
++
++void waydroid::core::Sensorfw::stop_stream()
+ {
+     if (!m_gsource)
+         return;
+-- 
+2.53.0
+
