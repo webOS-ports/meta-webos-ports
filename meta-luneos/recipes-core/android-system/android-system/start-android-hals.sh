@@ -71,8 +71,20 @@ CLASSES="hal core main late_start"
 # We force-start disabled services, so we need the equivalent denylist here.
 # To collect ramdumps: set the property, then "setprop ctl.start ss_ramdump".
 #
+# Also skipped: fuse_usbotg, from the init.project.rc MediaTek ships as a
+# template in its vendor images - the Titan's (Android 10) and the BraX3's
+# (Android 16) both carry it. It is "disabled" with nothing in any rc to start
+# it, and runs /system/bin/sdcard with the Android 6 command line (-u -g -w
+# 1023 -d <source> <target>), which today's sdcard rejects with "too many
+# arguments". Force-started, it exited and was restarted every 5s for the whole
+# uptime (BraX3, 13 Nov 2026: 720 restarts an hour, each also running
+# flags_health_check UPDATABLE_CRASHING). It would only have put a FUSE view of
+# /mnt/media_rw/usbotg - which Android's vold mounts, and nothing on LuneOS
+# does - in front of Android apps; USB storage on the host does not go through
+# it.
+#
 # deviceinfo_android_skip_services extends this per device.
-SKIP_SERVICES="bootanim bootanimation vendor.qcrild3 ss_ramdump"
+SKIP_SERVICES="bootanim bootanimation vendor.qcrild3 ss_ramdump fuse_usbotg"
 
 # Services with a prerequisite the start loop below cannot see. qcrild reaches
 # the modem over QMI, which needs rmt_storage (the modem's EFS backing store),
