@@ -8,33 +8,24 @@ require purple-connectors.inc
 
 # UnitedMarsupials/tdlib-purple is the maintained continuation of ars3niy/tdlib-purple, which has
 # not moved since 2021 and is stuck on TDLib 1.7.9. The fork follows TDLib's releases (see
-# tdlib_1.8.67.bb; it needs at least 1.8.44). 0001-0008 and 0015 are generic fixes meant for it,
-# one per patch; the others, one per feature, adapt the plug-in to imlibpurpletransport, the webOS
-# Messaging app and the Phone app.
+# tdlib_1.8.67.bb; it needs at least 1.8.44). 0001 is a generic fix meant for it; the others, one
+# per feature, adapt the plug-in to imlibpurpletransport, the webOS Messaging app and the Phone app.
 SRC_URI += " \
     git://github.com/UnitedMarsupials/tdlib-purple.git;branch=master;protocol=https;name=upstream;destsuffix=tdlib-purple \
-    file://0001-Request-missing-private-chats-in-batches-at-login.patch \
-    file://0002-Find-users-by-phone-number-and-by-username.patch \
-    file://0003-Send-voice-recordings-and-videos-as-such-not-as-docu.patch \
-    file://0004-Ask-for-login-input-through-a-chat-when-the-UI-has-n.patch \
-    file://0005-Do-not-truncate-the-user-id-of-an-outgoing-call.patch \
-    file://0006-Honour-Keep-inline-downloads-again-through-use_stora.patch \
-    file://0007-Let-libtgvoip-be-given-without-pkg-config.patch \
-    file://0008-Name-the-sender-of-a-deleted-group-message.patch \
-    file://0009-webOS-identity-store-and-what-the-transport-needs-pr.patch \
-    file://0010-webOS-reactions-sent-message-ids-delivery-and-read-t.patch \
-    file://0011-webOS-Telegram-calls-through-the-Phone-app-with-tgca.patch \
-    file://0012-webOS-carry-Telegram-calls-with-tgcalls-lite-alone-w.patch \
-    file://0013-webOS-do-what-the-Messaging-app-asks-edit-delete-gro.patch \
-    file://0014-webOS-edit-and-delete-a-received-message-where-it-is.patch \
-    file://0015-Tell-a-group-s-own-news-in-words.patch \
-    file://0016-webOS-rename-a-group-when-the-Messaging-app-asks.patch \
-    file://0017-webOS-give-the-app-the-id-of-what-we-sent-to-a-group.patch \
-    file://0018-webOS-show-a-poll-s-votes-in-the-Messaging-app-and-a.patch \
-    file://0019-webOS-hand-the-Messaging-app-received-files-file-URI.patch \
-    file://0020-webOS-name-who-a-forward-is-from-whatever-it-came-fr.patch \
+    file://0001-Let-libtgvoip-be-given-without-pkg-config.patch \
+    file://0002-webOS-identity-store-and-what-the-transport-needs-pr.patch \
+    file://0003-webOS-reactions-sent-message-ids-delivery-and-read-t.patch \
+    file://0004-webOS-Telegram-calls-through-the-Phone-app-with-tgca.patch \
+    file://0005-webOS-carry-Telegram-calls-with-tgcalls-lite-alone-w.patch \
+    file://0006-webOS-do-what-the-Messaging-app-asks-edit-delete-gro.patch \
+    file://0007-webOS-edit-and-delete-a-received-message-where-it-is.patch \
+    file://0008-webOS-rename-a-group-when-the-Messaging-app-asks.patch \
+    file://0009-webOS-give-the-app-the-id-of-what-we-sent-to-a-group.patch \
+    file://0010-webOS-show-a-poll-s-votes-in-the-Messaging-app-and-a.patch \
+    file://0011-webOS-hand-the-Messaging-app-received-files-file-URI.patch \
+    file://0012-webOS-name-who-a-forward-is-from-whatever-it-came-fr.patch \
 "
-SRCREV_upstream = "d87dcde22b4950b286c847879bf9e4b6a9d3912d"
+SRCREV_upstream = "e460589266fa4132c85f270efb4f2c8d332dbcb5"
 
 PV = "0.9.5+git"
 # The recipe used to be versioned 1.0+git while it built the monorepo copy; upstream's real version
@@ -49,9 +40,9 @@ PE = "5"
 #
 # fmt: the fork takes it from the system (pkg-config fmt) rather than bundling it.
 #
-# tgcalls-lite (0011) carries the calls, in the tgcalls V2 protocol current Telegram clients speak:
+# tgcalls-lite (0004) carries the calls, in the tgcalls V2 protocol current Telegram clients speak:
 # a static library, whose libnice, libsrtp2, json-glib, Opus and PulseAudio references are resolved
-# at this link. libtgvoip is not used (0012, NoTgvoip below).
+# at this link. libtgvoip is not used (0005, NoTgvoip below).
 DEPENDS = "pidgin glib-2.0 zlib openssl fmt tdlib libopus luna-service2 \
            tgcalls-lite libnice libsrtp json-glib pulseaudio"
 
@@ -63,7 +54,7 @@ DEBUG_PREFIX_MAP:append = " -ffile-prefix-map=${UNPACKDIR}=/usr/src/debug/${PN}/
 
 inherit cmake pkgconfig
 
-# NoVoip=OFF keeps calling; NoTgvoip=ON (0012) carries every call with tgcalls-lite and leaves
+# NoVoip=OFF keeps calling; NoTgvoip=ON (0005) carries every call with tgcalls-lite and leaves
 # libtgvoip out. libtgvoip only carried a call when the peer agreed on no tgcalls version, which no
 # current official client does (they all register tgcalls V2, 7.0.0); such a call is now refused.
 #
@@ -81,7 +72,7 @@ inherit cmake pkgconfig
 # lunaservice_* both need overriding. The defaults are the legacy webOS ones (liblunaservice.so);
 # LuneOS ships libluna-service2.so.
 #
-# tgcalls-lite's video (0011) has luneos-rtc-engine
+# tgcalls-lite's video (0004) has luneos-rtc-engine
 # (packagegroup-luneos-extended) decode and, where there is a camera and an encoder, encode the
 # H.264; without the engine on the device a video call stays voice-only.
 EXTRA_OECMAKE = " \
