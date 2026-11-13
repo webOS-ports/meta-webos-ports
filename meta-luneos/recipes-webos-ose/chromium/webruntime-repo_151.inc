@@ -110,12 +110,7 @@ CHROMIUM_OSS_PKG_INFO_CHKSUM = ""
 # of the repo and OE supplies the tools instead. The paths are hardcoded in
 # Chromium and not settable by GN args, so the shims have to live in the tree.
 
-# Chromium 151 pins node v24 (third_party/node/update_node_binaries) and
-# check_version.js compares the major version, so meta-oe's 22.23.1 is rejected.
-# nodejs24-native is meta-oe master's 24.19.0 renamed, so it does not displace
-# nodejs-native 22 for the Enact/enyo tooling - see
-# meta-luneos/recipes-devtools/nodejs24.
-DEPENDS += "nodejs24-native bindgen-cli-native gn-native ninja-native gperf-native esbuild-native"
+DEPENDS += "nodejs-native bindgen-cli-native gn-native ninja-native gperf-native esbuild-native"
 
 # devtools-frontend's rollup 4.60.4 loads a native addon for the build host,
 # and node_modules carries only @rollup/rollup-linux-x64-gnu. The wasm-node
@@ -171,7 +166,7 @@ do_configure:prepend() {
 
     # node: the graph calls third_party/node/node.py 3990 times and node.py
     # hardcodes this path with no environment override, so point it at the
-    # nodejs24-native binary.
+    # nodejs-native binary.
     install -d ${S}/src/third_party/node/linux/node-linux-x64/bin
     ln -sfn ${STAGING_BINDIR_NATIVE}/node \
         ${S}/src/third_party/node/linux/node-linux-x64/bin/node

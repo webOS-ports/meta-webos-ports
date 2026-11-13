@@ -80,7 +80,7 @@ inherit rust-common
 # is a plain "DEPENDS =" assignment that runs after the require and wipes them.
 # The shims are still created, so they end up as dangling symlinks and ninja
 # reports the tool "missing and no known rule to make it".
-DEPENDS += "bindgen-cli-native nodejs24-native gn-native ninja-native gperf-native"
+DEPENDS += "bindgen-cli-native nodejs-native gn-native ninja-native gperf-native"
 
 # Same reason as the rust args: without clang_base_path, //build/config/compiler
 # reads //third_party/llvm-build/Release+Asserts/cr_build_revision to identify
