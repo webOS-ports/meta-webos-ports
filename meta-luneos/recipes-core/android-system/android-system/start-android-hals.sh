@@ -355,6 +355,10 @@ echo "adaptation: ${_di:-none} (codename $(luneos-adaptation --codename 2>/dev/n
 [ -n "$_di" ] && . "$_di" 2>/dev/null
 [ -n "${deviceinfo_android_skip_services:-}" ] &&
     SKIP_SERVICES="$SKIP_SERVICES $deviceinfo_android_skip_services"
+# deviceinfo_android_stop_services: services the vendor's init starts by itself
+# and LuneOS does not want. Never started here either; see the stop below.
+[ -n "${deviceinfo_android_stop_services:-}" ] &&
+    SKIP_SERVICES="$SKIP_SERVICES $deviceinfo_android_stop_services"
 
 # deviceinfo_android_props="name=value ..." overrides vendor properties before
 # any service below is started, for a vendor default that does not fit LuneOS.
@@ -508,6 +512,30 @@ if [ -n "$gated_svcs" ]; then
                 *) echo "starting $s: its trigger property is still unset after $((i / 2))s" ;;
             esac
             setprop ctl.start "$s"
+        done
+    ) &
+fi
+
+# Skipping a service only keeps this script from starting it. A vendor rc can
+# start one itself from a trigger on a read-only property, e.g. the Titan
+# Pocket's "on property:ro.vendor.mtk_nn_support=1 / start
+# neuralnetworks_hal_service_mtk_neuron", which init fires at about the moment
+# this script begins. deviceinfo_android_stop_services lists those; stop each
+# whenever it shows up running or restarting over the next 10s. ctl.stop also
+# ends init's restarts, and the trigger does not fire again.
+if [ -n "${deviceinfo_android_stop_services:-}" ]; then
+    (
+        i=0
+        while [ $i -lt 20 ]; do
+            for s in $deviceinfo_android_stop_services; do
+                case "$(getprop init.svc.$s)" in
+                    running|restarting)
+                        setprop ctl.stop "$s" &&
+                            echo "stopped $s: listed in deviceinfo_android_stop_services" ;;
+                esac
+            done
+            i=$((i + 1))
+            sleep 0.5
         done
     ) &
 fi
