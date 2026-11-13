@@ -665,15 +665,25 @@ echo "booted $dsp DSP subsystem(s) init skipped"
 #
 # The composer registers under its highest implemented version and hwbinder
 # lookups are exact, so try each known version rather than a wildcard.
+# Vendors from Android 13 on may ship the AIDL composer3 instead, which
+# registers with servicemanager on /dev/binder, not on hwbinder: without
+# checking for it too, such a device (the BraX3) waits out the whole loop
+# below, about 27 s of every boot.
 COMPOSER_VERSIONS="2.4 2.3 2.2 2.1"
+COMPOSER_AIDL="android.hardware.graphics.composer3.IComposer/default"
 
 if command -v binder-ping >/dev/null 2>&1; then
     i=0
     registered=
     while [ $i -lt 100 ]; do
+        if binder-ping -q -d /dev/binder "$COMPOSER_AIDL" 2>/dev/null; then
+            echo "composer3 AIDL HAL registered on binder after $((i * 300))ms"
+            registered=1
+            break
+        fi
         for v in $COMPOSER_VERSIONS; do
             if binder-ping -q "android.hardware.graphics.composer@${v}::IComposer/default" 2>/dev/null; then
-                echo "composer HAL @${v} registered on hwbinder after ${i}00ms"
+                echo "composer HAL @${v} registered on hwbinder after $((i * 300))ms"
                 registered=1
                 break
             fi
