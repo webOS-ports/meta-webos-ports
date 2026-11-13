@@ -58,12 +58,6 @@ cur=$(cat $STATE 2>/dev/null)
 
 log() { echo "$(date -u +%FT%TZ) $*"; }
 
-# Whether to try the nl80211 testmode suspend request when the private ioctl is
-# rejected: "auto" tries it, "never" goes straight to the interface-down
-# fallback. Default never, because the only chip that accepts the call so far
-# is made worse by it - see the measurement above testmode_cmd().
-WLAN_TESTMODE=${WLAN_TESTMODE:-never}
-
 # MDTIM periods to skip while suspended. 1 keeps the pre-existing behaviour.
 MDTIM=${MDTIM:-3}
 IW=${IW:-/usr/sbin/iw}
@@ -149,134 +143,10 @@ except OSError as e:
 PY
 }
 
-# MEASURED, AND OFF BY DEFAULT. The gen2 chip accepts this call and reports
-# success, but the firmware carries on handing packets to the host: the WLAN
-# wakelocks (WLAN TX THREAD, WLAN Timer, WLAN AHB ISR) are taken exactly as
-# before and the suspend handshake never wins. Back-to-back runs on the
-# mindphone 2026-09-22, same build, same phone, screen off, off charger:
-#
-#   interface down (fallback):  1058 s window, 98.5% asleep, longest 1017 s,
-#                               1 failed suspend, 4.227 -> 4.206 V
-#   testmode, interface up:     1182 s window,  0.0% asleep, no sleep at all,
-#                              43 failed suspends, 4.364 -> 4.153 V
-#
-# So an accepted TESTMODE command is not evidence of anything: this one is
-# either ignored or sets something that is not the broadcast filter. Keep the
-# code - it is the only lead for a chip that has no other filtering path, and
-# a different gen2/gen4m firmware may honour it - but never let it displace a
-# fallback that works. Enable with WLAN_TESTMODE=auto to test a new chip, and
-# measure the asleep fraction before trusting it.
-#
-# nl80211 testmode suspend, for drivers that reject the private ioctl. Pure
-# python over a generic-netlink socket rather than libnl: the daemon already
-# depends on python3 for the ioctl, and this adds no library to the image.
-# A driver without testmode answers EOPNOTSUPP, which is a clean "not me".
-testmode_cmd() {
-    python3 - "$IF" "$1" <<'PY'
-import os, socket, struct, sys
-
-NETLINK_GENERIC = 16
-GENL_ID_CTRL = 0x10
-CTRL_CMD_GETFAMILY = 3
-CTRL_ATTR_FAMILY_ID = 1
-CTRL_ATTR_FAMILY_NAME = 2
-NLM_F_REQUEST, NLM_F_ACK = 1, 4
-NLMSG_ERROR, NLMSG_DONE = 2, 3
-NL80211_CMD_TESTMODE = 45
-NL80211_ATTR_IFINDEX = 3
-NL80211_ATTR_TESTDATA = 69
-TESTMODE_CMD_ID_SUSPEND = 101
-
-ifname, suspend = sys.argv[1], int(sys.argv[2])
-
-def nla(t, payload):
-    return struct.pack("HH", 4 + len(payload), t) + payload + b"\0" * (-len(payload) % 4)
-
-def msg(family, cmd, payload, seq):
-    g = struct.pack("BBH", cmd, 0, 0) + payload
-    return struct.pack("IHHII", 16 + len(g), family, NLM_F_REQUEST | NLM_F_ACK, seq, 0) + g
-
-def attrs_of(buf):
-    out, i = {}, 0
-    while i + 4 <= len(buf):
-        ln, t = struct.unpack_from("HH", buf, i)
-        if ln < 4:
-            break
-        out[t] = buf[i + 4:i + ln]
-        i += (ln + 3) & ~3
-    return out
-
-s = socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, NETLINK_GENERIC)
-s.bind((0, 0))
-s.settimeout(3)
-
-# Replies are matched on sequence number: a request made with NLM_F_ACK is
-# answered by the reply *and* a trailing ACK, and taking whatever arrives next
-# would read the family lookup's ACK as the testmode result.
-s.send(msg(GENL_ID_CTRL, CTRL_CMD_GETFAMILY, nla(CTRL_ATTR_FAMILY_NAME, b"nl80211\0"), 1))
-fam = None
-try:
-    while fam is None:
-        data = s.recv(65535)
-        ln, mtype, _, seq, _ = struct.unpack_from("IHHII", data, 0)
-        if seq != 1:
-            continue
-        if mtype == NLMSG_ERROR:
-            err = struct.unpack_from("i", data, 16)[0]
-            if err == 0:
-                continue
-            sys.exit("nl80211 lookup: %s" % os.strerror(-err))
-        a = attrs_of(data[20:ln])
-        if CTRL_ATTR_FAMILY_ID in a:
-            fam = struct.unpack("H", a[CTRL_ATTR_FAMILY_ID][:2])[0]
-except socket.timeout:
-    sys.exit("nl80211 lookup timed out")
-if not fam:
-    sys.exit("no nl80211 generic netlink family")
-
-try:
-    idx = socket.if_nametoindex(ifname)
-except OSError as e:
-    sys.exit("%s: %s" % (ifname, e))
-
-# struct testmode_cmd_suspend {u32 idx; u32 buflen; u8 suspend;} - 12 bytes
-# once the compiler has padded it out to its 4-byte alignment, which is the
-# size the driver expects.
-testdata = struct.pack("IIB", TESTMODE_CMD_ID_SUSPEND, 0, suspend) + b"\0" * 3
-payload = nla(NL80211_ATTR_IFINDEX, struct.pack("I", idx)) + \
-          nla(NL80211_ATTR_TESTDATA, testdata)
-s.send(msg(fam, NL80211_CMD_TESTMODE, payload, 2))
-try:
-    while True:
-        data = s.recv(65535)
-        _, mtype, _, seq, _ = struct.unpack_from("IHHII", data, 0)
-        if seq != 2:
-            continue
-        if mtype == NLMSG_ERROR:
-            err = struct.unpack_from("i", data, 16)[0]
-            if err == 0:
-                break
-            sys.exit("TESTMODE suspend=%d: %s" % (suspend, os.strerror(-err)))
-        if mtype == NLMSG_DONE:
-            break
-except socket.timeout:
-    sys.exit("TESTMODE suspend=%d timed out" % suspend)
-PY
-}
-
 # Some drivers have no screen-off command at all. MediaTek's older gen2
-# (mindphone, MT6739) answers a private command set of three - GET_WIFI_TYPE,
-# SETALWAYSSCANSTATE, SET_CHIP - and rejects SETSUSPENDMODE with EINVAL, so
-# nothing tells its firmware to stop handing packets to the host. Its RX
-# interrupt takes a wakelock each time, measured at 21 per second with the
-# screen off and the phone idle, and the suspend handshake can never win
-# against that: sleepd's every write to /sys/power/state returns EBUSY and the
-# device stays awake at about 283 mA, for ever.
-#
-# With the interface down the same counter falls to 1 per second and the phone
-# suspends normally: measured on mindphone 2026-09-21, 4 suspends in a 957 s
-# window, 948 s of it asleep, longest 588 s, against zero suspends in the run
-# before it.
+# (mindphone, MT6739) is detected by mtk-wifi-suspend, which returns failure
+# there so the interface-down path is used: measured on mindphone 2026-09-21,
+# 4 suspends in a 957 s window, 948 s of it asleep, longest 588 s.
 #
 # So where the driver cannot filter, take the station interface down instead.
 # That is only acceptable because nothing is being given up: this chip
@@ -402,6 +272,36 @@ sleep_off() {
     fi
 }
 
+GOVMARK=/run/wlan-suspend-mode.governors
+
+# Save each CPU's current scaling_governor and switch to powersave.
+# Idempotent: does nothing if the save file already exists.
+cpufreq_save_and_set() {
+    [ -e "$GOVMARK" ] && return 0
+    for f in /sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_governor; do
+        [ -f "$f" ] || continue
+        cpu=${f%/cpufreq/scaling_governor}; cpu=${cpu##*/cpu}
+        gov=$(cat "$f" 2>/dev/null) || continue
+        printf '%s=%s\n' "$cpu" "$gov"
+    done > "$GOVMARK"
+    for f in /sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_governor; do
+        [ -f "$f" ] || continue
+        echo powersave > "$f" 2>/dev/null || true
+    done
+    log "$1 -> cpufreq -> powersave"
+}
+
+# Restore saved governors and remove the save file.
+cpufreq_restore() {
+    [ -e "$GOVMARK" ] || return 0
+    while IFS='=' read -r cpu gov; do
+        f="/sys/devices/system/cpu/cpu${cpu}/cpufreq/scaling_governor"
+        [ -f "$f" ] && echo "$gov" > "$f" 2>/dev/null || true
+    done < "$GOVMARK"
+    rm -f "$GOVMARK"
+    log "$1 -> cpufreq -> restored"
+}
+
 apply() {  # $1 = suspendmode|normal, $2 = reason
     if [ "$1" = normal ]; then
         # Before anything else, and also when already normal: the sleep timer
@@ -411,6 +311,11 @@ apply() {  # $1 = suspendmode|normal, $2 = reason
     fi
     if [ "$1" = "$cur" ]; then log "$2 -> already $1"; return; fi
     if [ "$1" = suspendmode ]; then n=1; else n=0; fi
+
+    # CPU governor follows display state: powersave while screen is off,
+    # restore to saved governor when it comes back on.
+    if [ "$n" = 1 ]; then cpufreq_save_and_set "$2"; else cpufreq_restore "$2"; fi
+
     # Not on gen3 (Titan, Titan Pocket): it has no SET_MDTIM, and its private
     # command handler logs "Unknown driver command ... - ignored" and still
     # returns success (gl_wext_priv.c, priv_driver_cmds), so sending it there
@@ -423,39 +328,20 @@ apply() {  # $1 = suspendmode|normal, $2 = reason
             log "$2 -> SET_MDTIM 0 $MDTIM FAILED"
         fi
     fi
-    # gen2 (mindphone, MT6739) has no SETSUSPENDMODE either. It used to be
-    # rejected with EINVAL, but only because the request went out in the
-    # Qualcomm layout; since /dev/wmtWifi selects the MediaTek layout (for a
-    # built-in gen4m), gen2 takes the request, logs "Unknown driver command
-    # SETSUSPENDMODE 1 - ignored" and returns success (read on the mindphone,
-    # 13 Nov 2026). The success then skipped the interface-down fallback below,
-    # which is what lets this phone sleep at all, so do not ask it.
-    if [ -d /sys/module/wlan_drv_gen2 ]; then
-        err="gen2 has no SETSUSPENDMODE (it ignores the command and reports success)"
-    elif err=$(drvcmd "SETSUSPENDMODE $n" 2>&1); then
-        cur=$1; echo "$1" > $STATE; log "$2 -> SETSUSPENDMODE $n ok (mode=$1)"
+    # mtk-wifi-suspend tries SETSUSPENDMODE via SIOCDEVPRIVATE+1 (auto-layout)
+    # first, then NL80211 testmode CMD_ID 101.  Gen2 (wlan_drv_gen2) accepts
+    # both but filters nothing; the binary returns failure there so the
+    # interface-down path below is used instead.
+    # return 0, not bare return: the [ "$n" = 1 ] test below is the last
+    # command run before the return, and it is FALSE when n=1, so a bare
+    # return would exit 1 from the successful suspend path.
+    if err=$(mtk-wifi-suspend "$IF" "$n" 2>&1); then
+        cur=$1; echo "$1" > $STATE; log "$2 -> wifi-suspend suspend=$n ok (mode=$1)"
         [ "$n" = 1 ] && arm_sleep_off "$2"
         [ "$n" = 0 ] && undo_iface_down "$2"
-        # return 0, not a bare return: the test above is the last command run,
-        # and it is FALSE whenever n is 1, so a bare return hands back 1 from
-        # the path that just succeeded. The manual CLI form exits on that
-        # status, so "wlan-suspend-mode off" reported failure every time it
-        # worked (measured on radon: SETSUSPENDMODE 1 ok, rc=1).
         return 0
     fi
-    log "$2 -> SETSUSPENDMODE $n failed (${err:-no detail})"
-
-    # Same request, different transport. Opt-in only: accepted is not the same
-    # as honoured, and on the one chip measured so far it is much worse than
-    # the fallback below.
-    if [ "$WLAN_TESTMODE" != never ]; then
-        if err=$(testmode_cmd "$n" 2>&1); then
-            cur=$1; echo "$1" > $STATE; log "$2 -> testmode suspend=$n ok (mode=$1)"
-            [ "$n" = 0 ] && undo_iface_down "$2"
-            return 0
-        fi
-        log "$2 -> testmode suspend=$n failed (${err:-no detail})"
-    fi
+    log "$2 -> wifi-suspend suspend=$n failed (${err:-no detail})"
 
     # Only now is there genuinely no way to make the firmware filter.
     if ! iface_down_allowed; then
