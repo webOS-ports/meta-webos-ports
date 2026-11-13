@@ -21,8 +21,19 @@
 # late or not at all, and regenerating each boot keeps them correct if the
 # vendor partition is ever replaced.
 OUT=/etc/udev/rules.d/70-android.rules
-SRC="/ueventd.rc /ueventd.*.rc /vendor/ueventd.rc /vendor/ueventd.*.rc
-     /system/etc/ueventd.rc /odm/ueventd.rc
+
+# In the order ueventd reads them, because the order decides (see below):
+# the platform's file first, then the vendor's and the ODM's, then the
+# per-hardware ones. Android 10 moved the vendor's and the ODM's files into
+# etc/; older vendors keep them at the partition root, so both are listed. Only
+# the root ones used to be, and on a vendor that has just the etc/ file - the
+# BraX3's iodeOS 7.9, Android 16 - this read nothing but /system/etc/ueventd.rc:
+# 7 rules instead of the vendor's 110, so every MediaTek modem node, the audio
+# HAL's /dev/ccci_aud among them, stayed root:root 0600.
+SRC="/system/etc/ueventd.rc /ueventd.rc
+     /vendor/etc/ueventd.rc /vendor/ueventd.rc
+     /odm/etc/ueventd.rc /odm/ueventd.rc
+     /ueventd.*.rc /vendor/ueventd.*.rc
      /var/lib/lxc/android/rootfs/ueventd.rc /var/lib/lxc/android/rootfs/ueventd.*.rc"
 
 mkdir -p /etc/udev/rules.d
@@ -43,6 +54,7 @@ mkdir -p /etc/udev/rules.d
 # is mounted and a missing ueventd.rc is not coming.
 i=0
 while [ $i -lt 60 ]; do
+    [ -r /vendor/etc/ueventd.rc ] && break
     [ -r /vendor/ueventd.rc ] && break
     [ -e /vendor/build.prop ] && break
     sleep 1
@@ -91,6 +103,13 @@ fi
     # left alone. OWNER/GROUP/MODE are assignments, so a single '=' - the
     # pipeline in the Halium docs uses '==' there, which would quietly match
     # nothing instead of applying anything.
+    #
+    # Kept in file order, with exact repeats dropped: ueventd applies the last
+    # rule that matches a node, and udev's later assignments override earlier
+    # ones the same way, so the order carries the meaning over. Sorting did
+    # not: it put "foo" ahead of "foo*", the wildcard then won, and which of
+    # two files' rules applied came down to the alphabet. The BraX3's vendor
+    # gives /dev/ccci* to radio and then /dev/ccci_aud to audio.
     cat $FOUND 2>/dev/null \
       | tr -d '\r' \
       | grep '^/dev/' \
@@ -101,7 +120,7 @@ fi
               # same way, so the pattern carries over unchanged.
               printf "ACTION==\"add\", KERNEL==\"%s\", OWNER=\"%s\", GROUP=\"%s\", MODE=\"%s\"\n", path, $3, $4, $2
             }' \
-      | sort -u \
+      | awk '!seen[$0]++' \
       | while IFS= read -r rule; do
             k=$(printf '%s' "$rule" | sed -n 's/.*KERNEL=="\([^"]*\)".*/\1/p')
             grep -qxF "$k" "$COVERED" 2>/dev/null && continue
