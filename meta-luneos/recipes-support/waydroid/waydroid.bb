@@ -16,7 +16,7 @@ PV = "${SPV}"
 # Bumped whenever the shipped patches or helper scripts change: they alter what
 # the package contains without moving SRCREV or PV, so without this an already
 # installed waydroid stays at the previous build. Reset at the 1.6.3 move.
-PR = "r23"
+PR = "r24"
 
 # Pre-installed images, for machines whose system/vendor pairing is frozen.
 #
@@ -81,6 +81,10 @@ RDEPENDS:${PN} += "luna-service2 python3-json python3-compression python3-shell 
 # downloadmgr does the transfer when it is there; without it Waydroid falls
 # back to fetching the images itself, as upstream does, with no progress shown.
 RRECOMMENDS:${PN} += "luna-downloadmgr"
+# F-Droid in Android from the first boot, as a system app with the privileged
+# extension. Recommended rather than required, so an image can leave it out
+# with BAD_RECOMMENDATIONS.
+RRECOMMENDS:${PN} += "waydroid-fdroid"
 
 # The package varies by machine - WAYDROID_IMAGE_RDEPENDS decides whether it
 # pulls waydroid-data, and mindphone gets a config file nothing else does. That
