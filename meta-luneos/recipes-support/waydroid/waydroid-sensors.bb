@@ -13,10 +13,10 @@ SECTION = "webos/support"
 # No tags upstream; this is main as of 2026-09-02.
 SRCREV = "2f4791750b6b634aa0d52e38355d7c77a0694700"
 PV = "0.2.0+git"
-PR = "r0"
+PR = "r1"
 
 SRC_URI = "git://github.com/waydroid/waydroid-sensors.git;branch=main;protocol=https \
-    file://waydroid-sensors.service \
+    file://0001-sensorfw-reconnect-when-sensorfw-closes-the-socket-i.patch \
 "
 
 # The RPM packaging carried over from Sailfish also asks for Qt5Core and
@@ -37,7 +37,7 @@ COMPATIBLE_MACHINE:pinephonepro = "(.*)"
 COMPATIBLE_MACHINE:pinetab2 = "(.*)"
 COMPATIBLE_MACHINE:qemux86-64 = "(.*)"
 
-inherit cmake pkgconfig webos_systemd
+inherit cmake pkgconfig
 
 # Upstream still asks for cmake_minimum_required(VERSION 3.0), which CMake 4
 # refuses outright rather than warning about. Nothing in the project depends on
@@ -46,11 +46,11 @@ inherit cmake pkgconfig webos_systemd
 # tree.
 EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
 
-WEBOS_SYSTEMD_SERVICE = "waydroid-sensors.service"
-
-do_install:append() {
-    install -d ${D}${systemd_system_unitdir}
-    install -m 0644 ${UNPACKDIR}/waydroid-sensors.service ${D}${systemd_system_unitdir}
-}
+# No systemd unit. Waydroid starts the daemon itself when it brings a container
+# up and kills it when the container stops (container_manager.py), which is the
+# only time there is an ISensors client to answer. A unit of our own ran a
+# second copy for the whole uptime: with no container it pinged the absent
+# servicemanager once a second, and the extra copy is what broke Waydroid's
+# pidof-based kill, so every container start leaked another daemon.
 
 RDEPENDS:${PN} += "sensorfw"
