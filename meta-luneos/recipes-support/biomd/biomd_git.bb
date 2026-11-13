@@ -14,8 +14,8 @@ LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://debian/copyright;md5=a8c8bc0f09b5c02c7332dcda700ec1dc"
 
 # libfart is here even though WITH_FACE=0 below drops it from the daemon's
-# link: biomd-session's session_face.c includes <fart/fart_enums.h>, so the
-# headers are needed to compile it. It is a build-time dependency only -
+# link: face.c and biomd-session's session_face.c include <fart/fart_enums.h>,
+# so the headers are needed to compile them. It is a build-time dependency only -
 # nothing links libfart in this configuration, so neither opencv nor
 # tensorflow-lite ends up in the image.
 DEPENDS = "glib-2.0 libgbinder sqlite3 openssl gstreamer1.0 libpam libfart"
@@ -25,7 +25,7 @@ SRCREV = "d6ba5fedc7e9d2aa44a9207ced4008df13b30a72"
 SRC_URI = " \
     git://github.com/FuriLabs/biomd.git;protocol=https;branch=forky \
     file://0001-Makefile-make-toolchain-flags-and-install-paths-over.patch \
-    file://0002-Makefile-allow-building-without-the-face-backend.patch \
+    file://0002-face-allow-building-without-the-FART-backend.patch \
     file://0003-fingerprint-accept-free-form-finger-names.patch \
     file://0004-fingerprint-add-an-AIDL-backend.patch \
     file://0005-fingerprint-survive-a-restarted-Gatekeeper-HAL-in-th.patch \
@@ -42,11 +42,13 @@ inherit pkgconfig systemd
 
 # WITH_FACE=0: fingerprint only for now, so we do not drag libfart - and with it
 # opencv and tensorflow-lite - into the image for a subsystem nothing calls yet.
+# biomd then builds a disabled face backend: the Face interface stays on the
+# bus, reports ImplementationType 0 and answers its methods with NotSupported.
 # It is not merely weight: libtensorflow-lite.so as built here does not record
 # its dependency on abseil, so linking an executable against it fails on
 # undefined absl::log_internal symbols. That has to be fixed in the
 # libtensorflow-lite recipe before the face half can work at all; flip this to 1
-# and add libfart back to DEPENDS once it is.
+# once it is.
 EXTRA_OEMAKE = " \
     PREFIX=${prefix} \
     LIBDIR=${libdir} \
