@@ -1,49 +1,57 @@
-From 640b72ee5adefdcb319e5c9d1a9b517b741d1917 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Herman van Hazendonk <github.com@herrie.org>
-Date: Fri, 4 Sep 2026 09:14:08 +0200
-Subject: [PATCH 1/2] Add Db8Predictor: a DictionaryPredictor backed by webOS
- db8
+Date: Fri, 13 Nov 2026 17:16:12 +0100
+Subject: [PATCH] Add Db8Predictor: a DictionaryPredictor backed by webOS db8
 
 Same idea as DictionaryPredictor - prefix-match tokens out of a word
 list - except the word list lives in webOS's db8 rather than a flat
-file. A standing db8 subscription (luna://com.palm.db/find,
-subscribe:true) keeps an in-memory copy of the current word list up
-to date; predict() only ever reads that copy, so a keystroke never
-waits on the bus, and a restore that repopulates db8 (which always
-ends in a reboot on this platform) is picked up automatically the
-next time this predictor is constructed - no separate file to
-regenerate.
+file: the user dictionary that Text Assist in
+org.webosports.app.settings keeps in the kind
+org.webosports.app.settings.dictionary:1. predict() only ever reads an
+in-memory copy of that list, so a keystroke never waits on the bus.
+Configured the same way as DictionaryPredictor, with KIND (a db8 kind
+name) in place of DICTIONARY and the same PROBABILITY, and activated in
+presage.xml.template as UserDictionaryPredictor.
 
-Configured the same way DictionaryPredictor is, with KIND (a db8
-kind name) in place of DICTIONARY (a file path) and the same
-PROBABILITY.
+Keeping the copy current: a find with "watch":true delivers a single
+"fired" notification in practice, and re-registering the watch from its
+own handler loops (over ten thousand iterations in under a second on a
+device, with mojodb pinned). So the copy is refreshed by a plain 30 s
+poll timer; the find+watch only stays as a fast path for the first
+change after startup.
 
-luna-service2 and json-c are only ever available (and only ever
-needed) for the target build - this recipe also builds a native
-variant for build-time tools like text2ngram, which must keep
-configuring and building without them, so detection is non-fatal
-and Db8Predictor drops out of the build entirely (USE_DB8PREDICTOR)
-if either is missing, the same way USE_SQLITE already does for
-optional SQLite support.
+The poll timer and the watch both carry the predictor as their context,
+and presage builds a new predictor for every keyboard language. Both are
+removed in the destructor, before LSUnregister() drops any refresh
+still in flight; a timer left behind fired into the freed predictor
+30 s after a language switch and killed MaliitServer (BraX3,
+13 Nov 2026). A new kind replaces the old watch instead of adding one.
+
+luna-service2 and json-c are only available, and only needed, for the
+target build. The native variant used for build-time tools such as
+text2ngram must keep building without them, so detection is non-fatal
+and Db8Predictor drops out of the build (USE_DB8PREDICTOR) if either is
+missing, the same way USE_SQLITE does for SQLite.
 
 Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
 Upstream-Status: Inappropriate [webOS-ports specific]
 ---
- configure.ac                        |  29 ++++
- src/lib/core/Makefile.am            |   7 +
- src/lib/core/predictorRegistry.cpp  |   9 ++
- src/lib/predictors/Makefile.am      |  12 +-
- src/lib/predictors/db8Predictor.cpp | 207 ++++++++++++++++++++++++++++
- src/lib/predictors/db8Predictor.h   |  82 +++++++++++
- 6 files changed, 345 insertions(+), 1 deletion(-)
+ configure.ac                            |  29 +++
+ resources/profiles/presage.xml.template |  15 +-
+ src/lib/core/Makefile.am                |   7 +
+ src/lib/core/predictorRegistry.cpp      |   9 +
+ src/lib/predictors/Makefile.am          |  12 +-
+ src/lib/predictors/db8Predictor.cpp     | 292 ++++++++++++++++++++++++
+ src/lib/predictors/db8Predictor.h       | 116 ++++++++++
+ 7 files changed, 478 insertions(+), 2 deletions(-)
  create mode 100644 src/lib/predictors/db8Predictor.cpp
  create mode 100644 src/lib/predictors/db8Predictor.h
 
 diff --git a/configure.ac b/configure.ac
-index c4ee280..1c4e766 100644
+index c933e19..be52a33 100644
 --- a/configure.ac
 +++ b/configure.ac
-@@ -201,6 +201,35 @@ fi
+@@ -198,6 +198,35 @@ fi
  AM_CONDITIONAL([USE_SQLITE], [test "x$use_sqlite" = "xyes"])
  
  
@@ -79,6 +87,39 @@ index c4ee280..1c4e766 100644
  dnl ==================
  dnl Checks for CppUnit
  dnl ==================
+diff --git a/resources/profiles/presage.xml.template b/resources/profiles/presage.xml.template
+index 9b5db66..f4a32db 100644
+--- a/resources/profiles/presage.xml.template
++++ b/resources/profiles/presage.xml.template
+@@ -5,7 +5,7 @@
+         <!-- PREDICTORS
+ 	     Space separated list of predictors to use to generate predictions
+         -->
+-        <PREDICTORS>DefaultAbbreviationExpansionPredictor DefaultSmoothedNgramPredictor UserSmoothedNgramPredictor DefaultRecencyPredictor</PREDICTORS>
++        <PREDICTORS>DefaultAbbreviationExpansionPredictor DefaultSmoothedNgramPredictor UserSmoothedNgramPredictor DefaultRecencyPredictor UserDictionaryPredictor</PREDICTORS>
+     </PredictorRegistry>
+     <ContextTracker>
+         <LOGGER>ERROR</LOGGER>
+@@ -119,6 +119,19 @@
+             <!-- fixed probability assigned to prediction -->
+             <PROBABILITY>0.000001</PROBABILITY>
+         </DefaultDictionaryPredictor>
++        <!-- webOS-ports: org.webosports.app.settings' Text Assist page keeps
++             its user dictionary in db8, under this kind. A short,
++             user-curated list, so a much higher fixed probability than
++             DefaultDictionaryPredictor's ~100k-word system dictionary above
++             gets - these are words the user explicitly asked for. Falls out
++             of the build entirely (USE_DB8PREDICTOR) wherever
++             luna-service2/json-c are not available, e.g. presage-native. -->
++        <UserDictionaryPredictor>
++            <PREDICTOR>Db8Predictor</PREDICTOR>
++            <LOGGER>ERROR</LOGGER>
++            <KIND>org.webosports.app.settings.dictionary:1</KIND>
++            <PROBABILITY>0.0001</PROBABILITY>
++        </UserDictionaryPredictor>
+         <DefaultAbbreviationExpansionPredictor>
+             <PREDICTOR>AbbreviationExpansionPredictor</PREDICTOR>
+             <LOGGER>ERROR</LOGGER>
 diff --git a/src/lib/core/Makefile.am b/src/lib/core/Makefile.am
 index c660c31..19b328f 100644
 --- a/src/lib/core/Makefile.am
@@ -156,10 +197,10 @@ index ea2a870..c37de0a 100644
  					dummyPredictor.h           
 diff --git a/src/lib/predictors/db8Predictor.cpp b/src/lib/predictors/db8Predictor.cpp
 new file mode 100644
-index 0000000..3d36e06
+index 0000000..79dd202
 --- /dev/null
 +++ b/src/lib/predictors/db8Predictor.cpp
-@@ -0,0 +1,207 @@
+@@ -0,0 +1,292 @@
 +/******************************************************
 + *  Presage, an extensible predictive text entry system
 + *  ---------------------------------------------------
@@ -202,6 +243,8 @@ index 0000000..3d36e06
 +	     "Db8Predictor, a dictionary based predictor that generates a prediction by extracting tokens that start with the current prefix from a webOS db8 kind"
 +	     ),
 +      serviceHandle (0),
++      pollSource (0),
++      watchToken (LSMESSAGE_TOKEN_INVALID),
 +      dispatcher (this)
 +{
 +    LOGGER      = PREDICTORS + name + ".LOGGER";
@@ -218,9 +261,25 @@ index 0000000..3d36e06
 +
 +Db8Predictor::~Db8Predictor()
 +{
++    // Stop the timer first: it is the one thing that would still run this
++    // object's code from the main loop once the destructor returns.
++    if (pollSource) {
++        g_source_remove(pollSource);
++        pollSource = 0;
++    }
++
 +    if (serviceHandle) {
 +        LSError error;
 +        LSErrorInit(&error);
++        if (watchToken != LSMESSAGE_TOKEN_INVALID &&
++            !LSCallCancel(serviceHandle, watchToken, &error)) {
++            logger << ERROR << "LSCallCancel failed: " << error.message << endl;
++            LSErrorFree(&error);
++            LSErrorInit(&error);
++        }
++        watchToken = LSMESSAGE_TOKEN_INVALID;
++        // Also drops the one-shot refresh calls still in flight, so their
++        // replies never reach findCallback with this object as context.
 +        if (!LSUnregister(serviceHandle, &error)) {
 +            logger << ERROR << "LSUnregister failed: " << error.message << endl;
 +            LSErrorFree(&error);
@@ -240,14 +299,26 @@ index 0000000..3d36e06
 +        return;
 +    }
 +
-+    if (!LSGmainAttach(serviceHandle, g_main_loop_new(g_main_context_default(), TRUE), &error)) {
++    // LSGmainAttach only uses the loop to find its context, so the loop
++    // itself can go straight away instead of leaking one per predictor.
++    GMainLoop* loop = g_main_loop_new(g_main_context_default(), FALSE);
++    const bool attached = LSGmainAttach(serviceHandle, loop, &error);
++    g_main_loop_unref(loop);
++    if (!attached) {
 +        logger << ERROR << "LSGmainAttach failed: " << error.message << endl;
 +        LSErrorFree(&error);
 +        return;
 +    }
 +
++    // The actual freshness mechanism - see the header comment for why this
++    // exists instead of relying on watch alone. Registered exactly once,
++    // for the life of this predictor; pollCallback no-ops until kind is
++    // known.
++    // Removed again in the destructor (see pollSource).
++    pollSource = g_timeout_add_seconds(POLL_INTERVAL_SECONDS, Db8Predictor::pollCallback, this);
++
 +    if (!kind.empty())
-+        findWords();
++        findWordsAndWatch();
 +}
 +
 +void Db8Predictor::set_kind (const std::string& value)
@@ -256,7 +327,7 @@ index 0000000..3d36e06
 +    logger << INFO << "KIND: " << value << endl;
 +
 +    if (serviceHandle)
-+        findWords();
++        findWordsAndWatch();
 +}
 +
 +
@@ -266,12 +337,43 @@ index 0000000..3d36e06
 +    logger << INFO << "PROBABILITY: " << value << endl;
 +}
 +
-+void Db8Predictor::findWords()
++// Registers ONE long-lived find, with "watch":true alongside "query" (the
++// db8 API's actual live-notification flag - see the header comment). Call
++// this exactly once per kind: the subscription it creates keeps delivering
++// "fired" notifications on its own for as long as it stays open, so it
++// must never be re-registered from inside handleFindResult().
++void Db8Predictor::findWordsAndWatch()
 +{
 +    LSError error;
 +    LSErrorInit(&error);
 +
-+    std::string payload = "{\"subscribe\":true,\"query\":{\"from\":\"" + kind + "\",\"orderBy\":\"word\"}}";
++    std::string payload = "{\"query\":{\"from\":\"" + kind + "\",\"orderBy\":\"word\"},\"watch\":true}";
++
++    // A new kind replaces the watch on the old one rather than adding to it.
++    if (watchToken != LSMESSAGE_TOKEN_INVALID) {
++        if (!LSCallCancel(serviceHandle, watchToken, &error)) {
++            logger << ERROR << "LSCallCancel failed: " << error.message << endl;
++            LSErrorFree(&error);
++            LSErrorInit(&error);
++        }
++        watchToken = LSMESSAGE_TOKEN_INVALID;
++    }
++
++    if (!LSCall(serviceHandle, "luna://com.palm.db/find", payload.c_str(),
++                Db8Predictor::findCallback, this, &watchToken, &error)) {
++        logger << ERROR << "com.palm.db/find failed: " << error.message << endl;
++        LSErrorFree(&error);
++    }
++}
++
++// One-shot refresh, no watch - used to pick up what changed once the
++// standing subscription above reports a fired notification.
++void Db8Predictor::refreshWords()
++{
++    LSError error;
++    LSErrorInit(&error);
++
++    std::string payload = "{\"query\":{\"from\":\"" + kind + "\",\"orderBy\":\"word\"}}";
 +
 +    if (!LSCall(serviceHandle, "luna://com.palm.db/find", payload.c_str(),
 +                Db8Predictor::findCallback, this, NULL, &error)) {
@@ -306,27 +408,51 @@ index 0000000..3d36e06
 +    }
 +
 +    json_object* resultsObj = 0;
-+    if (!json_object_object_get_ex(root, "results", &resultsObj) ||
-+        !json_object_is_type(resultsObj, json_type_array)) {
-+        json_object_put(root);
-+        return;
++    if (json_object_object_get_ex(root, "results", &resultsObj) &&
++        json_object_is_type(resultsObj, json_type_array)) {
++        std::vector<std::string> newWords;
++        const size_t count = json_object_array_length(resultsObj);
++        for (size_t i = 0; i < count; i++) {
++            json_object* entry = json_object_array_get_idx(resultsObj, i);
++            json_object* wordObj = 0;
++            if (entry && json_object_object_get_ex(entry, "word", &wordObj) &&
++                json_object_is_type(wordObj, json_type_string)) {
++                newWords.push_back(json_object_get_string(wordObj));
++            }
++        }
++
++        words = newWords;
++        logger << INFO << "Loaded " << words.size() << " words from " << kind << endl;
 +    }
 +
-+    std::vector<std::string> newWords;
-+    int count = json_object_array_length(resultsObj);
-+    for (int i = 0; i < count; i++) {
-+        json_object* entry = json_object_array_get_idx(resultsObj, i);
-+        json_object* wordObj = 0;
-+        if (entry && json_object_object_get_ex(entry, "word", &wordObj) &&
-+            json_object_is_type(wordObj, json_type_string)) {
-+            newWords.push_back(json_object_get_string(wordObj));
-+        }
-+    }
++    // The find+watch subscription's later replies carry "fired":true when
++    // the result set changes, and may or may not repeat "results" - fetch
++    // it explicitly with a plain one-shot find rather than relying on
++    // that. This does NOT re-register the watch: the original find+watch
++    // call stays open and keeps delivering future fired notifications by
++    // itself. (Re-registering here was the infinite-loop bug - see the
++    // header comment.)
++    json_object* firedObj = 0;
++    bool fired = json_object_object_get_ex(root, "fired", &firedObj)
++                 && json_object_get_boolean(firedObj);
 +
 +    json_object_put(root);
 +
-+    words = newWords;
-+    logger << INFO << "Loaded " << words.size() << " words from " << kind << endl;
++    if (fired)
++        refreshWords();
++}
++
++// Fires on a fixed POLL_INTERVAL_SECONDS cadence for the life of this
++// predictor - see the header comment for why this, and not watch alone,
++// is what actually keeps words current. Returns TRUE (via G_SOURCE_CONTINUE)
++// unconditionally so glib keeps calling it; it cannot loop tighter than
++// its own fixed interval, unlike re-arming a watch from its own handler.
++gboolean Db8Predictor::pollCallback(gpointer ctx)
++{
++    Db8Predictor* self = static_cast<Db8Predictor*>(ctx);
++    if (!self->kind.empty())
++        self->refreshWords();
++    return G_SOURCE_CONTINUE;
 +}
 +
 +Prediction Db8Predictor::predict(const size_t max_partial_predictions_size, const char** filter) const
@@ -369,10 +495,10 @@ index 0000000..3d36e06
 +}
 diff --git a/src/lib/predictors/db8Predictor.h b/src/lib/predictors/db8Predictor.h
 new file mode 100644
-index 0000000..16cc441
+index 0000000..e9b2715
 --- /dev/null
 +++ b/src/lib/predictors/db8Predictor.h
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,116 @@
 +/******************************************************
 + *  Presage, an extensible predictive text entry system
 + *  ---------------------------------------------------
@@ -402,6 +528,7 @@ index 0000000..16cc441
 +#include "../core/dispatcher.h"
 +
 +#include <luna-service2/lunaservice.h>
++#include <glib.h>
 +
 +#include <vector>
 +#include <string>
@@ -419,6 +546,29 @@ index 0000000..16cc441
 + * property - the shape org.webosports.app.settings' Text Assist page
 + * already keeps its user dictionary in). PROBABILITY works the same
 + * way DictionaryPredictor's does.
++ *
++ * db8's find does NOT push live updates for "subscribe":true the way
++ * getPreferences-style calls do - confirmed empirically, a subscribed
++ * find just sits there after its one reply. find also accepts a
++ * "watch":true flag alongside "query" (see the official db8 reference)
++ * whose reply, later, carries "fired":true when the result set changes
++ * - but that too is one-shot in practice: confirmed live on-device, it
++ * delivered exactly one "fired" notification for the first change after
++ * registration and nothing for the two changes after that, despite the
++ * original call staying open throughout. (An earlier version of this
++ * file tried re-registering a fresh watch from inside its own fired
++ * handler to keep listening. A watch registered against a kind that
++ * already has matching rows apparently has no prior state to compare
++ * against, so it reports fired immediately - re-registering it from the
++ * fired handler is an infinite tight loop, confirmed live on-device:
++ * over ten thousand iterations in under a second, ~87% CPU pinned on
++ * mojodb. Do not reintroduce that pattern.)
++ *
++ * So the actual freshness mechanism here is a plain poll timer
++ * (POLL_INTERVAL_SECONDS, via glib) that re-fetches on a fixed cadence
++ * no matter what watch does - simple, and it cannot loop. The one-shot
++ * watch is kept only as a fast path: it typically beats the timer to
++ * the first change made right after a restart.
 + */
 +class Db8Predictor : public Predictor, public Observer {
 +public:
@@ -436,10 +586,14 @@ index 0000000..16cc441
 +
 +private:
 +    void connect();
-+    void findWords();
++    void findWordsAndWatch();
++    void refreshWords();
 +    void handleFindResult(const char* payload);
 +
 +    static bool findCallback(LSHandle* handle, LSMessage* message, void* ctx);
++    static gboolean pollCallback(gpointer ctx);
++
++    static const unsigned int POLL_INTERVAL_SECONDS = 30;
 +
 +    std::string LOGGER;
 +    std::string KIND;
@@ -449,6 +603,12 @@ index 0000000..16cc441
 +    double probability;
 +
 +    LSHandle* serviceHandle;
++    // The poll timer and the standing find+watch call both carry this
++    // predictor as their context, so both have to go before it does:
++    // presage builds a new predictor for every keyboard language, and a
++    // timer left behind fired into the freed one 30 s after a switch.
++    guint pollSource;
++    LSMessageToken watchToken;
 +    std::vector<std::string> words;
 +
 +    Dispatcher<Db8Predictor> dispatcher;
