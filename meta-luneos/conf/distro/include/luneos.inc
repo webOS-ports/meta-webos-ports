@@ -87,9 +87,6 @@ BUILDCFG_VARS += "WEBOS_DISTRO_LUNEUI_DESCRIBE"
 WEBOS_COMPAT_VERSION ?= "3.0.5"
 BUILDCFG_VARS += "WEBOS_COMPAT_VERSION"
 
-# Add build timestamp to what's displayed in build-id.txt for use in pruning script
-BUILDCFG_VARS += "DATETIME"
-
 # Add the same variables from BUILDCFG_VARS to /etc/buildinfo as well
 IMAGE_BUILDINFO_VARS = "${BUILDCFG_VARS}"
 
