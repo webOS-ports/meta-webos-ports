@@ -32,8 +32,6 @@ SRC_URI = " \
     file://0004-Fix-build-with-gcc-11.patch \
     file://0005-configure.ac-don-t-use-L-usr-local-lib-in-LDFLAGS.patch \
     file://0006-Add-Db8Predictor.patch \
-    file://0007-presage-xml-Db8Predictor.patch \
-    file://0008-Db8Predictor-poll-for-dictionary-changes.patch \
 "
 
 SRC_URI[md5sum] = "9667be297912fa0d432e748526d8dd9e"
