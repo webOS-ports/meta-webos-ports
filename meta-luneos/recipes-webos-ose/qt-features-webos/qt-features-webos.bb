@@ -25,6 +25,7 @@ SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
     file://0004-generate_qmap-add-the-phone-toolbelt-keys.patch \
     file://0005-generate_qmap-add-the-emoji-picker-key.patch \
     file://0006-generate_qmap-add-the-camera-and-programmable-keys.patch \
+    file://0007-generate_qmap-map-MediaTek-s-programmable-key.patch \
 "
 
 FILES:${PN}-dev += "${OE_QMAKE_PATH_QT_ARCHDATA}/mkspecs"
