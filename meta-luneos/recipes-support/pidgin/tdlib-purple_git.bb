@@ -8,22 +8,21 @@ require purple-connectors.inc
 
 # UnitedMarsupials/tdlib-purple is the maintained continuation of ars3niy/tdlib-purple, which has
 # not moved since 2021 and is stuck on TDLib 1.7.9. The fork follows TDLib's releases (see
-# tdlib_1.8.67.bb; it needs at least 1.8.44). 0001 is a generic fix meant for it; the others, one
-# per feature, adapt the plug-in to imlibpurpletransport, the webOS Messaging app and the Phone app.
+# tdlib_1.8.67.bb; it needs at least 1.8.44). The patches, one per feature, adapt the plug-in to
+# imlibpurpletransport, the webOS Messaging app and the Phone app.
 SRC_URI += " \
     git://github.com/UnitedMarsupials/tdlib-purple.git;branch=master;protocol=https;name=upstream;destsuffix=tdlib-purple \
-    file://0001-Let-libtgvoip-be-given-without-pkg-config.patch \
-    file://0002-webOS-identity-store-and-what-the-transport-needs-pr.patch \
-    file://0003-webOS-reactions-sent-message-ids-delivery-and-read-t.patch \
-    file://0004-webOS-Telegram-calls-through-the-Phone-app-with-tgca.patch \
-    file://0005-webOS-carry-Telegram-calls-with-tgcalls-lite-alone-w.patch \
-    file://0006-webOS-do-what-the-Messaging-app-asks-edit-delete-gro.patch \
-    file://0007-webOS-edit-and-delete-a-received-message-where-it-is.patch \
-    file://0008-webOS-rename-a-group-when-the-Messaging-app-asks.patch \
-    file://0009-webOS-give-the-app-the-id-of-what-we-sent-to-a-group.patch \
-    file://0010-webOS-show-a-poll-s-votes-in-the-Messaging-app-and-a.patch \
-    file://0011-webOS-hand-the-Messaging-app-received-files-file-URI.patch \
-    file://0012-webOS-name-who-a-forward-is-from-whatever-it-came-fr.patch \
+    file://0001-webOS-identity-store-and-what-the-transport-needs-pr.patch \
+    file://0002-webOS-reactions-sent-message-ids-delivery-and-read-t.patch \
+    file://0003-webOS-Telegram-calls-through-the-Phone-app-with-tgca.patch \
+    file://0004-webOS-carry-Telegram-calls-with-tgcalls-lite-alone-w.patch \
+    file://0005-webOS-do-what-the-Messaging-app-asks-edit-delete-gro.patch \
+    file://0006-webOS-edit-and-delete-a-received-message-where-it-is.patch \
+    file://0007-webOS-rename-a-group-when-the-Messaging-app-asks.patch \
+    file://0008-webOS-give-the-app-the-id-of-what-we-sent-to-a-group.patch \
+    file://0009-webOS-show-a-poll-s-votes-in-the-Messaging-app-and-a.patch \
+    file://0010-webOS-hand-the-Messaging-app-received-files-file-URI.patch \
+    file://0011-webOS-name-who-a-forward-is-from-whatever-it-came-fr.patch \
 "
 SRCREV_upstream = "e460589266fa4132c85f270efb4f2c8d332dbcb5"
 
@@ -40,9 +39,9 @@ PE = "5"
 #
 # fmt: the fork takes it from the system (pkg-config fmt) rather than bundling it.
 #
-# tgcalls-lite (0004) carries the calls, in the tgcalls V2 protocol current Telegram clients speak:
+# tgcalls-lite (0003) carries the calls, in the tgcalls V2 protocol current Telegram clients speak:
 # a static library, whose libnice, libsrtp2, json-glib, Opus and PulseAudio references are resolved
-# at this link. libtgvoip is not used (0005, NoTgvoip below).
+# at this link. libtgvoip is not used (0004, NoTgvoip below).
 DEPENDS = "pidgin glib-2.0 zlib openssl fmt tdlib libopus luna-service2 \
            tgcalls-lite libnice libsrtp json-glib pulseaudio"
 
@@ -54,7 +53,7 @@ DEBUG_PREFIX_MAP:append = " -ffile-prefix-map=${UNPACKDIR}=/usr/src/debug/${PN}/
 
 inherit cmake pkgconfig
 
-# NoVoip=OFF keeps calling; NoTgvoip=ON (0005) carries every call with tgcalls-lite and leaves
+# NoVoip=OFF keeps calling; NoTgvoip=ON (0004) carries every call with tgcalls-lite and leaves
 # libtgvoip out. libtgvoip only carried a call when the peer agreed on no tgcalls version, which no
 # current official client does (they all register tgcalls V2, 7.0.0); such a call is now refused.
 #
@@ -72,7 +71,7 @@ inherit cmake pkgconfig
 # lunaservice_* both need overriding. The defaults are the legacy webOS ones (liblunaservice.so);
 # LuneOS ships libluna-service2.so.
 #
-# tgcalls-lite's video (0004) has luneos-rtc-engine
+# tgcalls-lite's video (0003) has luneos-rtc-engine
 # (packagegroup-luneos-extended) decode and, where there is a camera and an encoder, encode the
 # H.264; without the engine on the device a video call stays voice-only.
 EXTRA_OECMAKE = " \
