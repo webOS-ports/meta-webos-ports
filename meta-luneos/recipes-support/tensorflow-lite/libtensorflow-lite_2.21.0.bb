@@ -16,6 +16,11 @@
 #  - KleidiAI (libkleidiai.so) is picked up on aarch64 when built.
 #  - FINSANE_SKIP near the bottom is an upstream typo for INSANE_SKIP; left
 #    as-is to keep this a verbatim mirror.
+#
+# Local addition: 002-link-abseil-log-and-check.patch. Without it
+# libtensorflow-lite.so references abseil's logging without recording the
+# libraries, and an executable linking it - biomd, through libfart - fails to
+# link on undefined absl::log_internal symbols.
 
 DESCRIPTION = "TensorFlow Lite CPP "
 LICENSE = "Apache-2.0"
@@ -36,6 +41,7 @@ SRC_URI = " \
     file://001-remove_unnecessary_modules.patch \
     file://001-Set-CMAKE-SYSTEM-PROCESSOR.patch \
     file://001-flatbuffers.cmake.patch \
+    file://002-link-abseil-log-and-check.patch \
 "
 
 SRC_URI:append:riscv32 = " \
