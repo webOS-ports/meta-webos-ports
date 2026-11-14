@@ -10,6 +10,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 SRC_URI = " \
     file://halium-generate-udev-rules \
     file://halium-udev-rules.service \
+    file://35-container-ueventd \
 "
 
 S = "${UNPACKDIR}"
@@ -29,4 +30,9 @@ do_install() {
 
     install -d ${D}${systemd_system_unitdir}
     install -m 0644 ${UNPACKDIR}/halium-udev-rules.service ${D}${systemd_system_unitdir}/
+
+    # Run by the Android container's pre-start.sh (android-system), after the
+    # vendor tree is mounted and before the container's init starts.
+    install -d ${D}${localstatedir}/lib/lxc/android/pre-start.d
+    install -m 0755 ${UNPACKDIR}/35-container-ueventd ${D}${localstatedir}/lib/lxc/android/pre-start.d/
 }
