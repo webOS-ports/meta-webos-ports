@@ -1,0 +1,84 @@
+From 31aec23fbba3e199ad4f5ec13b8a689263de89fc Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 14 Nov 2026 06:40:46 +0100
+Subject: [PATCH] callmanager: End calls when the radio is turned off
+
+AT+CFUN=4 only switched off registration, so calls that were up stayed
+up with the radio off.  A real modem ends them, and oFono does not end
+them on its own: it waits for the modem to report it, so it went on
+showing calls that could no longer exist.
+
+Once a rule has answered an AT+CFUN=<fun> with <fun> other than 1, hang
+up every call from the network side, the way the GUI's remote hangup
+does: *ECAV with the call ended and NO CARRIER for each, after which
+oFono queries AT+CLCC and drops them.  The rule's response has been
+written by then, so the NO CARRIERs follow the OK and are not taken
+for the final response to AT+CFUN.  AT+CFUN? and AT+CFUN=? are left
+alone, and so is a CFUN no rule accepts (default.xml has none for
+CFUN=0).
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://lore.kernel.org/ofono/20261114060554.4104107-1-github.com@herrie.org/]
+---
+ src/callmanager.cpp |  6 ++++++
+ src/callmanager.h   |  3 +++
+ src/phonesim.cpp    | 11 +++++++++++
+ 3 files changed, 20 insertions(+)
+
+diff --git a/src/callmanager.cpp b/src/callmanager.cpp
+index 40f9b3b..f1c0385 100644
+--- a/src/callmanager.cpp
++++ b/src/callmanager.cpp
+@@ -478,6 +478,12 @@ void CallManager::hangupRemote( int id )
+     }
+ }
+ 
++void CallManager::hangupAllRemote()
++{
++    while ( !callList.isEmpty() )
++        hangupRemote( callList.constFirst().id );
++}
++
+ bool CallManager::acceptCall()
+ {
+     int id = idForIncoming();
+diff --git a/src/callmanager.h b/src/callmanager.h
+index a39f484..93381db 100644
+--- a/src/callmanager.h
++++ b/src/callmanager.h
+@@ -109,6 +109,9 @@ public slots:
+     // Simulate a remote hangup.
+     void hangupRemote( int id );
+ 
++    // Simulate a remote hangup of every call, as when the radio goes off.
++    void hangupAllRemote();
++
+ signals:
+     // Send a response to a command.
+     void send( const QString& line );
+diff --git a/src/phonesim.cpp b/src/phonesim.cpp
+index 89d5e9d..994031c 100644
+--- a/src/phonesim.cpp
++++ b/src/phonesim.cpp
+@@ -1182,6 +1182,17 @@ void SimRules::command( const QString& cmd )
+             respond( "ERROR" );
+ 
+         }
++    } else if ( cmd.startsWith( "AT+CFUN=" ) ) {
++
++        // A real modem ends every call when its radio is turned off, and
++        // oFono waits for it to do so.  The rule has answered by now, so
++        // the NO CARRIERs cannot be taken as the final response to AT+CFUN.
++        bool ok;
++        int fun = cmd.mid( 8 ).section( ',', 0, 0 ).toInt( &ok );
++
++        if ( ok && fun != 1 )
++            _callManager->hangupAllRemote();
++
+     }
+ }
+ 
+-- 
+2.53.0
+
