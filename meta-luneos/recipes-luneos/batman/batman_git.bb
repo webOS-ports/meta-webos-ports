@@ -9,7 +9,7 @@ HOMEPAGE = "https://github.com/FuriLabs/batman"
 LICENSE = "GPL-2.0-only"
 LIC_FILES_CHKSUM = "file://LICENSE;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
-DEPENDS = "glib-2.0 libgbinder libnl luna-service2"
+DEPENDS = "glib-2.0 libgbinder libnl luna-service2 libpbnjson"
 
 # libbatman branch of the fork, proposed upstream as FuriLabs/batman#2
 SRC_URI = " \
@@ -20,7 +20,7 @@ SRC_URI = " \
     file://com.palm.batman.perm.json \
     file://batman-luna.manifest.json \
 "
-SRCREV = "5a454297641c439c417e5b46b0b0ba29713ababc"
+SRCREV = "349d2ce45c6959a11349a7309c2d66cf3f01b9e2"
 PV = "1.0+git"
 PR = "r1"
 
