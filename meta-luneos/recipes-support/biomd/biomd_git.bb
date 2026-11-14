@@ -27,6 +27,7 @@ SRC_URI = " \
     git://github.com/FuriLabs/biomd.git;protocol=https;branch=forky \
     file://biomd-hal-wait.sh \
     file://10-hal-wait.conf \
+    file://0001-fingerprint-put-the-non-null-marker-in-front-of-AIDL-parcelables.patch \
 "
 
 S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}"
