@@ -1,0 +1,730 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] unit: test EuiccManager.ResetCard
+
+Builds the real src/sim.c on a small model of the modem and the runtime
+driver registry, with a scripted SIM driver that finishes a reset when
+the test says so, and calls ResetCard from a second bus connection.
+
+The caller is answered only once the driver has finished, with the
+driver's result, exactly once, also for one reset after another. A
+driver without reset_card gives NotImplemented, and so does one that
+has the member set but registers as SIM driver API version 2, which
+predates it: the registry must cut it off rather than call whatever
+lies past the end of the plugin's struct.
+
+Runs under dbus-run-session; without a bus it reports itself skipped.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ Makefile.am           |  12 +
+ unit/test-sim-euicc.c | 677 ++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 689 insertions(+)
+ create mode 100644 unit/test-sim-euicc.c
+
+diff --git a/Makefile.am b/Makefile.am
+index 9b9c730..55708a6 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -997,6 +997,18 @@ unit_test_dbus_queue_LDADD = gdbus/libgdbus-internal.la @GLIB_LIBS@ \
+ 				@DBUS_LIBS@ $(ell_ldadd) -ldl
+ unit_objects += $(unit_test_dbus_queue_OBJECTS)
+ 
++unit_tests += unit/test-sim-euicc
++
++unit_test_sim_euicc_SOURCES = unit/test-sim-euicc.c unit/test-dbus.c \
++				unit/test-dbus.h src/sim.c src/simfs.c \
++				src/simutil.c src/stkutil.c src/smsutil.c \
++				src/storage.c src/watch.c src/common.c \
++				src/util.c src/dbus.c
++
++unit_test_sim_euicc_LDADD = gdbus/libgdbus-internal.la @GLIB_LIBS@ \
++				@DBUS_LIBS@ $(ell_ldadd) -ldl
++unit_objects += $(unit_test_sim_euicc_OBJECTS)
++
+ unit_tests += unit/test-dbus-queue-atoms
+ 
+ unit_test_dbus_queue_atoms_SOURCES = unit/test-dbus-queue-atoms.c \
+diff --git a/unit/test-sim-euicc.c b/unit/test-sim-euicc.c
+new file mode 100644
+index 0000000..b2947c6
+--- /dev/null
++++ b/unit/test-sim-euicc.c
+@@ -0,0 +1,677 @@
++/*
++ * oFono - Open Source Telephony
++ *
++ * org.ofono.EuiccManager.ResetCard: it reaches the SIM driver's reset_card,
++ * answers the caller with the driver's result exactly once, and says
++ * NotImplemented for a driver without reset_card - including one that sets
++ * it but registered as SIM driver API version 2, which predates the member.
++ *
++ * The real src/sim.c and the D-Bus helpers are built into this test, on a
++ * small model of src/modem.c and the driver registry, with a scripted SIM
++ * driver that finishes a reset when the test says so. Clients are a second
++ * connection to the bus: run it under dbus-run-session. Without a bus the
++ * test reports itself skipped.
++ *
++ * SPDX-License-Identifier: GPL-2.0-only
++ */
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <stdarg.h>
++/* The checks are asserts, some with side effects: keep them in any build */
++#undef NDEBUG
++#include <assert.h>
++
++#include <glib.h>
++#include <gdbus.h>
++
++#include "ofono.h"
++#include "test-dbus.h"
++
++#define MODEM_PATH "/test_0"
++#define EUICC_IFACE "org.ofono.EuiccManager"
++#define ERR_FAILED "org.ofono.Error.Failed"
++#define ERR_NOT_IMPLEMENTED "org.ofono.Error.NotImplemented"
++
++/* ---- logging ------------------------------------------------------------ */
++
++static void vlog(const char *format, va_list ap) G_GNUC_PRINTF(1, 0);
++
++static void vlog(const char *format, va_list ap)
++{
++	if (g_test_verbose()) {
++		vfprintf(stderr, format, ap);
++		fputc('\n', stderr);
++	}
++}
++
++void ofono_debug(const char *format, ...)
++{
++	va_list ap;
++
++	va_start(ap, format);
++	vlog(format, ap);
++	va_end(ap);
++}
++
++void ofono_info(const char *format, ...)
++{
++	va_list ap;
++
++	va_start(ap, format);
++	vlog(format, ap);
++	va_end(ap);
++}
++
++void ofono_warn(const char *format, ...)
++{
++	va_list ap;
++
++	va_start(ap, format);
++	vlog(format, ap);
++	va_end(ap);
++}
++
++void ofono_error(const char *format, ...)
++{
++	va_list ap;
++
++	va_start(ap, format);
++	vlog(format, ap);
++	va_end(ap);
++}
++
++/* ---- a model of the modem and its atoms --------------------------------- */
++
++struct ofono_modem {
++	GSList *atoms;
++	GSList *interfaces;
++};
++
++struct ofono_atom {
++	enum ofono_atom_type type;
++	void (*destruct)(struct ofono_atom *atom);
++	void (*unregister)(struct ofono_atom *atom);
++	void *data;
++	struct ofono_modem *modem;
++};
++
++struct ofono_atom *__ofono_modem_add_atom(struct ofono_modem *modem,
++					enum ofono_atom_type type,
++					void (*destruct)(struct ofono_atom *),
++					void *data)
++{
++	struct ofono_atom *atom = g_new0(struct ofono_atom, 1);
++
++	atom->type = type;
++	atom->destruct = destruct;
++	atom->data = data;
++	atom->modem = modem;
++	modem->atoms = g_slist_prepend(modem->atoms, atom);
++
++	return atom;
++}
++
++void *__ofono_atom_get_data(struct ofono_atom *atom)
++{
++	return atom->data;
++}
++
++const char *__ofono_atom_get_path(struct ofono_atom *atom)
++{
++	return MODEM_PATH;
++}
++
++struct ofono_modem *__ofono_atom_get_modem(struct ofono_atom *atom)
++{
++	return atom->modem;
++}
++
++void __ofono_atom_register(struct ofono_atom *atom,
++				void (*unregister)(struct ofono_atom *))
++{
++	atom->unregister = unregister;
++}
++
++ofono_bool_t __ofono_atom_get_registered(struct ofono_atom *atom)
++{
++	return atom->unregister != NULL;
++}
++
++/* As __ofono_atom_free() in src/modem.c: unregister, then destruct */
++void __ofono_atom_free(struct ofono_atom *atom)
++{
++	struct ofono_modem *modem = atom->modem;
++
++	modem->atoms = g_slist_remove(modem->atoms, atom);
++
++	if (atom->unregister) {
++		atom->unregister(atom);
++		atom->unregister = NULL;
++	}
++
++	if (atom->destruct)
++		atom->destruct(atom);
++
++	g_free(atom);
++}
++
++void ofono_modem_add_interface(struct ofono_modem *modem,
++				const char *interface)
++{
++	modem->interfaces = g_slist_append(modem->interfaces,
++						g_strdup(interface));
++}
++
++void ofono_modem_remove_interface(struct ofono_modem *modem,
++				const char *interface)
++{
++	GSList *l = g_slist_find_custom(modem->interfaces, interface,
++						(GCompareFunc) strcmp);
++
++	g_assert(l);
++	g_free(l->data);
++	modem->interfaces = g_slist_delete_link(modem->interfaces, l);
++}
++
++static gboolean modem_has_interface(struct ofono_modem *modem,
++					const char *interface)
++{
++	return g_slist_find_custom(modem->interfaces, interface,
++					(GCompareFunc) strcmp) != NULL;
++}
++
++/* ---- a model of the runtime driver registry in src/modem.c -------------- */
++
++struct driver_reg {
++	char *name;
++	const void *orig;
++	void *padded;
++};
++
++static GSList *driver_registry;
++
++/* As in src/modem.c: zero-fill, then copy what the caller's version had */
++int __ofono_driver_register_padded(const char *type, const char *name,
++				const void *driver, size_t size, size_t copy)
++{
++	struct driver_reg *reg;
++
++	g_assert_cmpstr(type, ==, "sim");
++	g_assert(copy <= size);
++
++	reg = g_new0(struct driver_reg, 1);
++	reg->name = g_strdup(name);
++	reg->orig = driver;
++	reg->padded = g_malloc0(size);
++	memcpy(reg->padded, driver, copy);
++	driver_registry = g_slist_prepend(driver_registry, reg);
++
++	return 0;
++}
++
++int __ofono_driver_register(const char *type, const char *name,
++				const void *driver)
++{
++	g_assert_not_reached();
++	return -1;
++}
++
++void __ofono_driver_unregister(const char *type, const void *driver)
++{
++	GSList *l;
++
++	for (l = driver_registry; l; l = l->next) {
++		struct driver_reg *reg = l->data;
++
++		if (reg->orig != driver)
++			continue;
++
++		driver_registry = g_slist_delete_link(driver_registry, l);
++		g_free(reg->name);
++		g_free(reg->padded);
++		g_free(reg);
++		return;
++	}
++
++	g_assert_not_reached();
++}
++
++const void *__ofono_driver_find(const char *type, const char *name,
++				const struct ofono_driver_desc *start,
++				const struct ofono_driver_desc *stop)
++{
++	GSList *l;
++
++	for (l = driver_registry; l; l = l->next) {
++		struct driver_reg *reg = l->data;
++
++		if (!strcmp(reg->name, name))
++			return reg->padded;
++	}
++
++	return NULL;
++}
++
++/* ---- the rest of the core that src/sim.c links against ------------------ */
++
++static unsigned int next_atom_watch;
++
++unsigned int __ofono_modem_add_atom_watch(struct ofono_modem *modem,
++					enum ofono_atom_type type,
++					ofono_atom_watch_func notify,
++					void *data, ofono_destroy_func destroy)
++{
++	/* No atom that sim.c watches for (the emulator) is ever added */
++	if (destroy)
++		destroy(data);
++
++	return ++next_atom_watch;
++}
++
++gboolean __ofono_modem_remove_atom_watch(struct ofono_modem *modem,
++						unsigned int id)
++{
++	return TRUE;
++}
++
++void __ofono_modem_foreach_registered_atom(struct ofono_modem *modem,
++						enum ofono_atom_type type,
++						ofono_atom_func callback,
++						void *data)
++{
++}
++
++void __ofono_modem_sim_reset(struct ofono_modem *modem)
++{
++	g_assert_not_reached();
++}
++
++ofono_bool_t __ofono_emulator_add_atom_handler(struct ofono_atom *atom,
++					const char *prefix,
++					ofono_emulator_request_cb_t cb,
++					void *data, ofono_destroy_func destroy)
++{
++	g_assert_not_reached();
++	return FALSE;
++}
++
++void __ofono_emulator_remove_atom_handler(struct ofono_atom *atom,
++						const char *prefix)
++{
++	g_assert_not_reached();
++}
++
++void ofono_emulator_send_final(struct ofono_emulator *em,
++				const struct ofono_error *final)
++{
++	g_assert_not_reached();
++}
++
++void ofono_emulator_send_info(struct ofono_emulator *em, const char *line,
++				ofono_bool_t last)
++{
++	g_assert_not_reached();
++}
++
++enum ofono_emulator_request_type ofono_emulator_request_get_type(
++					struct ofono_emulator_request *req)
++{
++	g_assert_not_reached();
++	return OFONO_EMULATOR_REQUEST_TYPE_COMMAND_ONLY;
++}
++
++/* ---- the scripted SIM driver -------------------------------------------- */
++
++static unsigned int resets_started;
++static ofono_sim_reset_card_cb_t reset_cb;
++static void *reset_data;
++
++static int sim_probe(struct ofono_sim *sim, unsigned int vendor, void *data)
++{
++	return 0;
++}
++
++static void sim_remove_driver(struct ofono_sim *sim)
++{
++}
++
++static void sim_logical_access(struct ofono_sim *sim, int session_id,
++			const unsigned char *pdu, unsigned int len,
++			ofono_sim_logical_access_cb_t cb, void *data)
++{
++	g_assert_not_reached();
++}
++
++static void sim_open_channel2(struct ofono_sim *sim, const unsigned char *aid,
++			unsigned int len, ofono_sim_open_channel_cb_t cb,
++			void *data)
++{
++	g_assert_not_reached();
++}
++
++static void sim_close_channel(struct ofono_sim *sim, int session_id,
++			ofono_sim_close_channel_cb_t cb, void *data)
++{
++	g_assert_not_reached();
++}
++
++static void sim_reset_card(struct ofono_sim *sim,
++				ofono_sim_reset_card_cb_t cb, void *data)
++{
++	g_assert(reset_cb == NULL);
++	resets_started++;
++	reset_cb = cb;
++	reset_data = data;
++}
++
++static void sim_finish_reset(gboolean ok)
++{
++	struct ofono_error err = {
++		.type = ok ? OFONO_ERROR_TYPE_NO_ERROR :
++						OFONO_ERROR_TYPE_FAILURE,
++		.error = 0,
++	};
++	ofono_sim_reset_card_cb_t cb = reset_cb;
++
++	g_assert(cb);
++	reset_cb = NULL;
++	cb(&err, reset_data);
++}
++
++/* EuiccManager needs logical channels; reset_card is what is under test */
++static const struct ofono_sim_driver test_sim_driver = {
++	.name		= "test",
++	.probe		= sim_probe,
++	.remove		= sim_remove_driver,
++	.open_channel2	= sim_open_channel2,
++	.close_channel	= sim_close_channel,
++	.logical_access	= sim_logical_access,
++	.reset_card	= sim_reset_card,
++};
++
++static const struct ofono_sim_driver test_sim_driver_no_reset = {
++	.name		= "test",
++	.probe		= sim_probe,
++	.remove		= sim_remove_driver,
++	.open_channel2	= sim_open_channel2,
++	.close_channel	= sim_close_channel,
++	.logical_access	= sim_logical_access,
++};
++
++/*
++ * src/sim.c also looks through the builtin "sim" driver section, which must
++ * then exist. The drivers under test are registered at runtime instead, as
++ * a plugin's are, so that the version handling is what gets exercised.
++ */
++OFONO_ATOM_DRIVER_BUILTIN(sim, builtin, &test_sim_driver_no_reset)
++
++/* ---- the test frame ----------------------------------------------------- */
++
++struct call {
++	unsigned int replies;
++	char *error;
++	DBusMessage *reply;
++};
++
++static struct test_dbus_context dbus;
++static struct ofono_modem modem;
++static struct ofono_sim *sim;
++static const struct ofono_sim_driver *registered;
++static unsigned int stray_replies;
++static guint timeout_id;
++
++static gboolean test_timeout(gpointer data)
++{
++	g_assert_not_reached();
++	return G_SOURCE_REMOVE;
++}
++
++/* A reply the client is not waiting for comes this way: a second answer */
++static DBusHandlerResult client_filter(DBusConnection *conn, DBusMessage *msg,
++					void *data)
++{
++	int type = dbus_message_get_type(msg);
++
++	if (type == DBUS_MESSAGE_TYPE_METHOD_RETURN ||
++			type == DBUS_MESSAGE_TYPE_ERROR)
++		stray_replies++;
++
++	return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
++}
++
++static void on_reply(DBusPendingCall *pending, void *data)
++{
++	struct call *call = data;
++	DBusMessage *reply = dbus_pending_call_steal_reply(pending);
++
++	call->replies++;
++
++	if (dbus_message_get_type(reply) == DBUS_MESSAGE_TYPE_ERROR)
++		call->error = g_strdup(dbus_message_get_error_name(reply));
++
++	if (call->reply)
++		dbus_message_unref(call->reply);
++
++	call->reply = reply;
++	dbus_pending_call_unref(pending);
++}
++
++static void call_done(struct call *call)
++{
++	g_free(call->error);
++
++	if (call->reply)
++		dbus_message_unref(call->reply);
++}
++
++/* Returns when everything sent so far was handled and answered */
++static void flush(void)
++{
++	struct call ping = { 0 };
++
++	test_dbus_send(&dbus, test_dbus_new_call(&dbus, "/",
++				"org.freedesktop.DBus.Peer", "Ping"),
++				on_reply, &ping);
++
++	while (!ping.replies)
++		g_main_context_iteration(NULL, TRUE);
++
++	g_assert_cmpstr(ping.error, ==, NULL);
++	call_done(&ping);
++}
++
++static void test_begin(const struct ofono_sim_driver *driver, int version)
++{
++	memset(&dbus, 0, sizeof(dbus));
++	memset(&modem, 0, sizeof(modem));
++	stray_replies = 0;
++	resets_started = 0;
++	reset_cb = NULL;
++	reset_data = NULL;
++
++	timeout_id = g_timeout_add_seconds(30, test_timeout, NULL);
++
++	test_dbus_setup(&dbus);
++	assert(dbus_connection_add_filter(dbus.client_connection,
++						client_filter, NULL, NULL));
++
++	g_assert_cmpint(ofono_sim_driver_register_version(driver, version),
++								==, 0);
++	registered = driver;
++
++	sim = ofono_sim_create(&modem, 0, "test", NULL);
++	g_assert(sim);
++	ofono_sim_register(sim);
++	g_assert(modem_has_interface(&modem, EUICC_IFACE));
++}
++
++static void test_end(void)
++{
++	g_assert(reset_cb == NULL);
++
++	while (modem.atoms)
++		__ofono_atom_free(modem.atoms->data);
++
++	flush();
++	g_assert(!modem_has_interface(&modem, EUICC_IFACE));
++	g_assert_cmpuint(stray_replies, ==, 0);
++
++	ofono_sim_driver_unregister(registered);
++	g_assert(driver_registry == NULL);
++
++	dbus_connection_remove_filter(dbus.client_connection, client_filter,
++					NULL);
++	test_dbus_shutdown(&dbus);
++	g_source_remove(timeout_id);
++	g_slist_free_full(modem.interfaces, g_free);
++}
++
++static void reset_card(struct call *call)
++{
++	test_dbus_send(&dbus, test_dbus_new_call(&dbus, MODEM_PATH,
++				EUICC_IFACE, "ResetCard"), on_reply, call);
++}
++
++static void assert_ok(struct call *call)
++{
++	g_assert_cmpuint(call->replies, ==, 1);
++	g_assert_cmpstr(call->error, ==, NULL);
++}
++
++static void assert_error(struct call *call, const char *error)
++{
++	g_assert_cmpuint(call->replies, ==, 1);
++	g_assert_cmpstr(call->error, ==, error);
++}
++
++/* ---- the tests ---------------------------------------------------------- */
++
++/* The caller is answered only once the driver has finished the reset */
++static void test_reset_ok(void)
++{
++	struct call a = { 0 };
++
++	test_begin(&test_sim_driver, OFONO_SIM_DRIVER_API_VERSION);
++
++	reset_card(&a);
++	flush();
++	g_assert_cmpuint(resets_started, ==, 1);
++	g_assert_cmpuint(a.replies, ==, 0);
++
++	sim_finish_reset(TRUE);
++	flush();
++	assert_ok(&a);
++
++	test_end();
++	call_done(&a);
++}
++
++static void test_reset_failed(void)
++{
++	struct call a = { 0 };
++
++	test_begin(&test_sim_driver, OFONO_SIM_DRIVER_API_VERSION);
++
++	reset_card(&a);
++	flush();
++	g_assert_cmpuint(resets_started, ==, 1);
++
++	sim_finish_reset(FALSE);
++	flush();
++	assert_error(&a, ERR_FAILED);
++
++	test_end();
++	call_done(&a);
++}
++
++/* One reset after the other, each answered by its own driver result */
++static void test_reset_again(void)
++{
++	struct call a = { 0 }, b = { 0 };
++
++	test_begin(&test_sim_driver, OFONO_SIM_DRIVER_API_VERSION);
++
++	reset_card(&a);
++	flush();
++	sim_finish_reset(FALSE);
++	flush();
++	assert_error(&a, ERR_FAILED);
++
++	reset_card(&b);
++	flush();
++	g_assert_cmpuint(resets_started, ==, 2);
++	sim_finish_reset(TRUE);
++	flush();
++	assert_ok(&b);
++	g_assert_cmpuint(a.replies, ==, 1);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++}
++
++static void test_reset_not_implemented(void)
++{
++	struct call a = { 0 };
++
++	test_begin(&test_sim_driver_no_reset, OFONO_SIM_DRIVER_API_VERSION);
++
++	reset_card(&a);
++	flush();
++	assert_error(&a, ERR_NOT_IMPLEMENTED);
++	g_assert_cmpuint(resets_started, ==, 0);
++
++	test_end();
++	call_done(&a);
++}
++
++/*
++ * A plugin built against version 2 has a shorter struct: whatever follows
++ * set_active_card_slot in its binary is not a reset_card, so it must not be
++ * called. The struct here does have the member set, which stands in for
++ * whatever happens to lie past the end of the plugin's real one.
++ */
++static void test_reset_version_2(void)
++{
++	struct call a = { 0 };
++
++	test_begin(&test_sim_driver, 2);
++
++	reset_card(&a);
++	flush();
++	assert_error(&a, ERR_NOT_IMPLEMENTED);
++	g_assert_cmpuint(resets_started, ==, 0);
++
++	test_end();
++	call_done(&a);
++}
++
++/* The newest version that exists is the one the header asks for */
++static void test_api_version(void)
++{
++	g_assert_cmpint(OFONO_SIM_DRIVER_API_VERSION, ==, 3);
++}
++
++int main(int argc, char **argv)
++{
++	test_dbus_require_bus();
++
++	g_test_init(&argc, &argv, NULL);
++
++#define T(name) g_test_add_func("/sim-euicc/" #name, test_ ## name)
++	T(api_version);
++	T(reset_ok);
++	T(reset_failed);
++	T(reset_again);
++	T(reset_not_implemented);
++	T(reset_version_2);
++#undef T
++
++	return g_test_run();
++}
