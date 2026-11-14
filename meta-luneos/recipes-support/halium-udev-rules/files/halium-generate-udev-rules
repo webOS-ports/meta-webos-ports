@@ -83,19 +83,62 @@ for existing in /lib/udev/rules.d/*.rules /etc/udev/rules.d/*.rules; do
 done
 sort -u "$COVERED" -o "$COVERED" 2>/dev/null
 
+# The patterns among them, one alternative per line, for the init rules below.
+# Those name single nodes, which the host's rules often cover by a glob instead:
+# 65-android.rules gives KERNEL=="video*" to system:camera 0777, and the BraX3's
+# vendor init gives video0, video1 and video3 to media or camera, group system,
+# 0660, which would have overridden it. Only rules that set OWNER, GROUP or
+# MODE count: systemd's own rules match broad globs such as "vd*" and "md*" to
+# name disks and RAID arrays, which says nothing about MediaTek's vdec-fmt or
+# mdp_sync. A bare "*" matches every node and says nothing about any one of
+# them either.
+GLOBS=$(mktemp 2>/dev/null || echo /tmp/.hur_globs)
+for existing in /lib/udev/rules.d/*.rules /etc/udev/rules.d/*.rules; do
+    [ -e "$existing" ] || continue
+    [ "$existing" = "$OUT" ] && continue
+    grep -E '(OWNER|GROUP|MODE)=' "$existing" 2>/dev/null \
+      | sed -n 's/.*KERNEL=="\([^"]*\)".*/\1/p'
+done | tr '|' '\n' | grep '[][*?]' | grep -vx '\*' | sort -u > "$GLOBS"
+
+covered_by_glob() {
+    while IFS= read -r pat; do
+        # Unquoted on purpose: matched as a pattern, as udev does.
+        # shellcheck disable=SC2254
+        case "$1" in $pat) return 0 ;; esac
+    done < "$GLOBS"
+    return 1
+}
+
 FOUND=""
 for f in $SRC; do
     [ -f "$f" ] && FOUND="$FOUND $f"
 done
 
-if [ -z "$FOUND" ]; then
-    echo "halium-udev-rules: no ueventd rc files found, nothing to translate" >&2
+# Not every node is in ueventd.rc: vendors also chown and chmod nodes from their
+# init scripts, and Halium runs those in the container, where the commands
+# never reach the host's /dev. The BraX3's MediaTek vendor (iodeOS 7.9) gives
+# only /dev/camera_eeprom* to the camera in ueventd.rc and sets kd_camera_hw,
+# seninf and camera-isp/-mem/-dip/-fdvt to "system camera 0660" from
+# /vendor/etc/init. Those stayed root:root 0600, camerahalserver (uid
+# cameraserver) could not open the sensor driver, and the camera provider
+# reported 0 devices, so there was no camera at all (measured 14 Nov 2026).
+# Only the vendor's and the ODM's: those set up the hardware.
+INITSRC="/vendor/etc/init/*.rc /vendor/etc/init/hw/*.rc
+         /odm/etc/init/*.rc /odm/etc/init/hw/*.rc"
+INITFOUND=""
+for f in $INITSRC; do
+    [ -f "$f" ] && INITFOUND="$INITFOUND $f"
+done
+
+if [ -z "$FOUND$INITFOUND" ]; then
+    echo "halium-udev-rules: no ueventd or vendor init rc files found, nothing to translate" >&2
     exit 0
 fi
 
 {
     echo "# Generated from Android ueventd rules by halium-generate-udev-rules."
     echo "# Source:$FOUND"
+    [ -n "$INITFOUND" ] && echo "# Init:$INITFOUND"
     echo "# Do not edit; regenerated on every boot."
 
     # ueventd lines are: <path> <mode> <user> <group> [options]
@@ -110,7 +153,7 @@ fi
     # not: it put "foo" ahead of "foo*", the wildcard then won, and which of
     # two files' rules applied came down to the alphabet. The BraX3's vendor
     # gives /dev/ccci* to radio and then /dev/ccci_aud to audio.
-    cat $FOUND 2>/dev/null \
+    [ -n "$FOUND" ] && cat $FOUND 2>/dev/null \
       | tr -d '\r' \
       | grep '^/dev/' \
       | awk '$2 != "" && $3 != "" && $4 != "" {
@@ -126,9 +169,61 @@ fi
             grep -qxF "$k" "$COVERED" 2>/dev/null && continue
             printf '%s\n' "$rule"
         done
+
+    # Init's chown and chmod come after ueventd's, as on Android, where init
+    # runs them after ueventd's coldboot has created the nodes, so they win.
+    #
+    # Only from the boot-time triggers, and only when the trigger is
+    # unconditional: a chown under "on property:..." or "on boot && ..."
+    # depends on state this cannot evaluate. Lines inside a service block are
+    # its options, not commands. Only direct children of /dev: init also
+    # chowns /dev/cpuset/*, /dev/socket/* and the like, which are not device
+    # nodes, and KERNEL== matches a node's name, not its path. The last
+    # chown and the last chmod of a node win, as they would in init.
+    [ -n "$INITFOUND" ] && cat $INITFOUND 2>/dev/null \
+      | tr -d '\r' \
+      | awk '
+          { sub(/#.*/, "") }
+          $1 == "on" {
+              trig = (NF == 2 && $2 ~ /^(early-init|init|late-init|early-fs|fs|post-fs|late-fs|post-fs-data|early-boot|boot)$/)
+              next
+          }
+          $1 == "service" || $1 == "import" { trig = 0; next }
+          !trig { next }
+          $1 == "chown" && (NF == 3 || NF == 4) {
+              path = $NF
+              if (path !~ /^\/dev\/[^\/*]+$/) next
+              n = substr(path, 6)
+              own[n] = $2
+              grp[n] = (NF == 4) ? $3 : ""
+              if (!(n in seen)) { seen[n] = 1; order[++c] = n }
+          }
+          $1 == "chmod" && NF == 3 && $2 ~ /^[0-7]+$/ {
+              path = $3
+              if (path !~ /^\/dev\/[^\/*]+$/) next
+              n = substr(path, 6)
+              mode[n] = $2
+              if (!(n in seen)) { seen[n] = 1; order[++c] = n }
+          }
+          END {
+              for (i = 1; i <= c; i++) {
+                  n = order[i]
+                  r = "ACTION==\"add\", KERNEL==\"" n "\""
+                  if (own[n] != "") r = r ", OWNER=\"" own[n] "\""
+                  if (grp[n] != "") r = r ", GROUP=\"" grp[n] "\""
+                  if (mode[n] != "") r = r ", MODE=\"" mode[n] "\""
+                  print r
+              }
+          }' \
+      | while IFS= read -r rule; do
+            k=$(printf '%s' "$rule" | sed -n 's/.*KERNEL=="\([^"]*\)".*/\1/p')
+            grep -qxF "$k" "$COVERED" 2>/dev/null && continue
+            covered_by_glob "$k" && continue
+            printf '%s\n' "$rule"
+        done
 } > "$OUT"
 
-rm -f "$COVERED"
+rm -f "$COVERED" "$GLOBS"
 
 COUNT=$(grep -c '^ACTION' "$OUT" 2>/dev/null)
 if [ "${COUNT:-0}" -eq 0 ]; then
