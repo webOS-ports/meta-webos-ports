@@ -5,10 +5,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 PV = "0.5+git"
 PE = "5"
 
-# herrie/bluetooth2-migration until its pull request is merged:
-# LuneOS.Bluetooth on com.webos.service.bluetooth2, without BluezQt.
-SRCREV = "d6e5fbb77e9721f69a3b31218951567c70da06d2"
-WEBOS_GIT_PARAM_BRANCH = "herrie/bluetooth2-migration"
+SRCREV = "34bad70eb1383d6f69831a7c7831eb9ac88df329"
 
 PR = "r4"
 

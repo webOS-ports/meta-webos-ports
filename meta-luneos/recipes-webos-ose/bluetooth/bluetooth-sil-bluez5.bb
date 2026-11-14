@@ -20,11 +20,7 @@ RDEPENDS:${PN} += "${@ bb.utils.contains('WEBOS_BLUETOOTH_ENABLED_SERVICE_CLASSE
 # Built from the webOS-ports fork: webosose submissions/87 with the LuneOS
 # changes as commits. Plain SRCREV: submission tags are a webosose convention.
 PV = "0.1.0-87+git"
-# herrie/bluetooth2-migration until its pull request is merged: device
-# connect, Just Works prompts, and an unanswered incoming pairing that BlueZ
-# cancels ends.
-SRCREV = "32d03d08b101e2757be7d69df9f12ac7b9dfba09"
-WEBOS_GIT_PARAM_BRANCH = "herrie/bluetooth2-migration"
+SRCREV = "2e30860e9a5d18b6d34c32c15e70e3f14d3a3704"
 PR = "r14"
 
 inherit webos_component
