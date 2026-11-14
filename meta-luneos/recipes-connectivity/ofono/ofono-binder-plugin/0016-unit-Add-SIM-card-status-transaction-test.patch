@@ -1,0 +1,639 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [unit] Add SIM card status transaction test
+
+Runs the SIM status transaction of binder_sim_card.c against a fake
+radio and checks when the slot's request group gets unblocked: no
+card, a card with an active USIM app, a USIM app that has to be
+subscribed first (the group must stay blocked meanwhile), and an
+eUICC with no enabled profile, before and after a profile shows up.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ unit/Makefile                      |   1 +
+ unit/unit_sim_card/Makefile        |   7 +
+ unit/unit_sim_card/unit_sim_card.c | 589 +++++++++++++++++++++++++++++
+ 3 files changed, 597 insertions(+)
+ create mode 100644 unit/unit_sim_card/Makefile
+ create mode 100644 unit/unit_sim_card/unit_sim_card.c
+
+diff --git a/unit/Makefile b/unit/Makefile
+index 7a8aa99..c181034 100644
+--- a/unit/Makefile
++++ b/unit/Makefile
+@@ -12,6 +12,7 @@ all:
+ 	@$(MAKE) -C unit_ext_slot $*
+ 	@$(MAKE) -C unit_oplist $*
+ 	@$(MAKE) -C unit_radio_caps $*
++	@$(MAKE) -C unit_sim_card $*
+ 	@$(MAKE) -C unit_sim_settings $*
+ 	@$(MAKE) -C unit_util $*
+ 	@$(MAKE) -C unit_voicecall $*
+diff --git a/unit/unit_sim_card/Makefile b/unit/unit_sim_card/Makefile
+new file mode 100644
+index 0000000..0510605
+--- /dev/null
++++ b/unit/unit_sim_card/Makefile
+@@ -0,0 +1,7 @@
++# -*- Mode: makefile-gmake -*-
++
++LINK_PKGS += libgbinder
++
++EXE = unit_sim_card
++
++include ../common/Makefile
+diff --git a/unit/unit_sim_card/unit_sim_card.c b/unit/unit_sim_card/unit_sim_card.c
+new file mode 100644
+index 0000000..2f9c9a7
+--- /dev/null
++++ b/unit/unit_sim_card/unit_sim_card.c
+@@ -0,0 +1,589 @@
++/*
++ *  oFono - Open Source Telephony - binder based adaptation
++ *
++ *  Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU General Public License for more details.
++ */
++
++/*
++ * Runs the SIM status transaction of binder_sim_card.c against a fake
++ * radio. Reading the card status blocks the slot's request group, and
++ * every other SIM request of that slot (SIM I/O, logical channels) waits
++ * until the transaction is finished. These tests check when it is.
++ */
++
++#include "binder_sim_card.c"
++
++#include <gutil_log.h>
++
++GLOG_MODULE_DEFINE("unit_sim_card");
++
++#define TEST_PREFIX "/sim_card/"
++#define TEST_(t) TEST_PREFIX t
++
++struct radio_request {
++    int refcount;
++    RADIO_REQ code;
++    RadioRequestCompleteFunc complete;
++    GDestroyNotify destroy;
++    gpointer user_data;
++};
++
++typedef struct test_request_group {
++    RadioRequestGroup pub;
++    RADIO_BLOCK block;
++} TestRequestGroup;
++
++/* pub comes first, so a group is its TestRequestGroup */
++#define TEST_GROUP(g) ((TestRequestGroup*)(g))
++
++struct radio_client {
++    int dummy;
++};
++
++static struct test_state {
++    GPtrArray* pending; /* Submitted, not yet completed */
++    BinderSimCardStatus* next_status; /* Returned by the next status read */
++} test;
++
++/*==========================================================================*
++ * Stubs for the oFono core
++ *==========================================================================*/
++
++void
++ofono_debug(
++    const char* format,
++    ...)
++{
++}
++
++void
++ofono_warn(
++    const char* format,
++    ...)
++{
++}
++
++void
++ofono_encode_hex(
++    const void* in,
++    unsigned int n,
++    char out[])
++{
++    out[0] = 0;
++}
++
++enum ofono_radio_access_mode
++ofono_radio_access_max_mode(
++    enum ofono_radio_access_mode mask)
++{
++    return mask;
++}
++
++/*==========================================================================*
++ * Fake libgbinder-radio
++ *==========================================================================*/
++
++RadioRequest*
++radio_request_new2(
++    RadioRequestGroup* group,
++    RADIO_REQ code,
++    GBinderWriter* args,
++    RadioRequestCompleteFunc complete,
++    GDestroyNotify destroy,
++    void* user_data)
++{
++    RadioRequest* req = g_new0(RadioRequest, 1);
++
++    if (args) {
++        memset(args, 0, sizeof(*args));
++    }
++    req->refcount = 1;
++    req->code = code;
++    req->complete = complete;
++    req->destroy = destroy;
++    req->user_data = user_data;
++    return req;
++}
++
++static
++RadioRequest*
++test_request_ref(
++    RadioRequest* req)
++{
++    req->refcount++;
++    return req;
++}
++
++void
++radio_request_unref(
++    RadioRequest* req)
++{
++    if (req && !--req->refcount) {
++        if (req->destroy) {
++            req->destroy(req->user_data);
++        }
++        g_free(req);
++    }
++}
++
++gboolean
++radio_request_submit(
++    RadioRequest* req)
++{
++    if (req) {
++        g_ptr_array_add(test.pending, test_request_ref(req));
++        return TRUE;
++    }
++    return FALSE;
++}
++
++RadioRequest*
++radio_request_try_submit(
++    RadioRequest* req)
++{
++    if (radio_request_submit(req)) {
++        return req;
++    } else {
++        radio_request_unref(req);
++        return NULL;
++    }
++}
++
++void
++radio_request_drop(
++    RadioRequest* req)
++{
++    if (req) {
++        /* Cancel it if it's still pending, then drop the caller's ref */
++        if (g_ptr_array_remove(test.pending, req)) {
++            radio_request_unref(req);
++        }
++        radio_request_unref(req);
++    }
++}
++
++gboolean
++radio_request_retry(
++    RadioRequest* req)
++{
++    return TRUE;
++}
++
++void
++radio_request_set_timeout(
++    RadioRequest* req,
++    guint ms)
++{
++}
++
++void
++radio_request_set_retry(
++    RadioRequest* req,
++    guint delay_ms,
++    int max_count)
++{
++}
++
++RadioRequestGroup*
++radio_request_group_new(
++    RadioClient* client)
++{
++    TestRequestGroup* group = g_new0(TestRequestGroup, 1);
++
++    group->pub.client = client;
++    return &group->pub;
++}
++
++void
++radio_request_group_unref(
++    RadioRequestGroup* group)
++{
++    g_free(TEST_GROUP(group));
++}
++
++void
++radio_request_group_cancel(
++    RadioRequestGroup* group)
++{
++}
++
++RADIO_BLOCK
++radio_request_group_block_status(
++    RadioRequestGroup* group)
++{
++    return TEST_GROUP(group)->block;
++}
++
++RADIO_BLOCK
++radio_request_group_block(
++    RadioRequestGroup* group)
++{
++    /* Nothing else is going on, the block is acquired right away */
++    return (TEST_GROUP(group)->block = RADIO_BLOCK_ACQUIRED);
++}
++
++void
++radio_request_group_unblock(
++    RadioRequestGroup* group)
++{
++    TEST_GROUP(group)->block = RADIO_BLOCK_NONE;
++}
++
++RADIO_AIDL_INTERFACE
++radio_client_aidl_interface(
++    RadioClient* client)
++{
++    return RADIO_AIDL_INTERFACE_NONE;
++}
++
++gulong
++radio_client_add_indication_handler(
++    RadioClient* client,
++    RADIO_IND code,
++    RadioClientIndicationFunc func,
++    gpointer user_data)
++{
++    return 1;
++}
++
++void
++radio_client_remove_handlers(
++    RadioClient* client,
++    gulong* ids,
++    int count)
++{
++    memset(ids, 0, sizeof(*ids) * count);
++}
++
++/*==========================================================================*
++ * The card under test
++ *==========================================================================*/
++
++static
++BinderSimCardStatus*
++test_read_icc_card_status(
++    GBinderReader* reader,
++    RADIO_RESP resp)
++{
++    BinderSimCardStatus* status = test.next_status;
++
++    test.next_status = NULL;
++    return status;
++}
++
++static
++void
++test_write_set_uicc_subscription_args(
++    GBinderWriter* writer,
++    const RadioSelectUiccSub* sub)
++{
++}
++
++/* The HIDL codes with a status parser that hands out test.next_status */
++static const BinderSimCardApi test_api = {
++    "test",
++    RADIO_IND_SIM_STATUS_CHANGED,
++    RADIO_IND_SUBSCRIPTION_STATUS_CHANGED,
++    RADIO_REQ_GET_ICC_CARD_STATUS,
++    test_read_icc_card_status,
++    RADIO_REQ_SET_UICC_SUBSCRIPTION,
++    test_write_set_uicc_subscription_args
++};
++
++/*
++ * A status allocated the way binder_sim_card_status_free() frees it:
++ * the apps in the same block as the status.
++ */
++static
++BinderSimCardStatus*
++test_status_new(
++    RADIO_CARD_STATE card_state,
++    int gsm_umts_index,
++    guint num_apps,
++    RADIO_APP_TYPE app_type)
++{
++    BinderSimCardStatus* status = g_malloc0(sizeof(BinderSimCardStatus) +
++        num_apps * sizeof(BinderSimCardApp));
++    guint i;
++
++    status->card_state = card_state;
++    status->pin_state = RADIO_PIN_STATE_UNKNOWN;
++    status->gsm_umts_index = gsm_umts_index;
++    status->ims_index = -1;
++    status->num_apps = num_apps;
++    if (num_apps) {
++        status->apps = (BinderSimCardApp*)(status + 1);
++        for (i = 0; i < num_apps; i++) {
++            status->apps[i].app_type = app_type;
++            status->apps[i].app_state = RADIO_APP_STATE_READY;
++        }
++    }
++    return status;
++}
++
++typedef struct test_setup {
++    RadioClient client;
++    BinderSimCard* card;
++    BinderSimCardObject* self;
++} TestSetup;
++
++static
++void
++test_setup_init(
++    TestSetup* setup)
++{
++    memset(&test, 0, sizeof(test));
++    test.pending = g_ptr_array_new();
++    memset(setup, 0, sizeof(*setup));
++    setup->card = binder_sim_card_new(&setup->client, 1);
++    setup->self = THIS(setup->card);
++    setup->self->api = &test_api;
++}
++
++static
++void
++test_setup_deinit(
++    TestSetup* setup)
++{
++    binder_sim_card_unref(setup->card);
++    g_assert_cmpuint(test.pending->len, ==, 0);
++    g_ptr_array_free(test.pending, TRUE);
++    g_free(test.next_status);
++}
++
++static
++guint
++test_pending_count(
++    RADIO_REQ code)
++{
++    guint i, n = 0;
++
++    for (i = 0; i < test.pending->len; i++) {
++        const RadioRequest* req = g_ptr_array_index(test.pending, i);
++
++        if (req->code == code) {
++            n++;
++        }
++    }
++    return n;
++}
++
++/* Complete the pending request with this code, successfully */
++static
++void
++test_complete(
++    RADIO_REQ code)
++{
++    guint i;
++
++    for (i = 0; i < test.pending->len; i++) {
++        RadioRequest* req = g_ptr_array_index(test.pending, i);
++
++        if (req->code == code) {
++            GBinderReader reader;
++
++            memset(&reader, 0, sizeof(reader));
++            g_ptr_array_remove_index(test.pending, i);
++            req->complete(req, RADIO_TX_STATUS_OK, RADIO_RESP_NONE,
++                RADIO_ERROR_NONE, &reader, req->user_data);
++            radio_request_unref(req);
++            return;
++        }
++    }
++    g_assert_not_reached();
++}
++
++/* Answer the pending status query */
++static
++void
++test_answer_status(
++    BinderSimCardStatus* status)
++{
++    g_assert_cmpuint(test_pending_count(RADIO_REQ_GET_ICC_CARD_STATUS),
++        ==, 1);
++    g_free(test.next_status);
++    test.next_status = status;
++    test_complete(RADIO_REQ_GET_ICC_CARD_STATUS);
++}
++
++/* Fire the subscription start timer now instead of in 5 seconds */
++static
++void
++test_sub_start_timeout(
++    TestSetup* setup)
++{
++    BinderSimCardObject* self = setup->self;
++
++    g_assert(self->sub_start_timer);
++    g_source_remove(self->sub_start_timer);
++    binder_sim_card_sub_start_timeout(self);
++}
++
++static
++RADIO_BLOCK
++test_block(
++    TestSetup* setup)
++{
++    return radio_request_group_block_status(setup->self->g);
++}
++
++/*==========================================================================*
++ * Tests
++ *==========================================================================*/
++
++/* No card: the status query was all there was to it */
++static
++void
++test_absent(
++    void)
++{
++    TestSetup setup;
++
++    test_setup_init(&setup);
++    g_assert_cmpint(test_block(&setup), ==, RADIO_BLOCK_ACQUIRED);
++    test_answer_status(test_status_new(RADIO_CARD_STATE_ABSENT, -1, 0,
++        RADIO_APP_TYPE_UNKNOWN));
++    g_assert_cmpint(test_block(&setup), ==, RADIO_BLOCK_NONE);
++    g_assert(!setup.card->app);
++    test_setup_deinit(&setup);
++}
++
++/* A SIM with its USIM app already active */
++static
++void
++test_usim(
++    void)
++{
++    TestSetup setup;
++
++    test_setup_init(&setup);
++    test_answer_status(test_status_new(RADIO_CARD_STATE_PRESENT, 0, 1,
++        RADIO_APP_TYPE_USIM));
++    g_assert_cmpint(test_block(&setup), ==, RADIO_BLOCK_NONE);
++    g_assert(setup.card->app);
++    g_assert_cmpuint(test_pending_count(RADIO_REQ_SET_UICC_SUBSCRIPTION),
++        ==, 0);
++    test_setup_deinit(&setup);
++}
++
++/*
++ * A USIM app that doesn't activate by itself. The card gets subscribed,
++ * and nothing else may reach the slot until that is done.
++ */
++static
++void
++test_subscribe(
++    void)
++{
++    TestSetup setup;
++
++    test_setup_init(&setup);
++    test_answer_status(test_status_new(RADIO_CARD_STATE_PRESENT, -1, 1,
++        RADIO_APP_TYPE_USIM));
++    g_assert_cmpint(test_block(&setup), ==, RADIO_BLOCK_ACQUIRED);
++
++    test_sub_start_timeout(&setup);
++    g_assert_cmpuint(test_pending_count(RADIO_REQ_SET_UICC_SUBSCRIPTION),
++        ==, 1);
++    g_assert_cmpint(test_block(&setup), ==, RADIO_BLOCK_ACQUIRED);
++
++    /* The subscription is done, but the app isn't active yet */
++    test_complete(RADIO_REQ_SET_UICC_SUBSCRIPTION);
++    g_assert_cmpint(test_block(&setup), ==, RADIO_BLOCK_ACQUIRED);
++
++    /* Now it is */
++    binder_sim_card_get_status(setup.self);
++    test_answer_status(test_status_new(RADIO_CARD_STATE_PRESENT, 0, 1,
++        RADIO_APP_TYPE_USIM));
++    g_assert_cmpint(test_block(&setup), ==, RADIO_BLOCK_NONE);
++    test_setup_deinit(&setup);
++}
++
++/*
++ * An eUICC with no enabled profile: present, without applications.
++ * Once the card has had its time to come up, there is nothing left to
++ * wait for, and the slot must take requests again. The logical channel
++ * to the ISD-R that the LPA needs is one of them.
++ */
++static
++void
++test_no_apps(
++    void)
++{
++    TestSetup setup;
++
++    test_setup_init(&setup);
++    test_answer_status(test_status_new(RADIO_CARD_STATE_PRESENT, -1, 0,
++        RADIO_APP_TYPE_UNKNOWN));
++
++    /* The card has just appeared, give it time */
++    g_assert_cmpint(test_block(&setup), ==, RADIO_BLOCK_ACQUIRED);
++
++    test_sub_start_timeout(&setup);
++    g_assert_cmpuint(test_pending_count(RADIO_REQ_SET_UICC_SUBSCRIPTION),
++        ==, 0);
++    g_assert_cmpint(test_block(&setup), ==, RADIO_BLOCK_NONE);
++    g_assert(!setup.card->app);
++
++    /* Asking again with nothing changed doesn't block it for good */
++    binder_sim_card_get_status(setup.self);
++    g_assert_cmpint(test_block(&setup), ==, RADIO_BLOCK_ACQUIRED);
++    test_answer_status(test_status_new(RADIO_CARD_STATE_PRESENT, -1, 0,
++        RADIO_APP_TYPE_UNKNOWN));
++    g_assert_cmpint(test_block(&setup), ==, RADIO_BLOCK_NONE);
++    test_setup_deinit(&setup);
++}
++
++/* A profile gets enabled on the eUICC: its USIM app shows up later */
++static
++void
++test_no_apps_then_usim(
++    void)
++{
++    TestSetup setup;
++
++    test_setup_init(&setup);
++    test_answer_status(test_status_new(RADIO_CARD_STATE_PRESENT, -1, 0,
++        RADIO_APP_TYPE_UNKNOWN));
++    test_sub_start_timeout(&setup);
++    g_assert_cmpint(test_block(&setup), ==, RADIO_BLOCK_NONE);
++
++    binder_sim_card_get_status(setup.self);
++    test_answer_status(test_status_new(RADIO_CARD_STATE_PRESENT, 0, 1,
++        RADIO_APP_TYPE_USIM));
++    g_assert_cmpint(test_block(&setup), ==, RADIO_BLOCK_NONE);
++    g_assert(setup.card->app);
++    test_setup_deinit(&setup);
++}
++
++int main(int argc, char* argv[])
++{
++    g_test_init(&argc, &argv, NULL);
++    gutil_log_default.level = g_test_verbose() ?
++        GLOG_LEVEL_VERBOSE : GLOG_LEVEL_NONE;
++    gutil_log_timestamp = FALSE;
++
++    g_test_add_func(TEST_("absent"), test_absent);
++    g_test_add_func(TEST_("usim"), test_usim);
++    g_test_add_func(TEST_("subscribe"), test_subscribe);
++    g_test_add_func(TEST_("no_apps"), test_no_apps);
++    g_test_add_func(TEST_("no_apps_then_usim"), test_no_apps_then_usim);
++    return g_test_run();
++}
++
++/*
++ * Local Variables:
++ * mode: C
++ * c-basic-offset: 4
++ * indent-tabs-mode: nil
++ * End:
++ */

@@ -24,10 +24,12 @@ SRC_URI = "git://github.com/mer-hybris/ofono-binder-plugin.git;branch=master;pro
            file://0012-unit-Add-radio-caps-transaction-test.patch \
            file://0013-ofono-binder-Send-radio-caps-data-requests-in-the-tr.patch \
            file://0014-ofono-binder-Switch-the-radios-back-on-after-a-radio.patch \
+           file://0015-ofono-binder-Don-t-keep-the-slot-blocked-for-a-card-.patch \
+           file://0016-unit-Add-SIM-card-status-transaction-test.patch \
 "
 
 PV = "1.1.39"
-PR = "r1"
+PR = "r2"
 SRCREV = "67c3c85c58fb387d1303560f757144ed275c67d6"
 
 CFLAGS += "--sysroot=${RECIPE_SYSROOT} "
