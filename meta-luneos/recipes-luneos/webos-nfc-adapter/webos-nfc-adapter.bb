@@ -14,7 +14,7 @@ RRECOMMENDS:${PN} += "nfcd"
 
 PE = "1"
 PV = "0.1.0-1+git"
-SRCREV = "7d8a1bb8df903cada062167c6f9de735d6f02742"
+SRCREV = "a0268b372470300b6888f7c2db5a30e953ff02da"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths
