@@ -15,14 +15,18 @@ COMPATIBLE_MACHINE = "^halium$"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 SRC_URI = "git://github.com/FuriLabs/droidcam2v4l2.git;branch=forky;protocol=https \
-           file://0001-wait-for-any-vendor-camera-HAL-service.patch \
-           file://0002-dqevent-fallback-for-120-byte-pre-4.0-kernels.patch \
-           file://0003-adapt-preview-format-rate-and-skip-af-on-fixed-focus.patch \
+           file://0001-wait-for-any-vendor-s-camera-service.patch \
+           file://0002-fix-the-parameter-helpers-memory-handling.patch \
+           file://0003-give-I420Rotate-the-source-size.patch \
+           file://0004-dequeue-events-on-32-bit-with-a-64-bit-time_t.patch \
+           file://0005-accept-cameras-that-only-preview-in-NV21.patch \
+           file://0006-use-a-preview-frame-rate-the-camera-offers.patch \
+           file://0007-only-drive-autofocus-on-cameras-that-have-it.patch \
            file://droidcam2v4l2.service \
 "
 SRCREV = "6e7970d83efe290565dc6cd91fb2224d56998291"
 PV = "0.0+git"
-PR = "r1"
+PR = "r2"
 
 DEPENDS = "glib-2.0 droidmedia libhybris libyuv"
 

@@ -1,0 +1,114 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 14 Nov 2026 07:02:49 +0100
+Subject: [PATCH] droidcam2v4l2: fix the parameter helpers' memory handling
+
+droid_media_camera_get_parameter_value() freed its copy of the
+parameter string and then returned strlen() of a pointer into it. It
+also left value_out unterminated when the value did not fit.
+
+Both helpers strdup()ed the string droid_media_camera_get_parameters()
+returns, which is already a malloc()ed copy for the caller to free, so
+it leaked on every call, and strdup(NULL) crashed when the HAL returned
+no parameters. A token without '=' dereferenced NULL.
+
+Take the length before freeing, use g_strlcpy(), own the returned
+string directly, return early on NULL and skip tokens without '='.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/droidcam2v4l2.c | 41 ++++++++++++++++++++++++++---------------
+ 1 file changed, 26 insertions(+), 15 deletions(-)
+
+diff --git a/src/droidcam2v4l2.c b/src/droidcam2v4l2.c
+index e433b8c..a0893d3 100644
+--- a/src/droidcam2v4l2.c
++++ b/src/droidcam2v4l2.c
+@@ -246,30 +246,36 @@ droid_media_camera_get_parameter_value(DroidMediaCamera *camera, const char *par
+ {
+     char *original_params, *handle;
+ 
++    /* droid_media_camera_get_parameters() returns a malloc()ed copy. */
+     if (params)
+         original_params = strdup(params);
+     else
+-        original_params = strdup(droid_media_camera_get_parameters(camera));
++        original_params = droid_media_camera_get_parameters(camera);
+ 
+     handle = original_params;
+ 
+     while (original_params && *original_params) {
+-        const char *key = original_params;
+-        char *value = strchr(original_params, '=');
+-        *value = '\0';
+-        value++;
+-        char *next = strchr(value, ';');
++        char *key = original_params;
++        char *next = strchr(original_params, ';');
+         if (next) {
+             *next = '\0';
+             next++;
+         }
+         original_params = next;
+ 
++        char *value = strchr(key, '=');
++        if (!value)
++            continue;
++        *value = '\0';
++        value++;
++
+         if (strcmp(key, parameter_name) == 0) {
++            size_t len = strlen(value);
++
+             if (value_out && value_len)
+-                strncpy(value_out, value, value_len);
++                g_strlcpy(value_out, value, value_len);
+             free(handle);
+-            return strlen(value);
++            return len;
+         }
+     }
+ 
+@@ -280,26 +286,31 @@ droid_media_camera_get_parameter_value(DroidMediaCamera *camera, const char *par
+ bool
+ droid_media_camera_add_parameters(DroidMediaCamera *camera, const char *params)
+ {
+-    char *original_params = strdup(droid_media_camera_get_parameters(camera));
++    char *original_params = droid_media_camera_get_parameters(camera);
+     char *handle = original_params;
+ 
++    if (!original_params)
++        return false;
++
+     size_t final_buffer_size = strlen(original_params) + strlen(params) + 1;
+     char *final_params = malloc(final_buffer_size);
+     *final_params = '\0';
+ 
+     while (original_params && *original_params) {
+-        const char *key = original_params;
+-        char *value = strchr(original_params, '=');
+-        *value = '\0';
+-        value++;
+-
+-        char *next = strchr(value, ';');
++        char *key = original_params;
++        char *next = strchr(original_params, ';');
+         if (next) {
+             *next = '\0';
+             next++;
+         }
+         original_params = next;
+ 
++        char *value = strchr(key, '=');
++        if (!value)
++            continue;
++        *value = '\0';
++        value++;
++
+         strcat(final_params, key);
+         strcat(final_params, "=");
+ 
+-- 
+2.53.0
+
