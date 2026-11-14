@@ -30,6 +30,7 @@ SRC_URI = "git://github.com/mer-hybris/ofono-binder-plugin.git;branch=master;pro
            file://0018-unit-Test-the-SIM-card-power-cycle.patch \
            file://0019-ofono-binder-Report-a-present-card-without-applicati.patch \
            file://0020-unit-Test-when-the-SIM-driver-reports-a-SIM-inserted.patch \
+           file://0021-unit-Test-the-SIM-driver-s-card-reset.patch \
 "
 
 PV = "1.1.39"

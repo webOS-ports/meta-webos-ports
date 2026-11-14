@@ -1,0 +1,354 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [unit] Test the SIM driver's card reset
+
+reset_card is what an LPA calls after switching an eUICC profile.
+unit_sim now drives it through the setSimCardPower requests that
+binder_sim_card sends for it. It checks that oFono is answered only
+once the card is powered up again, that a failure to power it down or
+up is reported, that a second reset while one is going on fails without
+disturbing the first, and that a SIM driver removed halfway isn't called
+back while the card still gets powered up.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ unit/unit_sim/unit_sim.c | 255 ++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 249 insertions(+), 6 deletions(-)
+
+diff --git a/unit/unit_sim/unit_sim.c b/unit/unit_sim/unit_sim.c
+index 5810b66..b0990e9 100644
+--- a/unit/unit_sim/unit_sim.c
++++ b/unit/unit_sim/unit_sim.c
+@@ -20,6 +20,10 @@
+  * sets the card status the way binder_sim_card leaves it after reading
+  * it, and counts what binder_sim_status_changed_cb() makes of it in
+  * ofono_sim_inserted_notify() calls.
++ *
++ * It also drives the reset_card driver method, which an LPA calls after
++ * switching an eUICC profile, through the setSimCardPower requests that
++ * binder_sim_card sends for it.
+  */
+ 
+ #include "binder_sim.c"
+@@ -33,6 +37,8 @@ GLOG_MODULE_DEFINE("unit_sim");
+ 
+ struct radio_request {
+     int refcount;
++    RADIO_REQ code;
++    RadioRequestCompleteFunc complete;
+     GDestroyNotify destroy;
+     gpointer user_data;
+ };
+@@ -53,6 +59,10 @@ static struct test_state {
+     GPtrArray* pending; /* Submitted, not yet completed */
+     guint inserted; /* ofono_sim_inserted_notify(TRUE) calls */
+     guint removed;  /* ofono_sim_inserted_notify(FALSE) calls */
++    guint errors;   /* ofono_error() calls */
++    void* sim_data; /* ofono_sim_get_data() */
++    guint reset_done;   /* reset_card callbacks */
++    enum ofono_error_type reset_error; /* What the last one got */
+ } test;
+ 
+ /*==========================================================================*
+@@ -62,7 +72,7 @@ static struct test_state {
+ void ofono_debug(const char* format, ...) {}
+ void ofono_info(const char* format, ...) {}
+ void ofono_warn(const char* format, ...) {}
+-void ofono_error(const char* format, ...) {}
++void ofono_error(const char* format, ...) { test.errors++; }
+ 
+ void
+ ofono_encode_hex(
+@@ -114,7 +124,7 @@ ofono_bool_t ofono_parse_get_response_3g(const void* response,
+     unsigned int* structure, unsigned char* access, unsigned short* efid)
+     { TEST_NOT_REACHED(FALSE); }
+ void* ofono_sim_get_data(struct ofono_sim* sim)
+-    { TEST_NOT_REACHED(NULL); }
++    { return test.sim_data; }
+ enum ofono_sim_state ofono_sim_get_state(struct ofono_sim* sim)
+     { TEST_NOT_REACHED(OFONO_SIM_STATE_NOT_PRESENT); }
+ void ofono_sim_initialized_notify(struct ofono_sim* sim)
+@@ -131,7 +141,7 @@ void ofono_sim_set_active_card_slot(struct ofono_sim* sim, unsigned int val)
+ void ofono_sim_set_card_slot_count(struct ofono_sim* sim, unsigned int val)
+     { g_assert_not_reached(); }
+ void ofono_sim_set_data(struct ofono_sim* sim, void* data)
+-    { g_assert_not_reached(); }
++    { test.sim_data = data; }
+ int ofono_sim_driver_register_version(const struct ofono_sim_driver* d,
+     int version)
+     { TEST_NOT_REACHED(0); }
+@@ -143,9 +153,9 @@ unsigned long ofono_watch_add_sim_state_changed_handler(struct ofono_watch* w,
+ struct ofono_watch* ofono_watch_new(const char* path)
+     { TEST_NOT_REACHED(NULL); }
+ void ofono_watch_remove_handler(struct ofono_watch* w, unsigned long id)
+-    { g_assert_not_reached(); }
++    { g_assert(!w); }
+ void ofono_watch_unref(struct ofono_watch* w)
+-    { g_assert_not_reached(); }
++    { g_assert(!w); }
+ 
+ /*==========================================================================*
+  * Fake libgbinder-radio, enough for binder_sim_card to come up
+@@ -166,6 +176,8 @@ radio_request_new2(
+         memset(args, 0, sizeof(*args));
+     }
+     req->refcount = 1;
++    req->code = code;
++    req->complete = complete;
+     req->destroy = destroy;
+     req->user_data = user_data;
+     return req;
+@@ -270,7 +282,7 @@ radio_client_remove_handlers(
+ RadioConfig* radio_config_new(void)
+     { TEST_NOT_REACHED(NULL); }
+ void radio_config_unref(RadioConfig* config)
+-    { g_assert_not_reached(); }
++    { g_assert(!config); }
+ RADIO_INTERFACE_TYPE radio_config_interface_type(RadioConfig* config)
+     { TEST_NOT_REACHED(RADIO_INTERFACE_TYPE_NONE); }
+ RadioRequest* radio_config_request_new(RadioConfig* config,
+@@ -426,6 +438,232 @@ test_apps_gone(
+     test_setup_deinit(&setup);
+ }
+ 
++/*==========================================================================*
++ * reset_card
++ *==========================================================================*/
++
++/* What binder_sim_card asks for on a HIDL 1.4 radio */
++#define TEST_POWER_REQ RADIO_REQ_SET_SIM_CARD_POWER_1_1
++
++/* The SIM as binder_sim_probe() leaves it, for what reset_card needs */
++static
++void
++test_setup_driver(
++    TestSetup* setup)
++{
++    setup->self->g = radio_request_group_new(&setup->client);
++    setup->self->network_g = radio_request_group_new(&setup->client);
++    ofono_sim_set_data(NULL, setup->self);
++}
++
++static
++void
++test_reset_done(
++    const struct ofono_error* error,
++    void* data)
++{
++    g_assert(data == &test);
++    test.reset_done++;
++    test.reset_error = error->type;
++}
++
++static
++void
++test_reset_card(
++    void)
++{
++    binder_sim_driver.reset_card(NULL, test_reset_done, &test);
++}
++
++/* How many requests with this code are pending */
++static
++guint
++test_pending(
++    RADIO_REQ code)
++{
++    guint i, n = 0;
++
++    for (i = 0; i < test.pending->len; i++) {
++        const RadioRequest* req = g_ptr_array_index(test.pending, i);
++
++        if (req->code == code) {
++            n++;
++        }
++    }
++    return n;
++}
++
++/* Complete the pending request with this code */
++static
++void
++test_complete_error(
++    RADIO_REQ code,
++    RADIO_ERROR error)
++{
++    guint i;
++
++    for (i = 0; i < test.pending->len; i++) {
++        RadioRequest* req = g_ptr_array_index(test.pending, i);
++
++        if (req->code == code) {
++            GBinderReader reader;
++
++            memset(&reader, 0, sizeof(reader));
++            g_ptr_array_remove_index(test.pending, i);
++            req->complete(req, RADIO_TX_STATUS_OK, RADIO_RESP_NONE,
++                error, &reader, req->user_data);
++            radio_request_unref(req);
++            return;
++        }
++    }
++    g_assert_not_reached();
++}
++
++static
++void
++test_complete(
++    RADIO_REQ code)
++{
++    test_complete_error(code, RADIO_ERROR_NONE);
++}
++
++static
++void
++test_teardown_driver(
++    TestSetup* setup)
++{
++    radio_request_group_unref(setup->self->network_g);
++    radio_request_group_unref(setup->self->g);
++}
++
++/* The card is powered down, then up, and only then is oFono answered */
++static
++void
++test_reset_ok(
++    void)
++{
++    TestSetup setup;
++
++    test_setup_init(&setup);
++    test_setup_driver(&setup);
++    test_reset_card();
++    g_assert_cmpuint(test_pending(TEST_POWER_REQ), ==, 1);
++    g_assert_cmpuint(test.reset_done, ==, 0);
++
++    test_complete(TEST_POWER_REQ);
++    g_assert_cmpuint(test_pending(TEST_POWER_REQ), ==, 1);
++    g_assert_cmpuint(test.reset_done, ==, 0);
++
++    test_complete(TEST_POWER_REQ);
++    g_assert_cmpuint(test_pending(TEST_POWER_REQ), ==, 0);
++    g_assert_cmpuint(test.reset_done, ==, 1);
++    g_assert_cmpint(test.reset_error, ==, OFONO_ERROR_TYPE_NO_ERROR);
++
++    /* And it can be done again */
++    test_reset_card();
++    test_complete(TEST_POWER_REQ);
++    test_complete(TEST_POWER_REQ);
++    g_assert_cmpuint(test.reset_done, ==, 2);
++    g_assert_cmpint(test.reset_error, ==, OFONO_ERROR_TYPE_NO_ERROR);
++    g_assert_cmpuint(test.errors, ==, 0);
++    test_teardown_driver(&setup);
++    test_setup_deinit(&setup);
++}
++
++/* The modem won't power the card down: a failure, and no power up */
++static
++void
++test_reset_down_fails(
++    void)
++{
++    TestSetup setup;
++
++    test_setup_init(&setup);
++    test_setup_driver(&setup);
++    test_reset_card();
++    test_complete_error(TEST_POWER_REQ, RADIO_ERROR_GENERIC_FAILURE);
++    g_assert_cmpuint(test_pending(TEST_POWER_REQ), ==, 0);
++    g_assert_cmpuint(test.reset_done, ==, 1);
++    g_assert_cmpint(test.reset_error, ==, OFONO_ERROR_TYPE_FAILURE);
++    test_teardown_driver(&setup);
++    test_setup_deinit(&setup);
++}
++
++/* The card went down but won't come up */
++static
++void
++test_reset_up_fails(
++    void)
++{
++    TestSetup setup;
++
++    test_setup_init(&setup);
++    test_setup_driver(&setup);
++    test_reset_card();
++    test_complete(TEST_POWER_REQ);
++    test_complete_error(TEST_POWER_REQ, RADIO_ERROR_GENERIC_FAILURE);
++    g_assert_cmpuint(test.reset_done, ==, 1);
++    g_assert_cmpint(test.reset_error, ==, OFONO_ERROR_TYPE_FAILURE);
++    test_teardown_driver(&setup);
++    test_setup_deinit(&setup);
++}
++
++/*
++ * A second reset while one is going on fails straight away, and leaves
++ * the first one alone.
++ */
++static
++void
++test_reset_busy(
++    void)
++{
++    TestSetup setup;
++
++    test_setup_init(&setup);
++    test_setup_driver(&setup);
++    test_reset_card();
++    test_reset_card();
++    g_assert_cmpuint(test.reset_done, ==, 1);
++    g_assert_cmpint(test.reset_error, ==, OFONO_ERROR_TYPE_FAILURE);
++    g_assert_cmpuint(test.errors, ==, 1);
++    g_assert_cmpuint(test_pending(TEST_POWER_REQ), ==, 1);
++
++    test_complete(TEST_POWER_REQ);
++    test_complete(TEST_POWER_REQ);
++    g_assert_cmpuint(test.reset_done, ==, 2);
++    g_assert_cmpint(test.reset_error, ==, OFONO_ERROR_TYPE_NO_ERROR);
++    test_teardown_driver(&setup);
++    test_setup_deinit(&setup);
++}
++
++/*
++ * The SIM driver goes away halfway. The card, which outlives it (it
++ * belongs to the slot), still gets powered up, and the gone driver
++ * isn't called back.
++ */
++static
++void
++test_reset_remove(
++    void)
++{
++    TestSetup setup;
++
++    test_setup_init(&setup);
++    test_setup_driver(&setup);
++    test_reset_card();
++
++    binder_sim_card_ref(setup.card); /* binder_sim_remove() drops one */
++    binder_sim_driver.remove(NULL);
++    setup.self = NULL;
++    g_assert(!test.sim_data);
++
++    test_complete(TEST_POWER_REQ);
++    g_assert_cmpuint(test_pending(TEST_POWER_REQ), ==, 1);
++    test_complete(TEST_POWER_REQ);
++    g_assert_cmpuint(test.reset_done, ==, 0);
++    test_setup_deinit(&setup);
++}
++
+ int main(int argc, char* argv[])
+ {
+     g_test_init(&argc, &argv, NULL);
+@@ -437,6 +675,11 @@ int main(int argc, char* argv[])
+     g_test_add_func(TEST_("removed"), test_removed);
+     g_test_add_func(TEST_("no_apps"), test_no_apps);
+     g_test_add_func(TEST_("apps_gone"), test_apps_gone);
++    g_test_add_func(TEST_("reset_ok"), test_reset_ok);
++    g_test_add_func(TEST_("reset_down_fails"), test_reset_down_fails);
++    g_test_add_func(TEST_("reset_up_fails"), test_reset_up_fails);
++    g_test_add_func(TEST_("reset_busy"), test_reset_busy);
++    g_test_add_func(TEST_("reset_remove"), test_reset_remove);
+     return g_test_run();
+ }
+ 
