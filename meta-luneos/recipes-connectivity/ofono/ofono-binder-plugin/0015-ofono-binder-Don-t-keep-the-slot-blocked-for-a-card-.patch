@@ -1,0 +1,78 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [ofono-binder] Don't keep the slot blocked for a card
+ without apps
+
+Reading the SIM status blocks the slot's request group, so that no
+other SIM request gets in the way of the status query and of the UICC
+subscription that may follow it. binder_sim_card_tx_check() releases
+the block when the card is absent, or when it's present and has an
+active GSM/UMTS application.
+
+An eUICC with no enabled profile is neither. The radio reports it as
+present, with no applications at all (seen on a MT6835 phone with
+AIDL IRadioSim: card_state=PRESENT, num_apps=0). There's nothing to
+subscribe to and no status will ever have a GSM/UMTS app, so the
+group stays blocked for as long as the card is there. Every other
+SIM request of that slot is queued behind it and never submitted,
+including iccOpenLogicalChannel, which is exactly what an LPA needs
+to reach the ISD-R and download the first profile. The request
+timeout doesn't help either, it only starts when the request is
+submitted.
+
+Once the card has had its UICC_SUBSCRIPTION_START_MS to come up and
+there's still no application to select, finish the transaction too.
+If a profile gets enabled later, its application shows up in a new
+status and is handled as before.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/binder_sim_card.c | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/src/binder_sim_card.c b/src/binder_sim_card.c
+index bd7f45e..1a7988c 100644
+--- a/src/binder_sim_card.c
++++ b/src/binder_sim_card.c
+@@ -200,6 +200,11 @@ binder_sim_card_status_free(
+     }
+ }
+ 
++static
++int
++binder_sim_card_select_app(
++    const BinderSimCardStatus* status);
++
+ static
+ void
+ binder_sim_card_tx_start(
+@@ -234,6 +239,20 @@ binder_sim_card_tx_check(
+                 status->gsm_umts_index < status->num_apps) {
+                 DBG("status tx for slot %u finished", card->slot);
+                 radio_request_group_unblock(self->g);
++            } else if (!self->status_req && !self->sub_req &&
++                !self->sub_start_timer &&
++                binder_sim_card_select_app(status) < 0) {
++                /*
++                 * The card is there but has no application to
++                 * subscribe to, e.g. an eUICC with no enabled
++                 * profile. No status will ever finish the
++                 * transaction, and the requests that such a card
++                 * is good for (logical channels to the ISD-R)
++                 * would be stuck behind it.
++                 */
++                DBG("status tx for slot %u finished, no apps",
++                    card->slot);
++                radio_request_group_unblock(self->g);
+             }
+         } else {
+             DBG("status tx for slot %u cancelled", card->slot);
+@@ -358,6 +377,8 @@ binder_sim_card_update_app(
+             app_index = binder_sim_card_select_app(status);
+             if (app_index >= 0 && !self->sub_start_timer) {
+                 binder_sim_card_subscribe(self, app_index);
++            } else if (app_index < 0) {
++                binder_sim_card_tx_check(self);
+             }
+         }
+     } else {
