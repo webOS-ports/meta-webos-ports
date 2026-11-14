@@ -34,11 +34,16 @@ DROIDMEDIA_BRANCH = "halium-16.0"
 # is ever removed. That one addition is resolved with __try_resolve_sym rather than
 # the HYBRIS_WRAPPER macros, so on an older GSI it resolves to NULL and returns
 # false instead of aborting; every mandatory symbol exists everywhere.
+# Device images are not GSIs, though: tenderloin's Android 9 image carries a
+# libdroidmedia from before the 2021 package split, which exports the init entry
+# point as droid_media_init rather than _droid_media_init (79 symbols in all).
+# 0002 falls back to the old name instead of aborting every droidmedia user.
 DROIDMEDIA_FETCH = "git://github.com/Halium/droidmedia.git;branch=${DROIDMEDIA_BRANCH};protocol=https"
 
 SRC_URI = "${DROIDMEDIA_FETCH} \
     file://0001-recorder-runtime-encoder-control-glue.patch \
     file://0001-meson-make-the-Qt5-flashlight-helper-optional.patch \
+    file://0002-hybris-fall-back-to-droid_media_init-on-older-Android-sides.patch \
 "
 
 inherit meson pkgconfig
