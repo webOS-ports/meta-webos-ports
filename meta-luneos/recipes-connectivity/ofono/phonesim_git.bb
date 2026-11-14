@@ -14,7 +14,7 @@ SRC_URI = "git://git.kernel.org/pub/scm/network/ofono/phonesim.git;protocol=http
         file://0001-Phonesim-Port-to-CMake-and-Qt6.patch \
         file://0002-default.xml-LuneOS-Branding.patch \
         file://0003-control-give-scripts-the-widget-tree-QtScript-used-to.patch \
-        file://0004-callmanager-end-every-call-when-the-radio-is-turned-.patch \
+        file://0004-callmanager-End-calls-when-the-radio-is-turned-off.patch \
 "
 
 inherit qt6-cmake
