@@ -272,35 +272,19 @@ sleep_off() {
     fi
 }
 
+# r9 switched the CPU governors to powersave at display off and kept the
+# originals here. CPU tuning is batman-luna's job now; if this file is still
+# there (upgraded while the display was off), put those governors back once.
+# /run is gone after a reboot, so this only ever runs in that window.
 GOVMARK=/run/wlan-suspend-mode.governors
-
-# Save each CPU's current scaling_governor and switch to powersave.
-# Idempotent: does nothing if the save file already exists.
-cpufreq_save_and_set() {
-    [ -e "$GOVMARK" ] && return 0
-    for f in /sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_governor; do
-        [ -f "$f" ] || continue
-        cpu=${f%/cpufreq/scaling_governor}; cpu=${cpu##*/cpu}
-        gov=$(cat "$f" 2>/dev/null) || continue
-        printf '%s=%s\n' "$cpu" "$gov"
-    done > "$GOVMARK"
-    for f in /sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_governor; do
-        [ -f "$f" ] || continue
-        echo powersave > "$f" 2>/dev/null || true
-    done
-    log "$1 -> cpufreq -> powersave"
-}
-
-# Restore saved governors and remove the save file.
-cpufreq_restore() {
-    [ -e "$GOVMARK" ] || return 0
+if [ -e "$GOVMARK" ]; then
     while IFS='=' read -r cpu gov; do
         f="/sys/devices/system/cpu/cpu${cpu}/cpufreq/scaling_governor"
         [ -f "$f" ] && echo "$gov" > "$f" 2>/dev/null || true
     done < "$GOVMARK"
     rm -f "$GOVMARK"
-    log "$1 -> cpufreq -> restored"
-}
+    log "startup -> cpufreq governors left by r9 restored"
+fi
 
 apply() {  # $1 = suspendmode|normal, $2 = reason
     if [ "$1" = normal ]; then
@@ -311,10 +295,6 @@ apply() {  # $1 = suspendmode|normal, $2 = reason
     fi
     if [ "$1" = "$cur" ]; then log "$2 -> already $1"; return; fi
     if [ "$1" = suspendmode ]; then n=1; else n=0; fi
-
-    # CPU governor follows display state: powersave while screen is off,
-    # restore to saved governor when it comes back on.
-    if [ "$n" = 1 ]; then cpufreq_save_and_set "$2"; else cpufreq_restore "$2"; fi
 
     # Not on gen3 (Titan, Titan Pocket): it has no SET_MDTIM, and its private
     # command handler logs "Unknown driver command ... - ignored" and still
