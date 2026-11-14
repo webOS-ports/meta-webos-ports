@@ -11,22 +11,17 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "qtbase"
 
-WEBOS_VERSION = "1.0.0-58_3bbd046f3f87c5316a8ebf5b1f4224dfca337f96"
-PR = "r9"
+# Built from the webOS-ports fork (webosose 1.0.0-58 with the patches LuneOS
+# used to carry merged as commits). Pinned with a plain SRCREV: submission
+# tags are a webosose convention and this branch carries none.
+PV = "1.0.0-58+git"
+SRCREV = "cbfb80350a342d2694e4481cc323a9843bcb4652"
+PR = "r10"
 
 inherit webos_qmake6
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_ose_repo
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-Do-not-depend-on-QtInputSupport-for-generate_qmap.patch \
-    file://0002-generate_qmap-drop-the-QKeyboardMap-alias.patch \
-    file://0003-webos-service-match-LS2-filenames-by-suffix.patch \
-    file://0004-generate_qmap-add-the-phone-toolbelt-keys.patch \
-    file://0005-generate_qmap-add-the-emoji-picker-key.patch \
-    file://0006-generate_qmap-add-the-camera-and-programmable-keys.patch \
-    file://0007-generate_qmap-map-MediaTek-s-programmable-key.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 FILES:${PN}-dev += "${OE_QMAKE_PATH_QT_ARCHDATA}/mkspecs"
 
