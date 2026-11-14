@@ -1,0 +1,119 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 14 Nov 2026 06:58:29 +0100
+Subject: [PATCH] droidcam2v4l2: dequeue events on 32-bit with a 64-bit
+ time_t
+
+struct v4l2_event carries a struct timespec, so a 32-bit build with
+_TIME_BITS=64 (openembedded-core's default on armv7) sends a 136-byte
+VIDIOC_DQEVENT. Kernels before 5.6 only know the 32-bit time layout:
+128 bytes, or 120 on the forward-ported pre-4.0 trees whose union has
+no __s64 member. They fail it with EINVAL, the event loop exits, and
+the camera never starts when a client starts streaming.
+
+On EINVAL in a 32-bit build, retry with those layouts. The timestamp
+is spelled as two 32-bit fields, so the fallbacks keep their size
+whatever time_t is.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/droidcam2v4l2.c | 75 ++++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 74 insertions(+), 1 deletion(-)
+
+diff --git a/src/droidcam2v4l2.c b/src/droidcam2v4l2.c
+index c54b628..71b0b20 100644
+--- a/src/droidcam2v4l2.c
++++ b/src/droidcam2v4l2.c
+@@ -566,6 +566,79 @@ stop_preview(camera_config *conf)
+     pthread_mutex_unlock(&camera_lock);
+ }
+ 
++/* 32-bit userspace built with a 64-bit time_t sends a VIDIOC_DQEVENT
++ * whose size kernels before 5.6 do not know. Retry with the layouts
++ * those kernels use: 32-bit timestamp, and before 4.0 also no __s64 in
++ * the union. */
++struct v4l2_event_time32 {
++    __u32 type;
++    union {
++        __s64 value64;
++        __u8 data[64];
++    } u;
++    __u32 pending;
++    __u32 sequence;
++    __s32 tv_sec;
++    __s32 tv_nsec;
++    __u32 id;
++    __u32 reserved[8];
++};
++
++struct v4l2_event_time32_pre40 {
++    __u32 type;
++    union {
++        __u8 data[64];
++    } u;
++    __u32 pending;
++    __u32 sequence;
++    __s32 tv_sec;
++    __s32 tv_nsec;
++    __u32 id;
++    __u32 reserved[8];
++};
++
++#if defined(__arm__)
++_Static_assert(sizeof(struct v4l2_event_time32) == 128, "v4l2_event_time32 layout");
++_Static_assert(sizeof(struct v4l2_event_time32_pre40) == 120, "v4l2_event_time32_pre40 layout");
++#endif
++
++#define VIDIOC_DQEVENT_TIME32 _IOR('V', 89, struct v4l2_event_time32)
++#define VIDIOC_DQEVENT_TIME32_PRE40 _IOR('V', 89, struct v4l2_event_time32_pre40)
++
++static int
++dqevent(int fd, struct v4l2_event *event)
++{
++    int ret = ioctl(fd, VIDIOC_DQEVENT, event);
++
++    if (ret == 0 || errno != EINVAL || sizeof(long) != 4)
++        return ret;
++
++    /* Same request number as above when time_t is already 32-bit. */
++    if (VIDIOC_DQEVENT != VIDIOC_DQEVENT_TIME32) {
++        struct v4l2_event_time32 ev;
++
++        ret = ioctl(fd, VIDIOC_DQEVENT_TIME32, &ev);
++        if (ret == 0) {
++            memset(event, 0, sizeof(*event));
++            event->type = ev.type;
++            memcpy(event->u.data, ev.u.data, sizeof(ev.u.data));
++            return 0;
++        }
++        if (errno != EINVAL)
++            return ret;
++    }
++
++    struct v4l2_event_time32_pre40 ev;
++
++    ret = ioctl(fd, VIDIOC_DQEVENT_TIME32_PRE40, &ev);
++    if (ret == 0) {
++        memset(event, 0, sizeof(*event));
++        event->type = ev.type;
++        memcpy(event->u.data, ev.u.data, sizeof(ev.u.data));
++    }
++    return ret;
++}
++
+ void*
+ camera_event_loop(void *userdata)
+ {
+@@ -577,7 +650,7 @@ camera_event_loop(void *userdata)
+     while (1) {
+         struct v4l2_event event;
+         g_debug("[CAMERA %d] Waiting for events...", conf->v4l2_idx);
+-        int ret = ioctl(conf->v4l2_fd, VIDIOC_DQEVENT, &event);
++        int ret = dqevent(conf->v4l2_fd, &event);
+         if (ret < 0) {
+             if (errno == EBADF) {
+                 if (!conf->asleep)
+-- 
+2.53.0
+
