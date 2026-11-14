@@ -1,0 +1,501 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [unit] Test when the SIM driver reports a SIM inserted or
+ removed
+
+Builds binder_sim.c with binder_sim_card on a fake radio and counts the
+ofono_sim_inserted_notify() calls that card status changes lead to: a
+SIM showing up is reported once, taking it out reports it removed, a
+blank eUICC (present, no applications) is no SIM, and when an eUICC's
+profile is disabled (present, applications gone) the SIM is reported
+removed, and inserted again once a profile is enabled.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ unit/Makefile            |   1 +
+ unit/unit_sim/Makefile   |   7 +
+ unit/unit_sim/unit_sim.c | 449 +++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 457 insertions(+)
+ create mode 100644 unit/unit_sim/Makefile
+ create mode 100644 unit/unit_sim/unit_sim.c
+
+diff --git a/unit/Makefile b/unit/Makefile
+index c181034..267adec 100644
+--- a/unit/Makefile
++++ b/unit/Makefile
+@@ -12,6 +12,7 @@ all:
+ 	@$(MAKE) -C unit_ext_slot $*
+ 	@$(MAKE) -C unit_oplist $*
+ 	@$(MAKE) -C unit_radio_caps $*
++	@$(MAKE) -C unit_sim $*
+ 	@$(MAKE) -C unit_sim_card $*
+ 	@$(MAKE) -C unit_sim_settings $*
+ 	@$(MAKE) -C unit_util $*
+diff --git a/unit/unit_sim/Makefile b/unit/unit_sim/Makefile
+new file mode 100644
+index 0000000..630e91e
+--- /dev/null
++++ b/unit/unit_sim/Makefile
+@@ -0,0 +1,7 @@
++# -*- Mode: makefile-gmake -*-
++
++LINK_PKGS += libgbinder
++
++EXE = unit_sim
++
++include ../common/Makefile
+diff --git a/unit/unit_sim/unit_sim.c b/unit/unit_sim/unit_sim.c
+new file mode 100644
+index 0000000..5810b66
+--- /dev/null
++++ b/unit/unit_sim/unit_sim.c
+@@ -0,0 +1,449 @@
++/*
++ *  oFono - Open Source Telephony - binder based adaptation
++ *
++ *  Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU General Public License for more details.
++ */
++
++/*
++ * When binder_sim.c tells oFono that a SIM was inserted or removed.
++ *
++ * The card comes from binder_sim_card, here on a fake radio. The test
++ * sets the card status the way binder_sim_card leaves it after reading
++ * it, and counts what binder_sim_status_changed_cb() makes of it in
++ * ofono_sim_inserted_notify() calls.
++ */
++
++#include "binder_sim.c"
++
++#include <gutil_log.h>
++
++GLOG_MODULE_DEFINE("unit_sim");
++
++#define TEST_PREFIX "/sim/"
++#define TEST_(t) TEST_PREFIX t
++
++struct radio_request {
++    int refcount;
++    GDestroyNotify destroy;
++    gpointer user_data;
++};
++
++typedef struct test_request_group {
++    RadioRequestGroup pub;
++    RADIO_BLOCK block;
++} TestRequestGroup;
++
++/* pub comes first, so a group is its TestRequestGroup */
++#define TEST_GROUP(g) ((TestRequestGroup*)(g))
++
++struct radio_client {
++    int dummy;
++};
++
++static struct test_state {
++    GPtrArray* pending; /* Submitted, not yet completed */
++    guint inserted; /* ofono_sim_inserted_notify(TRUE) calls */
++    guint removed;  /* ofono_sim_inserted_notify(FALSE) calls */
++} test;
++
++/*==========================================================================*
++ * Stubs for the oFono core
++ *==========================================================================*/
++
++void ofono_debug(const char* format, ...) {}
++void ofono_info(const char* format, ...) {}
++void ofono_warn(const char* format, ...) {}
++void ofono_error(const char* format, ...) {}
++
++void
++ofono_encode_hex(
++    const void* in,
++    unsigned int n,
++    char out[])
++{
++    out[0] = 0;
++}
++
++enum ofono_radio_access_mode
++ofono_radio_access_max_mode(
++    enum ofono_radio_access_mode mask)
++{
++    return mask;
++}
++
++void
++ofono_sim_inserted_notify(
++    struct ofono_sim* sim,
++    ofono_bool_t inserted)
++{
++    if (inserted) {
++        test.inserted++;
++    } else {
++        test.removed++;
++    }
++}
++
++/* Nothing else in the oFono core is reached by these tests */
++#define TEST_NOT_REACHED(ret) \
++    do { g_assert_not_reached(); return ret; } while (0)
++
++unsigned int ofono_get_ef_path_2g(unsigned short id, unsigned char path[])
++    { TEST_NOT_REACHED(0); }
++unsigned int ofono_get_ef_path_3g(unsigned short id, unsigned char path[])
++    { TEST_NOT_REACHED(0); }
++void* ofono_modem_get_data(struct ofono_modem* modem)
++    { TEST_NOT_REACHED(NULL); }
++const char* ofono_modem_get_path(struct ofono_modem* modem)
++    { TEST_NOT_REACHED(NULL); }
++ofono_bool_t ofono_parse_get_response_2g(const void* response,
++    unsigned int len, unsigned int* file_len, unsigned int* record_len,
++    unsigned int* structure, unsigned char* access,
++    unsigned char* file_status)
++    { TEST_NOT_REACHED(FALSE); }
++ofono_bool_t ofono_parse_get_response_3g(const void* response,
++    unsigned int len, unsigned int* file_len, unsigned int* record_len,
++    unsigned int* structure, unsigned char* access, unsigned short* efid)
++    { TEST_NOT_REACHED(FALSE); }
++void* ofono_sim_get_data(struct ofono_sim* sim)
++    { TEST_NOT_REACHED(NULL); }
++enum ofono_sim_state ofono_sim_get_state(struct ofono_sim* sim)
++    { TEST_NOT_REACHED(OFONO_SIM_STATE_NOT_PRESENT); }
++void ofono_sim_initialized_notify(struct ofono_sim* sim)
++    { g_assert_not_reached(); }
++enum ofono_sim_password_type ofono_sim_puk2pin(
++    enum ofono_sim_password_type type)
++    { TEST_NOT_REACHED(OFONO_SIM_PASSWORD_INVALID); }
++void ofono_sim_refresh_full(struct ofono_sim* sim)
++    { g_assert_not_reached(); }
++void ofono_sim_register(struct ofono_sim* sim)
++    { g_assert_not_reached(); }
++void ofono_sim_set_active_card_slot(struct ofono_sim* sim, unsigned int val)
++    { g_assert_not_reached(); }
++void ofono_sim_set_card_slot_count(struct ofono_sim* sim, unsigned int val)
++    { g_assert_not_reached(); }
++void ofono_sim_set_data(struct ofono_sim* sim, void* data)
++    { g_assert_not_reached(); }
++int ofono_sim_driver_register_version(const struct ofono_sim_driver* d,
++    int version)
++    { TEST_NOT_REACHED(0); }
++void ofono_sim_driver_unregister(const struct ofono_sim_driver* d)
++    { g_assert_not_reached(); }
++unsigned long ofono_watch_add_sim_state_changed_handler(struct ofono_watch* w,
++    ofono_watch_cb_t cb, void* user_data)
++    { TEST_NOT_REACHED(0); }
++struct ofono_watch* ofono_watch_new(const char* path)
++    { TEST_NOT_REACHED(NULL); }
++void ofono_watch_remove_handler(struct ofono_watch* w, unsigned long id)
++    { g_assert_not_reached(); }
++void ofono_watch_unref(struct ofono_watch* w)
++    { g_assert_not_reached(); }
++
++/*==========================================================================*
++ * Fake libgbinder-radio, enough for binder_sim_card to come up
++ *==========================================================================*/
++
++RadioRequest*
++radio_request_new2(
++    RadioRequestGroup* group,
++    RADIO_REQ code,
++    GBinderWriter* args,
++    RadioRequestCompleteFunc complete,
++    GDestroyNotify destroy,
++    void* user_data)
++{
++    RadioRequest* req = g_new0(RadioRequest, 1);
++
++    if (args) {
++        memset(args, 0, sizeof(*args));
++    }
++    req->refcount = 1;
++    req->destroy = destroy;
++    req->user_data = user_data;
++    return req;
++}
++
++void
++radio_request_unref(
++    RadioRequest* req)
++{
++    if (req && !--req->refcount) {
++        if (req->destroy) {
++            req->destroy(req->user_data);
++        }
++        g_free(req);
++    }
++}
++
++gboolean
++radio_request_submit(
++    RadioRequest* req)
++{
++    req->refcount++;
++    g_ptr_array_add(test.pending, req);
++    return TRUE;
++}
++
++RadioRequest*
++radio_request_try_submit(
++    RadioRequest* req)
++{
++    radio_request_submit(req);
++    return req;
++}
++
++void
++radio_request_drop(
++    RadioRequest* req)
++{
++    if (req) {
++        /*
++         * Cancel it if it's still pending. The caller's ref is still
++         * held then, so dropping the pending one doesn't free it.
++         */
++        if (g_ptr_array_remove(test.pending, req)) {
++            g_assert_cmpint(req->refcount, >, 1);
++            req->refcount--;
++        }
++        radio_request_unref(req);
++    }
++}
++
++gboolean radio_request_retry(RadioRequest* req)
++    { return TRUE; }
++void radio_request_set_timeout(RadioRequest* req, guint ms)
++    {}
++void radio_request_set_retry(RadioRequest* req, guint ms, int count)
++    {}
++void radio_request_set_retry_func(RadioRequest* req,
++    RadioRequestRetryFunc retry)
++    {}
++void radio_request_set_blocking(RadioRequest* req, gboolean blocking)
++    {}
++
++RadioRequestGroup*
++radio_request_group_new(
++    RadioClient* client)
++{
++    TestRequestGroup* group = g_new0(TestRequestGroup, 1);
++
++    group->pub.client = client;
++    return &group->pub;
++}
++
++void radio_request_group_unref(RadioRequestGroup* group)
++    { g_free(TEST_GROUP(group)); }
++void radio_request_group_cancel(RadioRequestGroup* group)
++    {}
++RADIO_BLOCK radio_request_group_block_status(RadioRequestGroup* group)
++    { return TEST_GROUP(group)->block; }
++RADIO_BLOCK radio_request_group_block(RadioRequestGroup* group)
++    { return (TEST_GROUP(group)->block = RADIO_BLOCK_ACQUIRED); }
++void radio_request_group_unblock(RadioRequestGroup* group)
++    { TEST_GROUP(group)->block = RADIO_BLOCK_NONE; }
++
++RADIO_AIDL_INTERFACE radio_client_aidl_interface(RadioClient* client)
++    { return RADIO_AIDL_INTERFACE_NONE; }
++RADIO_INTERFACE radio_client_interface(RadioClient* client)
++    { return RADIO_INTERFACE_1_4; }
++gulong radio_client_add_indication_handler(RadioClient* client,
++    RADIO_IND code, RadioClientIndicationFunc func, gpointer user_data)
++    { return 1; }
++
++void
++radio_client_remove_handlers(
++    RadioClient* client,
++    gulong* ids,
++    int count)
++{
++    memset(ids, 0, sizeof(*ids) * count);
++}
++
++RadioConfig* radio_config_new(void)
++    { TEST_NOT_REACHED(NULL); }
++void radio_config_unref(RadioConfig* config)
++    { g_assert_not_reached(); }
++RADIO_INTERFACE_TYPE radio_config_interface_type(RadioConfig* config)
++    { TEST_NOT_REACHED(RADIO_INTERFACE_TYPE_NONE); }
++RadioRequest* radio_config_request_new(RadioConfig* config,
++    RADIO_CONFIG_REQ code, GBinderWriter* args,
++    RadioConfigRequestCompleteFunc complete, GDestroyNotify destroy,
++    void* user_data)
++    { TEST_NOT_REACHED(NULL); }
++
++/*==========================================================================*
++ * The SIM under test
++ *==========================================================================*/
++
++typedef struct test_setup {
++    RadioClient client;
++    BinderSimCard* card;
++    BinderSim* self;
++} TestSetup;
++
++static
++void
++test_setup_init(
++    TestSetup* setup)
++{
++    memset(&test, 0, sizeof(test));
++    test.pending = g_ptr_array_new();
++    memset(setup, 0, sizeof(*setup));
++    setup->card = binder_sim_card_new(&setup->client, 1);
++    setup->self = g_new0(BinderSim, 1);
++    setup->self->card = setup->card;
++    binder_sim_invalidate_passwd_state(setup->self);
++}
++
++static
++void
++test_setup_deinit(
++    TestSetup* setup)
++{
++    binder_sim_card_unref(setup->card);
++    g_free(setup->self);
++    g_assert_cmpuint(test.pending->len, ==, 0);
++    g_ptr_array_free(test.pending, TRUE);
++}
++
++/*
++ * The card has read this status. The status is allocated the way
++ * binder_sim_card frees it (apps in the same block), and the app is the
++ * one binder_sim_card would pick, the USIM.
++ */
++static
++void
++test_card_status(
++    TestSetup* setup,
++    RADIO_CARD_STATE card_state,
++    guint num_apps)
++{
++    BinderSimCard* card = setup->card;
++    BinderSimCardStatus* status = g_malloc0(sizeof(BinderSimCardStatus) +
++        num_apps * sizeof(BinderSimCardApp));
++
++    status->card_state = card_state;
++    status->pin_state = RADIO_PIN_STATE_UNKNOWN;
++    status->gsm_umts_index = num_apps ? 0 : -1;
++    status->ims_index = -1;
++    status->num_apps = num_apps;
++    if (num_apps) {
++        status->apps = (BinderSimCardApp*)(status + 1);
++        status->apps[0].app_type = RADIO_APP_TYPE_USIM;
++        status->apps[0].app_state = RADIO_APP_STATE_READY;
++    }
++
++    g_free(card->status);
++    card->status = status;
++    card->app = num_apps ? status->apps : NULL;
++    binder_sim_status_changed_cb(card, setup->self);
++}
++
++/*==========================================================================*
++ * Tests
++ *==========================================================================*/
++
++/* A SIM shows up, and is reported once */
++static
++void
++test_inserted(
++    void)
++{
++    TestSetup setup;
++
++    test_setup_init(&setup);
++    test_card_status(&setup, RADIO_CARD_STATE_PRESENT, 1);
++    g_assert_cmpuint(test.inserted, ==, 1);
++    test_card_status(&setup, RADIO_CARD_STATE_PRESENT, 1);
++    g_assert_cmpuint(test.inserted, ==, 1);
++    g_assert_cmpuint(test.removed, ==, 0);
++    test_setup_deinit(&setup);
++}
++
++/* The SIM is taken out */
++static
++void
++test_removed(
++    void)
++{
++    TestSetup setup;
++
++    test_setup_init(&setup);
++    test_card_status(&setup, RADIO_CARD_STATE_PRESENT, 1);
++    test_card_status(&setup, RADIO_CARD_STATE_ABSENT, 0);
++    g_assert_cmpuint(test.inserted, ==, 1);
++    g_assert_cmpuint(test.removed, ==, 1);
++    test_setup_deinit(&setup);
++}
++
++/* A blank eUICC is no SIM to oFono */
++static
++void
++test_no_apps(
++    void)
++{
++    TestSetup setup;
++
++    test_setup_init(&setup);
++    test_card_status(&setup, RADIO_CARD_STATE_PRESENT, 0);
++    g_assert_cmpuint(test.inserted, ==, 0);
++    g_assert_cmpuint(test.removed, ==, 0);
++    test_setup_deinit(&setup);
++}
++
++/*
++ * The eUICC's profile is disabled. The card stays present and its app
++ * goes away: oFono must hear that the SIM is gone, and when a profile is
++ * enabled again, that it is back.
++ */
++static
++void
++test_apps_gone(
++    void)
++{
++    TestSetup setup;
++
++    test_setup_init(&setup);
++    test_card_status(&setup, RADIO_CARD_STATE_PRESENT, 1);
++    test_card_status(&setup, RADIO_CARD_STATE_PRESENT, 0);
++    g_assert_cmpuint(test.inserted, ==, 1);
++    g_assert_cmpuint(test.removed, ==, 1);
++
++    test_card_status(&setup, RADIO_CARD_STATE_PRESENT, 0);
++    g_assert_cmpuint(test.removed, ==, 1);
++
++    test_card_status(&setup, RADIO_CARD_STATE_PRESENT, 1);
++    g_assert_cmpuint(test.inserted, ==, 2);
++    g_assert_cmpuint(test.removed, ==, 1);
++    test_setup_deinit(&setup);
++}
++
++int main(int argc, char* argv[])
++{
++    g_test_init(&argc, &argv, NULL);
++    gutil_log_default.level = g_test_verbose() ?
++        GLOG_LEVEL_VERBOSE : GLOG_LEVEL_NONE;
++    gutil_log_timestamp = FALSE;
++
++    g_test_add_func(TEST_("inserted"), test_inserted);
++    g_test_add_func(TEST_("removed"), test_removed);
++    g_test_add_func(TEST_("no_apps"), test_no_apps);
++    g_test_add_func(TEST_("apps_gone"), test_apps_gone);
++    return g_test_run();
++}
++
++/*
++ * Local Variables:
++ * mode: C
++ * c-basic-offset: 4
++ * indent-tabs-mode: nil
++ * End:
++ */

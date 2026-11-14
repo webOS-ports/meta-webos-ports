@@ -1,0 +1,233 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] sim: let an LPA reset the card through EuiccManager
+
+An eUICC applies an enabled or disabled profile only when the card is
+reset. Until then the modem keeps reporting the card it read last: no
+SIM after enabling a profile on a blank eUICC, the old profile after a
+disable.
+
+SGP.22 lets the LPA ask the eUICC for a REFRESH instead, but REFRESH
+is a proactive command, and the modem has to fetch it. One with no STK
+session on the card, which is the state a blank eUICC leaves it in,
+never does. Seen on a Brax3 (MT6835, AIDL radio): the eUICC answered
+the enable with SW 91 0B, a proactive command waiting, and no SIM
+indication followed. Powering the card down and up made the modem read
+it at once, and the new profile came up.
+
+Add a reset_card operation to the SIM driver, which powers the card down
+and up and reports once it is powered up again, and expose it as
+org.ofono.EuiccManager.ResetCard(). Drivers without it answer
+NotImplemented.
+
+reset_card goes at the end of the driver struct, so the SIM driver API
+version becomes 3. A plugin built against version 2 has a shorter
+struct, so its registration is copied only up to reset_card, and
+whatever follows its set_active_card_slot in memory is never called.
+Sailfish stops at version 2 and never had this member.
+
+Also document the EuiccManager interface, which had no API document.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ Makefile.am       |  2 +-
+ doc/euicc-api.txt | 63 +++++++++++++++++++++++++++++++++++++++++++++++
+ include/sim.h     | 15 ++++++++++-
+ src/sim.c         | 43 ++++++++++++++++++++++++++++++--
+ 4 files changed, 119 insertions(+), 4 deletions(-)
+ create mode 100644 doc/euicc-api.txt
+
+diff --git a/Makefile.am b/Makefile.am
+index b21f7ec..9b9c730 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -713,7 +713,7 @@ doc_files = doc/overview.txt doc/ofono-paper.txt doc/release-faq.txt \
+ 			doc/call-volume-api.txt doc/cell-broadcast-api.txt \
+ 			doc/messagemanager-api.txt doc/message-waiting-api.txt \
+ 			doc/phonebook-api.txt doc/radio-settings-api.txt \
+-			doc/sim-api.txt doc/stk-api.txt \
++			doc/sim-api.txt doc/euicc-api.txt doc/stk-api.txt \
+ 			doc/audio-settings-api.txt doc/text-telephony-api.txt \
+ 			doc/calypso-modem.txt doc/message-api.txt \
+ 			doc/location-reporting-api.txt \
+diff --git a/doc/euicc-api.txt b/doc/euicc-api.txt
+new file mode 100644
+index 0000000..a880552
+--- /dev/null
++++ b/doc/euicc-api.txt
+@@ -0,0 +1,63 @@
++EuiccManager hierarchy
++======================
++
++Service		org.ofono
++Interface	org.ofono.EuiccManager
++Object path	[variable prefix]/{modem0,modem1,...}
++
++The building blocks a Local Profile Assistant (GSMA SGP.22) needs to manage
++the profiles on an eUICC while oFono keeps the modem. The interface knows
++nothing about SGP.22 itself: the caller opens a channel to the applet it
++wants, usually ISD-R, and talks to it.
++
++It is present next to SimManager when the SIM driver supports logical
++channels.
++
++Methods		int32 OpenChannel(array{byte} aid)
++
++			Opens a logical channel to the applet with the given
++			AID, 1 to 16 bytes long, and returns the session id
++			to use with TransmitApdu and CloseChannel.
++
++			Possible Errors: [service].Error.InvalidArguments
++					 [service].Error.NotImplemented
++					 [service].Error.NotAvailable
++					 [service].Error.Failed
++
++		void CloseChannel(int32 session)
++
++			Closes a channel opened with OpenChannel.
++
++			Possible Errors: [service].Error.InvalidArguments
++					 [service].Error.NotImplemented
++					 [service].Error.Failed
++
++		array{byte} TransmitApdu(int32 session, array{byte} pdu)
++
++			Sends a command APDU on the channel and returns the
++			response, including the status word SW1 SW2. A status
++			other than 90 00 is returned as a response, not as an
++			error.
++
++			Possible Errors: [service].Error.InvalidArguments
++					 [service].Error.NotImplemented
++					 [service].Error.Failed
++
++		void ResetCard()
++
++			Powers the card down and up again, so that the modem
++			reads it afresh. An enabled or disabled profile takes
++			effect only once the card has been reset: call this
++			after the profile change, with the channels to the
++			card closed.
++
++			Returns once the card has been powered up again. The
++			new card then shows up on SimManager the usual way,
++			after a period with no card present.
++
++			SGP.22 also lets the LPA ask the eUICC to send a
++			REFRESH when the profile changes. Not every modem acts
++			on it, which is why this method exists.
++
++			Possible Errors: [service].Error.NotImplemented
++					 [service].Error.Failed
+diff --git a/include/sim.h b/include/sim.h
+index 0557f14..5825958 100644
+--- a/include/sim.h
++++ b/include/sim.h
+@@ -126,6 +126,9 @@ typedef void (*ofono_sim_set_active_card_slot_cb_t)(
+ 					const struct ofono_error *error,
+ 					void *data);
+ 
++typedef void (*ofono_sim_reset_card_cb_t)(const struct ofono_error *error,
++					void *data);
++
+ struct ofono_sim_driver {
+ 	/* Driver name, for drivers registered at runtime */
+ 	const char *name;
+@@ -214,11 +217,21 @@ struct ofono_sim_driver {
+ 			void *data);
+ 	void (*set_active_card_slot)(struct ofono_sim *sim, unsigned int index,
+ 			ofono_sim_set_active_card_slot_cb_t cb, void *data);
++	/*
++	 * Power the card down and up again, so that the modem reads it
++	 * afresh. Needed after an eUICC profile is enabled or disabled: the
++	 * profile only takes effect once the card has been reset, and not
++	 * every modem fetches the REFRESH the eUICC may ask for. Report
++	 * success once the card has been powered up again; the new card
++	 * state then arrives the usual way. Added in API version 3.
++	 */
++	void (*reset_card)(struct ofono_sim *sim,
++			ofono_sim_reset_card_cb_t cb, void *data);
+ };
+ 
+ int ofono_sim_driver_register(const struct ofono_sim_driver *d);
+ 
+-#define OFONO_SIM_DRIVER_API_VERSION 2
++#define OFONO_SIM_DRIVER_API_VERSION 3
+ #define ofono_sim_driver_register(d) \
+ 	ofono_sim_driver_register_version(d, OFONO_SIM_DRIVER_API_VERSION)
+ int ofono_sim_driver_register_version(const struct ofono_sim_driver *d,
+diff --git a/src/sim.c b/src/sim.c
+index 82ab310..2790c02 100644
+--- a/src/sim.c
++++ b/src/sim.c
+@@ -3583,6 +3583,38 @@ static DBusMessage *sim_euicc_transmit_apdu(DBusConnection *conn,
+ 	}
+ }
+ 
++static void sim_euicc_reset_card_cb(const struct ofono_error *error,
++								void *data)
++{
++	struct sim_euicc_req *req = data;
++
++	sim_euicc_req_reply(req, error->type == OFONO_ERROR_TYPE_NO_ERROR ?
++					dbus_message_new_method_return(req->msg) :
++					__ofono_error_failed(req->msg));
++}
++
++/*
++ * An eUICC applies an enabled or disabled profile only when the card is
++ * reset. SGP.22 lets the LPA ask the eUICC for a REFRESH instead, but that
++ * is a proactive command, and a modem that does not fetch it (one with no
++ * STK session yet, which is exactly the state a blank eUICC is in) never
++ * acts on it. Powering the card down and up works on every modem that
++ * supports it, so the LPA calls this once the profile change is done.
++ */
++static DBusMessage *sim_euicc_reset_card(DBusConnection *conn,
++						DBusMessage *msg, void *data)
++{
++	struct ofono_sim *sim = data;
++
++	if (sim->driver->reset_card == NULL)
++		return __ofono_error_not_implemented(msg);
++
++	sim->driver->reset_card(sim, sim_euicc_reset_card_cb,
++					sim_euicc_req_new(sim, msg));
++
++	return NULL;
++}
++
+ static const GDBusMethodTable sim_euicc_methods[] = {
+ 	{ GDBUS_ASYNC_METHOD("OpenChannel",
+ 			GDBUS_ARGS({ "aid", "ay" }),
+@@ -3595,6 +3627,8 @@ static const GDBusMethodTable sim_euicc_methods[] = {
+ 			GDBUS_ARGS({ "session", "i" }, { "pdu", "ay" }),
+ 			GDBUS_ARGS({ "response", "ay" }),
+ 			sim_euicc_transmit_apdu) },
++	{ GDBUS_ASYNC_METHOD("ResetCard", NULL, NULL,
++			sim_euicc_reset_card) },
+ 	{ }
+ };
+ 
+@@ -4200,8 +4234,9 @@ void ofono_sim_set_active_card_slot(struct ofono_sim *sim, unsigned int val)
+  * copied and the remainder is left zeroed.
+  *
+  * The version boundaries match Sailfish's: version 0 predates
+- * open_channel2, version 1 predates set_active_card_slot, and anything
+- * newer is copied whole.
++ * open_channel2, version 1 predates set_active_card_slot. Version 2 is
++ * where Sailfish stops; version 3 adds reset_card, which Sailfish never had.
++ * Anything newer is copied whole.
+  */
+ #undef ofono_sim_driver_register
+ 
+@@ -4232,6 +4267,10 @@ int ofono_sim_driver_register_version(const struct ofono_sim_driver *d,
+ 		/* Has open_channel2, predates set_active_card_slot */
+ 		copy = offsetof(struct ofono_sim_driver, set_active_card_slot);
+ 		break;
++	case 2:
++		/* Has set_active_card_slot, predates reset_card */
++		copy = offsetof(struct ofono_sim_driver, reset_card);
++		break;
+ 	default:
+ 		copy = sizeof(*d);
+ 		break;

@@ -76,6 +76,8 @@ SRC_URI:append = " \
   file://0137-call-forwarding-allow-multiple-pending-GetProperties.patch \
   file://0138-unit-test-the-atoms-that-queue-D-Bus-requests.patch \
   file://0139-sim-forget-the-IMPI-when-the-SIM-state-is-freed.patch \
+  file://0140-sim-let-an-LPA-reset-the-card-through-EuiccManager.patch \
+  file://0141-unit-test-EuiccManager.ResetCard.patch \
 "
 
 # On Halium the modem is driven by ofono-binder-plugin. The in-tree ril

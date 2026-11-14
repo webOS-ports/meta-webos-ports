@@ -1,0 +1,72 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [ofono-binder] Report a present card without applications as
+ no SIM
+
+A card is reported to oFono as inserted once it is present and has an
+application, and as removed only when it goes absent. An eUICC whose
+profile is disabled does neither: after the card has been reset it
+comes back present, with no applications at all. oFono was never told,
+and kept showing the old SIM as present, with its old provider name,
+only no longer registered. Seen on a Brax3 after disabling an eUICC
+profile: getIccCardStatus said card_state=1, num_apps=0, while oFono's
+SimManager still had Present true.
+
+Treat a card that is present but has no application oFono can use as
+no SIM. Enabling a profile again then reports the SIM as inserted
+again, as before.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/binder_sim.c | 35 +++++++++++++++++++----------------
+ 1 file changed, 19 insertions(+), 16 deletions(-)
+
+diff --git a/src/binder_sim.c b/src/binder_sim.c
+index cfb4826..5610386 100644
+--- a/src/binder_sim.c
++++ b/src/binder_sim.c
+@@ -1162,25 +1162,28 @@ binder_sim_status_changed_cb(
+     BinderSim* self = user_data;
+ 
+     GASSERT(self->card == sim);
+-    if (sim->status && sim->status->card_state == RADIO_CARD_STATE_PRESENT) {
+-        if (sim->app) {
+-            enum ofono_sim_password_type ps;
+-
+-            binder_sim_check_perm_lock(self);
+-            if (!self->inserted) {
+-                self->inserted = TRUE;
+-                ofono_info("SIM card OK");
+-                ofono_sim_inserted_notify(self->sim, TRUE);
+-            }
++    if (sim->status && sim->status->card_state == RADIO_CARD_STATE_PRESENT &&
++        sim->app) {
++        enum ofono_sim_password_type ps;
++
++        binder_sim_check_perm_lock(self);
++        if (!self->inserted) {
++            self->inserted = TRUE;
++            ofono_info("SIM card OK");
++            ofono_sim_inserted_notify(self->sim, TRUE);
++        }
+ 
+-            ps = binder_sim_passwd_state(self);
+-            if (ps != OFONO_SIM_PASSWORD_INVALID) {
+-                binder_sim_finish_passwd_state_query(self, ps);
+-            }
+-        } else {
+-            binder_sim_invalidate_passwd_state(self);
++        ps = binder_sim_passwd_state(self);
++        if (ps != OFONO_SIM_PASSWORD_INVALID) {
++            binder_sim_finish_passwd_state_query(self, ps);
+         }
+     } else {
++        /*
++         * A card that is present but has no application oFono can use
++         * is no SIM to oFono either. An eUICC looks like that once its
++         * profile is disabled: the card never goes absent, only its
++         * applications go away, and oFono would keep the old SIM.
++         */
+         binder_sim_invalidate_passwd_state(self);
+         if (self->inserted) {
+             self->inserted = FALSE;

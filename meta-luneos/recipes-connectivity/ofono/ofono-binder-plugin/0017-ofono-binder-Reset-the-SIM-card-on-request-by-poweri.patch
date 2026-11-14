@@ -1,0 +1,459 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [ofono-binder] Reset the SIM card on request by powering it
+ down and up
+
+An eUICC applies an enabled or disabled profile only when the card is
+reset, and until then the modem keeps reporting the card it read last.
+The eUICC can ask for the reset itself with a REFRESH, but that is a
+proactive command, and a modem that has no STK session on the card
+never fetches it. A blank eUICC leaves it in exactly that state. Seen
+on a Brax3 (MT6835, AIDL radio): the enable was answered with SW 91 0B
+and nothing followed, while setSimCardPower down and up made the modem
+read the card at once.
+
+binder_sim_card_power_cycle() does that power cycle: setSimCardPower
+(IRadioSim), setSimCardPower_1_1 (IRadio 1.1 and later) or the boolean
+setSimCardPower of IRadio 1.0. The requests go through the card's own
+request group. Powering down makes the modem report the card gone, the
+status query that follows blocks that group, and only requests of the
+group holding the block still go through, so powering up again never
+waits for the status of a card that isn't there. Powering up is
+retried, and if it still fails that is logged, as nothing else would
+bring the card back. Cancelling only forgets the callback; the cycle
+goes on, so that the card isn't left powered down.
+
+The SIM driver implements oFono's reset_card with it, when built
+against a SIM driver API that has it (version 3 and later).
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/binder_sim.c      |  71 +++++++++++++-
+ src/binder_sim_card.c | 220 +++++++++++++++++++++++++++++++++++++++++-
+ src/binder_sim_card.h |  19 ++++
+ 3 files changed, 306 insertions(+), 4 deletions(-)
+
+diff --git a/src/binder_sim.c b/src/binder_sim.c
+index 4c73452..cfb4826 100644
+--- a/src/binder_sim.c
++++ b/src/binder_sim.c
+@@ -109,6 +109,12 @@ typedef struct binder_sim {
+     void* query_passwd_state_cb_data;
+     guint query_passwd_state_timeout_id;
+     gulong query_passwd_state_sim_status_refresh_id;
++
++#if OFONO_SIM_DRIVER_API_VERSION >= 3
++    /* reset_card context */
++    ofono_sim_reset_card_cb_t reset_card_cb;
++    void* reset_card_cb_data;
++#endif
+ } BinderSim;
+ 
+ typedef struct binder_sim_io_response {
+@@ -2741,6 +2747,59 @@ binder_sim_set_active_card_slot(
+     }
+ }
+ 
++#if OFONO_SIM_DRIVER_API_VERSION >= 3
++
++static
++void
++binder_sim_reset_card_done(
++    BinderSimCard* card,
++    gboolean ok,
++    void* user_data)
++{
++    BinderSim* self = user_data;
++    ofono_sim_reset_card_cb_t cb = self->reset_card_cb;
++    void* data = self->reset_card_cb_data;
++    struct ofono_error err;
++
++    self->reset_card_cb = NULL;
++    self->reset_card_cb_data = NULL;
++    cb(ok ? binder_error_ok(&err) : binder_error_failure(&err), data);
++}
++
++/*
++ * An eUICC applies an enabled or disabled profile only when the card is
++ * reset, and a modem that has no STK session with the card doesn't act
++ * on the REFRESH the eUICC may send. Powering the card down and up
++ * makes the modem read it again either way.
++ */
++static
++void
++binder_sim_reset_card(
++    struct ofono_sim* sim,
++    ofono_sim_reset_card_cb_t cb,
++    void* data)
++{
++    BinderSim* self = binder_sim_get_data(sim);
++    struct ofono_error err;
++
++    DBG_(self, "");
++    if (self->reset_card_cb) {
++        ofono_error("SIM card reset already in progress");
++    } else {
++        self->reset_card_cb = cb;
++        self->reset_card_cb_data = data;
++        if (binder_sim_card_power_cycle(self->card,
++            binder_sim_reset_card_done, self)) {
++            return;
++        }
++        self->reset_card_cb = NULL;
++        self->reset_card_cb_data = NULL;
++    }
++    cb(binder_error_failure(&err), data);
++}
++
++#endif /* OFONO_SIM_DRIVER_API_VERSION >= 3 */
++
+ static
+ gboolean
+ binder_sim_register(
+@@ -2841,6 +2900,13 @@ static void binder_sim_remove(struct ofono_sim *sim)
+     ofono_watch_remove_handler(self->watch, self->sim_state_watch_id);
+     ofono_watch_unref(self->watch);
+ 
++#if OFONO_SIM_DRIVER_API_VERSION >= 3
++    /* Like a slot switch, a reset in progress goes unanswered */
++    if (self->reset_card_cb) {
++        binder_sim_card_power_cycle_cancel(self->card);
++    }
++#endif
++
+     binder_sim_card_remove_all_handlers(self->card, self->card_event_id);
+     binder_sim_card_unref(self->card);
+ 
+@@ -3181,7 +3247,10 @@ static const struct ofono_sim_driver binder_sim_driver = {
+     .session_read_record    = binder_sim_session_read_record,
+     .session_read_info      = binder_sim_session_read_info,
+     .logical_access         = binder_sim_logical_access,
+-    .set_active_card_slot   = binder_sim_set_active_card_slot
++    .set_active_card_slot   = binder_sim_set_active_card_slot,
++#if OFONO_SIM_DRIVER_API_VERSION >= 3
++    .reset_card             = binder_sim_reset_card
++#endif
+ };
+ 
+ void
+diff --git a/src/binder_sim_card.c b/src/binder_sim_card.c
+index 1a7988c..959b62a 100644
+--- a/src/binder_sim_card.c
++++ b/src/binder_sim_card.c
+@@ -68,6 +68,10 @@ typedef struct binder_sim_card_object {
+     guint sim_io_idle_id;
+     guint sim_io_idle_count;
+     GHashTable* sim_io_pending;
++    RadioRequest* power_req;
++    gboolean power_up;
++    BinderSimCardPowerCycleFunc power_cycle_fn;
++    void* power_cycle_data;
+ } BinderSimCardObject;
+ 
+ struct binder_sim_card_api {
+@@ -82,8 +86,21 @@ struct binder_sim_card_api {
+     void (*write_set_uicc_subscription_args)(
+         GBinderWriter* writer,
+         const RadioSelectUiccSub* sub);
++    RADIO_REQ set_sim_card_power_req;
++    void (*write_set_sim_card_power_args)(
++        GBinderWriter* writer,
++        gboolean up);
+ };
+ 
++/*
++ * CardPowerState, in IRadio@1.1 types.hal and in IRadioSim.aidl.
++ * POWER_UP_PASS_THROUGH isn't used here.
++ */
++typedef enum binder_sim_card_power_state {
++    BINDER_SIM_CARD_POWER_DOWN = 0,
++    BINDER_SIM_CARD_POWER_UP = 1
++} BINDER_SIM_CARD_POWER_STATE;
++
+ enum binder_sim_card_signal {
+     SIGNAL_STATUS_RECEIVED,
+     SIGNAL_STATUS_CHANGED,
+@@ -692,6 +709,36 @@ binder_sim_card_api_write_set_uicc_subscription_args_hidl(
+         sizeof(*sub));
+ }
+ 
++/*
++ * IRadio.hal:
++ * oneway setSimCardPower(int32_t serial, bool powerUp);
++ */
++static
++void
++binder_sim_card_api_write_set_sim_card_power_args_hidl_1_0(
++    GBinderWriter* writer,
++    gboolean up)
++{
++    gbinder_writer_append_bool(writer, up);
++}
++
++/*
++ * IRadio.hal 1.1:
++ * oneway setSimCardPower_1_1(int32_t serial, CardPowerState powerUp);
++ *
++ * IRadioSim.aidl:
++ * void setSimCardPower(in int serial, in CardPowerState powerUp);
++ */
++static
++void
++binder_sim_card_api_write_set_sim_card_power_args(
++    GBinderWriter* writer,
++    gboolean up)
++{
++    gbinder_writer_append_int32(writer, up ?
++        BINDER_SIM_CARD_POWER_UP : BINDER_SIM_CARD_POWER_DOWN);
++}
++
+ static const BinderSimCardApi binder_sim_card_api_hidl = {
+     "hidl",
+     RADIO_IND_SIM_STATUS_CHANGED,
+@@ -699,7 +746,22 @@ static const BinderSimCardApi binder_sim_card_api_hidl = {
+     RADIO_REQ_GET_ICC_CARD_STATUS,
+     binder_sim_card_api_read_icc_card_status_hidl,
+     RADIO_REQ_SET_UICC_SUBSCRIPTION,
+-    binder_sim_card_api_write_set_uicc_subscription_args_hidl
++    binder_sim_card_api_write_set_uicc_subscription_args_hidl,
++    RADIO_REQ_SET_SIM_CARD_POWER_1_1,
++    binder_sim_card_api_write_set_sim_card_power_args
++};
++
++/* IRadio 1.0 has no setSimCardPower_1_1, only the boolean one */
++static const BinderSimCardApi binder_sim_card_api_hidl_1_0 = {
++    "hidl_1_0",
++    RADIO_IND_SIM_STATUS_CHANGED,
++    RADIO_IND_SUBSCRIPTION_STATUS_CHANGED,
++    RADIO_REQ_GET_ICC_CARD_STATUS,
++    binder_sim_card_api_read_icc_card_status_hidl,
++    RADIO_REQ_SET_UICC_SUBSCRIPTION,
++    binder_sim_card_api_write_set_uicc_subscription_args_hidl,
++    RADIO_REQ_SET_SIM_CARD_POWER,
++    binder_sim_card_api_write_set_sim_card_power_args_hidl_1_0
+ };
+ 
+ /*==========================================================================*
+@@ -851,9 +913,113 @@ static const BinderSimCardApi binder_sim_card_api_aidl = {
+     RADIO_SIM_REQ_GET_ICC_CARD_STATUS,
+     binder_sim_card_api_read_icc_card_status_aidl,
+     RADIO_SIM_REQ_SET_UICC_SUBSCRIPTION,
+-    binder_sim_card_api_write_set_uicc_subscription_args_aidl
++    binder_sim_card_api_write_set_uicc_subscription_args_aidl,
++    (RADIO_REQ) RADIO_SIM_REQ_SET_SIM_CARD_POWER, /* Holds AIDL codes too */
++    binder_sim_card_api_write_set_sim_card_power_args
+ };
+ 
++/*==========================================================================*
++ * Power cycle
++ *==========================================================================*/
++
++static
++void
++binder_sim_card_power_cycle_finish(
++    BinderSimCardObject* self,
++    gboolean ok)
++{
++    BinderSimCardPowerCycleFunc fn = self->power_cycle_fn;
++    void* data = self->power_cycle_data;
++
++    self->power_cycle_fn = NULL;
++    self->power_cycle_data = NULL;
++    if (fn) {
++        fn(&self->card, ok, data);
++    }
++}
++
++static
++gboolean
++binder_sim_card_power_submit(
++    BinderSimCardObject* self,
++    gboolean up);
++
++static
++void
++binder_sim_card_power_cb(
++    RadioRequest* req,
++    RADIO_TX_STATUS status,
++    RADIO_RESP resp,
++    RADIO_ERROR error,
++    const GBinderReader* args,
++    gpointer user_data)
++{
++    BinderSimCardObject* self = THIS(user_data);
++    const gboolean up = self->power_up;
++
++    GASSERT(self->power_req == req);
++    radio_request_unref(self->power_req);
++    self->power_req = NULL;
++
++    if (status != RADIO_TX_STATUS_OK) {
++        ofono_error("setSimCardPower(%s) tx failed for slot %u",
++            up ? "up" : "down", self->card.slot);
++    } else if (error != RADIO_ERROR_NONE) {
++        ofono_error("setSimCardPower(%s) failed for slot %u: %s",
++            up ? "up" : "down", self->card.slot,
++            binder_radio_error_string(error));
++    } else if (!up) {
++        DBG("slot %u powered down", self->card.slot);
++        if (binder_sim_card_power_submit(self, TRUE)) {
++            return;
++        }
++    } else {
++        DBG("slot %u powered up", self->card.slot);
++        binder_sim_card_power_cycle_finish(self, TRUE);
++        return;
++    }
++
++    if (up) {
++        /* Nothing else would bring it back */
++        ofono_error("SIM card in slot %u may be left powered down",
++            self->card.slot);
++    }
++    binder_sim_card_power_cycle_finish(self, FALSE);
++}
++
++static
++gboolean
++binder_sim_card_power_submit(
++    BinderSimCardObject* self,
++    gboolean up)
++{
++    const BinderSimCardApi* api = self->api;
++    GBinderWriter writer;
++
++    /*
++     * Through the card's own group: when the card goes away the status
++     * query blocks that group, and requests of the group holding the
++     * block still go through. Powering the card up again mustn't wait
++     * for the status of a card that isn't there.
++     */
++    RadioRequest* req = radio_request_new2(self->g,
++        api->set_sim_card_power_req, &writer,
++        binder_sim_card_power_cb, NULL, self);
++
++    api->write_set_sim_card_power_args(&writer, up);
++    if (up) {
++        /* Retry, the card mustn't be left off */
++        radio_request_set_retry(req, BINDER_RETRY_MS, 3);
++    }
++    if (radio_request_submit(req)) {
++        self->power_req = req;
++        self->power_up = up;
++        return TRUE;
++    }
++    radio_request_unref(req);
++    return FALSE;
++}
++
+ /*==========================================================================*
+  * API
+  *==========================================================================*/
+@@ -867,7 +1033,9 @@ binder_sim_card_new(
+     BinderSimCard *card = &self->card;
+     const BinderSimCardApi* api =
+         (radio_client_aidl_interface(client) == RADIO_SIM_INTERFACE) ?
+-        &binder_sim_card_api_aidl : &binder_sim_card_api_hidl;
++        &binder_sim_card_api_aidl :
++        (radio_client_interface(client) >= RADIO_INTERFACE_1_1) ?
++        &binder_sim_card_api_hidl : &binder_sim_card_api_hidl_1_0;
+ 
+     DBG("%u %s api", slot, api->name);
+     card->slot = slot;
+@@ -931,6 +1099,51 @@ binder_sim_card_request_status(
+     }
+ }
+ 
++/*
++ * Powers the card down and up again, so that the modem reads it from
++ * scratch. An eUICC applies an enabled or disabled profile only when it
++ * is reset. fn is called once the card is powered up again, or the cycle
++ * has failed, unless binder_sim_card_power_cycle_cancel() is called first.
++ * The new card state then arrives through the usual status updates.
++ *
++ * Returns FALSE, without calling fn, if a power cycle is already going
++ * on or can't be started.
++ */
++gboolean
++binder_sim_card_power_cycle(
++    BinderSimCard* card,
++    BinderSimCardPowerCycleFunc fn,
++    void* user_data)
++{
++    BinderSimCardObject* self = binder_sim_card_cast(card);
++
++    if (G_LIKELY(self) && !self->power_req) {
++        DBG("powering slot %u down and up", card->slot);
++        if (binder_sim_card_power_submit(self, FALSE)) {
++            self->power_cycle_fn = fn;
++            self->power_cycle_data = user_data;
++            return TRUE;
++        }
++    }
++    return FALSE;
++}
++
++/*
++ * Forgets the callback of a power cycle in progress. The cycle itself
++ * goes on: stopping halfway could leave the card powered down.
++ */
++void
++binder_sim_card_power_cycle_cancel(
++    BinderSimCard* card)
++{
++    BinderSimCardObject* self = binder_sim_card_cast(card);
++
++    if (G_LIKELY(self)) {
++        self->power_cycle_fn = NULL;
++        self->power_cycle_data = NULL;
++    }
++}
++
+ void
+ binder_sim_card_sim_io_started(
+     BinderSimCard* card,
+@@ -1086,6 +1299,7 @@ binder_sim_card_finalize(
+ 
+     radio_request_drop(self->status_req);
+     radio_request_drop(self->sub_req);
++    radio_request_drop(self->power_req);
+ 
+     radio_client_remove_all_handlers(self->g->client, self->event_id);
+     radio_request_group_unblock(self->g);
+diff --git a/src/binder_sim_card.h b/src/binder_sim_card.h
+index 2698b2a..78e7478 100644
+--- a/src/binder_sim_card.h
++++ b/src/binder_sim_card.h
+@@ -55,6 +55,13 @@ void
+     BinderSimCard* card,
+     void* user_data);
+ 
++typedef
++void
++(*BinderSimCardPowerCycleFunc)(
++    BinderSimCard* card,
++    gboolean ok,
++    void* user_data);
++
+ BinderSimCard*
+ binder_sim_card_new(
+     RadioClient* client,
+@@ -81,6 +88,18 @@ binder_sim_card_request_status(
+     BinderSimCard* card)
+     BINDER_INTERNAL;
+ 
++gboolean
++binder_sim_card_power_cycle(
++    BinderSimCard* card,
++    BinderSimCardPowerCycleFunc fn,
++    void* user_data)
++    BINDER_INTERNAL;
++
++void
++binder_sim_card_power_cycle_cancel(
++    BinderSimCard* card)
++    BINDER_INTERNAL;
++
+ void
+ binder_sim_card_sim_io_started(
+     BinderSimCard* card,
