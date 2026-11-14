@@ -20,9 +20,9 @@ SRC_URI = " \
     file://com.palm.batman.perm.json \
     file://batman-luna.manifest.json \
 "
-SRCREV = "56f7f5bec539495bdef385c97f763f7117dc1ef5"
+SRCREV = "5a454297641c439c417e5b46b0b0ba29713ababc"
 PV = "1.0+git"
-PR = "r0"
+PR = "r1"
 
 inherit meson pkgconfig systemd
 
