@@ -25,11 +25,10 @@ RRECOMMENDS:${PN} += "com.webos.service.camera"
 
 PV = "0.1.0-1+git"
 
-SRCREV = "b857839900fb27d2e09917f5586c498f23c32a9d"
+SRCREV = "6762c9745568561befcbfce5ca273f1c8463474a"
 
 inherit webos_ports_repo
-# On the pull request branch until webOS-ports/luneos-faced#4 is merged.
-WEBOS_GIT_PARAM_BRANCH = "herrie/faced-biomd"
+WEBOS_GIT_PARAM_BRANCH = "master"
 WEBOS_REPO_NAME = "luneos-faced"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
