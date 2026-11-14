@@ -19,14 +19,12 @@ LIC_FILES_CHKSUM = "file://debian/copyright;md5=a8c8bc0f09b5c02c7332dcda700ec1dc
 DEPENDS = "glib-2.0 libgbinder sqlite3 openssl gstreamer1.0 libpam libfart"
 
 PV = "0.1+git"
-SRCREV = "d6ba5fedc7e9d2aa44a9207ced4008df13b30a72"
+# forky with FuriLabs/biomd PR #1 merged: overridable Makefile paths,
+# WITH_FACE, free-form finger names, the AIDL backend and the Gatekeeper
+# reconnect, which LuneOS used to carry as patches.
+SRCREV = "d48b50bb2c072d4c9bdb79f8dcfdbd80ffd4f066"
 SRC_URI = " \
     git://github.com/FuriLabs/biomd.git;protocol=https;branch=forky \
-    file://0001-Makefile-make-toolchain-flags-and-install-paths-over.patch \
-    file://0002-face-allow-building-without-the-FART-backend.patch \
-    file://0003-fingerprint-accept-free-form-finger-names.patch \
-    file://0004-fingerprint-add-an-AIDL-backend.patch \
-    file://0005-fingerprint-survive-a-restarted-Gatekeeper-HAL-in-th.patch \
     file://biomd-hal-wait.sh \
     file://10-hal-wait.conf \
 "
