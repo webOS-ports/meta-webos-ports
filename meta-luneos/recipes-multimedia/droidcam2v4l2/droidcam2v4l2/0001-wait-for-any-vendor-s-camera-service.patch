@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 14 Nov 2026 06:57:45 +0100
+Subject: [PATCH] droidcam2v4l2: wait for any vendor's camera service
+
+Only init.svc.camerahalserver was checked, which is the MediaTek name.
+Qualcomm and Samsung Halium devices run vendor.camera-provider-2-4 or
+camera-provider-2-4 instead, and droidmedia's camera_service runs on
+all of them, so droidcam2v4l2 waited forever there.
+
+Wait until any of those is running. DROIDCAM2V4L2_SERVICE names a
+single service to wait for instead.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/droidcam2v4l2.c | 49 ++++++++++++++++++++++++++++++++++++---------
+ 1 file changed, 40 insertions(+), 9 deletions(-)
+
+diff --git a/src/droidcam2v4l2.c b/src/droidcam2v4l2.c
+index 14c0bf8..e433b8c 100644
+--- a/src/droidcam2v4l2.c
++++ b/src/droidcam2v4l2.c
+@@ -717,6 +717,44 @@ wait_for_v4l2loopback_dev(void)
+     }
+ }
+ 
++/* The init service that brings up the camera HAL is named per vendor.
++ * $DROIDCAM2V4L2_SERVICE overrides the list. */
++static const char * const camera_services[] = {
++    "camerahalserver",
++    "vendor.camera-provider-2-4",
++    "camera-provider-2-4",
++    "camera_service",
++    NULL,
++};
++
++static bool
++service_running(const char *service, char *state)
++{
++    char key[128]; /* PROP_NAME_MAX (32) is too short for vendor.* names */
++
++    snprintf(key, sizeof(key), "init.svc.%s", service);
++    property_get(key, state, "");
++    return strcmp(state, "running") == 0;
++}
++
++static bool
++camera_service_running(char *state)
++{
++    const char *forced = getenv("DROIDCAM2V4L2_SERVICE");
++
++    if (forced && *forced)
++        return service_running(forced, state);
++
++    for (int i = 0; camera_services[i]; i++) {
++        if (service_running(camera_services[i], state)) {
++            g_debug("%s is running", camera_services[i]);
++            return true;
++        }
++    }
++
++    return false;
++}
++
+ int
+ main(int argc, char *argv[])
+ {
+@@ -725,15 +763,8 @@ main(int argc, char *argv[])
+     int desired_camera;
+     char service_state[PROP_VALUE_MAX];
+ 
+-    while (1) {
+-        g_debug("waiting for camerahalserver to start...");
+-        property_get("init.svc.camerahalserver", service_state, "");
+-
+-        if (strcmp(service_state, "running") == 0) {
+-            g_debug("camerahalserver is running");
+-            break;
+-        }
+-
++    while (!camera_service_running(service_state)) {
++        g_debug("waiting for a camera service to start...");
+         sleep(5);
+     }
+ 
+-- 
+2.53.0
+

@@ -1,0 +1,76 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sat, 14 Nov 2026 06:59:18 +0100
+Subject: [PATCH] droidcam2v4l2: only drive autofocus on cameras that have
+ it
+
+start_auto_focus() was called at preview start and on every frame. On
+a fixed-focus camera, such as the HP TouchPad's, which lists only
+infinity in focus-mode-values, the call never returns and the preview
+never starts. Only call it when focus-mode-values offers auto, macro or
+a continuous mode.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/droidcam2v4l2.c | 16 ++++++++++++++--
+ 1 file changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/src/droidcam2v4l2.c b/src/droidcam2v4l2.c
+index a130129..e0eca39 100644
+--- a/src/droidcam2v4l2.c
++++ b/src/droidcam2v4l2.c
+@@ -57,6 +57,7 @@ typedef struct camera_config {
+     pthread_t thread;
+ 
+     bool nv21; /* the camera only offers yuv420sp previews */
++    bool autofocus;
+ } camera_config;
+ 
+ camera_config cameras[MAX_CAMERAS];
+@@ -387,7 +388,8 @@ preview_frame_callback(void *userdata, DroidMediaData *data)
+     }
+ 
+     /* we need to pump focus every frame to keep it focused on movement */
+-    droid_media_camera_start_auto_focus(cfg->camera);
++    if (cfg->autofocus)
++        droid_media_camera_start_auto_focus(cfg->camera);
+ 
+     const uint8_t *src = data->data;
+ 
+@@ -522,6 +524,14 @@ init_camera(int index, int desired_width, int desired_height)
+         && param_list_has(parameter_buffer, "yuv420sp"))
+         nv21 = true;
+ 
++    /* start_auto_focus() never returns on a fixed-focus camera. */
++    bool autofocus = false;
++    if (droid_media_camera_get_parameter_value(camera, "focus-mode-values", parameter_buffer, sizeof(parameter_buffer), NULL))
++        autofocus = param_list_has(parameter_buffer, "auto")
++                    || param_list_has(parameter_buffer, "macro")
++                    || param_list_has(parameter_buffer, "continuous-video")
++                    || param_list_has(parameter_buffer, "continuous-picture");
++
+     /* Prefer 30 fps, else the first rate the camera offers. */
+     int frame_rate = 30;
+     if (droid_media_camera_get_parameter_value(camera, "preview-frame-rate-values", parameter_buffer, sizeof(parameter_buffer), NULL)
+@@ -561,6 +571,7 @@ init_camera(int index, int desired_width, int desired_height)
+     conf->camera_idx = index;
+     conf->parameters = strdup(parameter_buffer);
+     conf->nv21 = nv21;
++    conf->autofocus = autofocus;
+ 
+     return conf;
+ }
+@@ -599,7 +610,8 @@ start_preview(camera_config *conf)
+     callbacks.preview_frame_cb = preview_frame_callback;
+     droid_media_camera_set_callbacks(conf->camera, &callbacks, conf);
+ 
+-    droid_media_camera_start_auto_focus(conf->camera);
++    if (conf->autofocus)
++        droid_media_camera_start_auto_focus(conf->camera);
+ 
+     if (!droid_media_camera_start_preview(conf->camera)) {
+         g_warning("[CAMERA %d] Failed to start preview.", conf->v4l2_idx);
+-- 
+2.53.0
+
