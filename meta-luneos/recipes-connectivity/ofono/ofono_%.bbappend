@@ -3,7 +3,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 # oe-core's ofono_2.19.bb sets no PR. Without one here, a rebuilt package
 # carries the same version as the installed one and opkg won't upgrade it.
 # Bump it whenever the patches below change what is built.
-PR = "r1"
+PR = "r2"
 
 DEPENDS += "dbus-glib libmce-glib"
 # The modem stack differs per machine class. The default is the mainline
@@ -82,6 +82,8 @@ SRC_URI:append = " \
   file://0139-sim-forget-the-IMPI-when-the-SIM-state-is-freed.patch \
   file://0140-sim-let-an-LPA-reset-the-card-through-EuiccManager.patch \
   file://0141-unit-test-EuiccManager.ResetCard.patch \
+  file://0142-sim-report-the-card-slots-when-there-is-no-card.patch \
+  file://0143-unit-test-the-card-slots-with-no-card-present.patch \
 "
 
 # On Halium the modem is driven by ofono-binder-plugin. The in-tree ril

@@ -1,0 +1,81 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] sim: report the card slots when there is no card
+
+GetProperties returned only Present while no card was in the active
+slot, so CardSlotCount and ActiveCardSlot disappeared exactly when a
+client needed them.
+
+A modem with one logical slot and several physical ones, such as a SIM
+slot and an eUICC, is mapped to one physical slot at a time. Mapped to
+the empty one, it has no card, and the only way to reach the card that
+is there is to set ActiveCardSlot. Setting it already works with no
+card present; reading it did not. A client that cannot see more than
+one slot cannot offer the switch, and the eUICC stays out of reach.
+
+Seen on a Pixel 3a (sargo, HIDL radio): mapped to the empty nano-SIM
+slot, EuiccManager.OpenChannel failed with the radio's INTERNAL_ERR,
+SimManager reported only Present: false, and the Settings app hid its
+slot switcher. Setting ActiveCardSlot to 2 by hand brought the eUICC
+back on the first try.
+
+The slots describe the modem, not the card, so report them before the
+Present check, and say so in the API document.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ doc/sim-api.txt |  8 ++++++++
+ src/sim.c       | 17 +++++++++++------
+ 2 files changed, 19 insertions(+), 6 deletions(-)
+
+diff --git a/doc/sim-api.txt b/doc/sim-api.txt
+index c8b7a2b..e4faf84 100644
+--- a/doc/sim-api.txt
++++ b/doc/sim-api.txt
+@@ -235,3 +235,11 @@ Properties	boolean Present [readonly]
+ 
+ 			This property will range from 1 (default) to
+ 			CardSlotCount (max) value.
++
++			CardSlotCount and ActiveCardSlot describe the modem,
++			not the card, so they are reported, and ActiveCardSlot
++			can be set, while Present is false. The active slot
++			may be the empty one on a modem with a single logical
++			slot and several physical ones, such as a SIM slot and
++			an eUICC; setting ActiveCardSlot is then the way to
++			reach the card.
+diff --git a/src/sim.c b/src/sim.c
+index 2790c02..857e372 100644
+--- a/src/sim.c
++++ b/src/sim.c
+@@ -486,6 +486,17 @@ static DBusMessage *sim_get_properties(DBusConnection *conn,
+ 
+ 	ofono_dbus_dict_append(&dict, "Present", DBUS_TYPE_BOOLEAN, &present);
+ 
++	/*
++	 * The slots describe the modem, not the card, and an empty active
++	 * slot is exactly when a client needs them: setting ActiveCardSlot
++	 * is the only way to move to a slot that does have a card in it.
++	 */
++	ofono_dbus_dict_append(&dict, "CardSlotCount", DBUS_TYPE_UINT32,
++							&sim->card_slot_count);
++
++	ofono_dbus_dict_append(&dict, "ActiveCardSlot", DBUS_TYPE_UINT32,
++							&sim->active_card_slot);
++
+ 	if (!present)
+ 		goto done;
+ 
+@@ -555,12 +566,6 @@ static DBusMessage *sim_get_properties(DBusConnection *conn,
+ 	ofono_dbus_dict_append_dict(&dict, "Retries", DBUS_TYPE_BYTE,
+ 							&pin_retries_dict);
+ 
+-	ofono_dbus_dict_append(&dict, "CardSlotCount", DBUS_TYPE_UINT32,
+-							&sim->card_slot_count);
+-
+-	ofono_dbus_dict_append(&dict, "ActiveCardSlot", DBUS_TYPE_UINT32,
+-							&sim->active_card_slot);
+-
+ 	g_free(pin_retries_dict);
+ 	g_free(dbus_retries);
+ 
