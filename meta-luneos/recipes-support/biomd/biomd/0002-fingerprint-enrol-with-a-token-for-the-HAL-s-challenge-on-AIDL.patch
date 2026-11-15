@@ -1,0 +1,376 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Sun, 15 Nov 2026 17:28:13 +0100
+Subject: [PATCH] fingerprint: enrol with a token for the HAL's challenge on
+ AIDL
+
+The AIDL backend asked Gatekeeper for a HardwareAuthToken with challenge
+0 and sent that to ISession::enroll, on the assumption that the HAL does
+not check the challenge at enroll time. FPC's does: fpc_pre_enroll asks
+the TA for an enrolment challenge, and fpc_tee_authorize_enrol refuses a
+token that does not carry it. On the Moto G06 every enrolment ended
+right after the passcode, before the first touch:
+
+  fpc_tac : fpc_tac_transfer TA returned error: 0xe913406b (FPC_ERROR_STATE)
+  fpc_fingerprint_hal: do_enroll failed FPC_ERROR_STATE
+  [AIDL]fpc_daemon: onError(3)
+
+which biomd passes on as FPERROR_TIMEOUT (Error::TIMEOUT is 3).
+
+Do what the HIDL backend does with preEnroll(): call generateChallenge(),
+and when onChallengeGenerated brings the challenge, mint the token for
+it with Gatekeeper's verify() and send enroll(). The callback only
+schedules that second half on the main loop, so no binder call is made
+while the HAL is calling in. The challenge is revoked when the
+enrolment completes, fails or is cancelled, and a cancel that comes
+while the challenge is still on its way reports CANCELED. The password
+copy and the token are wiped with explicit_bzero(), which the compiler
+cannot drop.
+
+Without Gatekeeper it still enrols with an empty token, as before.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/fingerprint_binder_aidl.c | 263 ++++++++++++++++++++++++++++------
+ 1 file changed, 223 insertions(+), 40 deletions(-)
+
+diff --git a/src/fingerprint_binder_aidl.c b/src/fingerprint_binder_aidl.c
+index 1c29eb7..2201386 100644
+--- a/src/fingerprint_binder_aidl.c
++++ b/src/fingerprint_binder_aidl.c
+@@ -151,6 +151,21 @@ struct _BiomFingerprintAidl {
+     gint32 sensor_id;
+     gboolean available;
+ 
++    /*
++     * Enrolling is generateChallenge(), then Gatekeeper's verify() with that
++     * challenge, then enroll() with the token verify() mints. The challenge
++     * comes back through onChallengeGenerated, so the second half runs from
++     * there. The TA checks the token's challenge (FPC's TA refuses one minted
++     * for challenge 0 with FPC_ERROR_STATE, which the HAL reports as
++     * Error::TIMEOUT).
++     */
++    gboolean enroll_pending;
++    gchar* enroll_password;
++    guint enroll_idle_id;
++    gint64 challenge;
++    gboolean challenge_active;
++    guint revoke_idle_id;
++
+     FingerprintAidlCallbacks callbacks;
+     gpointer user_data;
+ };
+@@ -580,6 +595,137 @@ fingerprint_aidl_gatekeeper_verify(BiomFingerprintAidl* self, guint32 uid, guint
+     return success;
+ }
+ 
++static void fingerprint_aidl_take_cancel_signal(BiomFingerprintAidl* self,
++                                               GBinderReader* reader);
++
++static void
++fingerprint_aidl_forget_password(BiomFingerprintAidl* self)
++{
++    if (self->enroll_password) {
++        explicit_bzero(self->enroll_password, strlen(self->enroll_password));
++        g_clear_pointer(&self->enroll_password, g_free);
++    }
++}
++
++/* void revokeChallenge(in long challenge); */
++static gboolean
++fingerprint_aidl_revoke_challenge_idle(gpointer user_data)
++{
++    BiomFingerprintAidl* self = (BiomFingerprintAidl*) user_data;
++    GBinderLocalRequest* req;
++    GBinderWriter writer;
++
++    self->revoke_idle_id = 0;
++
++    if (!self->challenge_active || !self->session_client)
++        return G_SOURCE_REMOVE;
++
++    self->challenge_active = FALSE;
++
++    req = gbinder_client_new_request2(self->session_client, SESSION_REVOKE_CHALLENGE);
++    gbinder_local_request_init_writer(req, &writer);
++    gbinder_writer_append_int64(&writer, self->challenge);
++    fingerprint_aidl_call_void(self->session_client, SESSION_REVOKE_CHALLENGE, req,
++                               "ISession::revokeChallenge");
++
++    return G_SOURCE_REMOVE;
++}
++
++/*
++ * From the callbacks: the HAL is in the middle of calling us, so the
++ * outgoing call waits for the main loop.
++ */
++static void
++fingerprint_aidl_schedule_revoke(BiomFingerprintAidl* self)
++{
++    if (self->challenge_active && !self->revoke_idle_id)
++        self->revoke_idle_id = g_idle_add(fingerprint_aidl_revoke_challenge_idle, self);
++}
++
++/* the second half of an enrollment, once the challenge is known */
++static gboolean
++fingerprint_aidl_enroll_idle(gpointer user_data)
++{
++    BiomFingerprintAidl* self = (BiomFingerprintAidl*) user_data;
++    GBinderLocalRequest* req;
++    GBinderRemoteReply* reply;
++    GBinderWriter writer;
++    GBinderReader reader;
++    int status = GBINDER_STATUS_FAILED;
++    AidlHardwareAuthToken auth_token;
++    gboolean have_token = FALSE;
++    gboolean success = FALSE;
++    void* handle = NULL;
++    guint32 handle_size = 0;
++
++    self->enroll_idle_id = 0;
++
++    if (!self->enroll_pending)
++        return G_SOURCE_REMOVE;
++
++    self->enroll_pending = FALSE;
++    memset(&auth_token, 0, sizeof(auth_token));
++
++    if (fingerprint_aidl_gatekeeper_load_handle(0, &handle, &handle_size)) {
++        have_token = fingerprint_aidl_gatekeeper_verify(self, 0, (guint64)self->challenge,
++                                                        handle, handle_size,
++                                                        self->enroll_password, &auth_token);
++        g_free(handle);
++    }
++
++    fingerprint_aidl_forget_password(self);
++
++    if (!have_token)
++        g_warning("Could not mint an auth token; enrolling with an empty one");
++
++    /* ICancellationSignal enroll(in HardwareAuthToken hat); */
++    req = gbinder_client_new_request2(self->session_client, SESSION_ENROLL);
++    gbinder_local_request_init_writer(req, &writer);
++    fingerprint_aidl_write_auth_token(&writer, have_token ? &auth_token : NULL);
++    explicit_bzero(&auth_token, sizeof(auth_token));
++
++    reply = gbinder_client_transact_sync_reply(self->session_client, SESSION_ENROLL,
++                                                req, &status);
++
++    if (fingerprint_aidl_reply_ok(reply, status, &reader, "ISession::enroll")) {
++        fingerprint_aidl_take_cancel_signal(self, &reader);
++        success = TRUE;
++    }
++
++    gbinder_remote_reply_unref(reply);
++    gbinder_local_request_unref(req);
++
++    if (!success) {
++        fingerprint_aidl_schedule_revoke(self);
++        if (self->callbacks.error)
++            self->callbacks.error(self->user_data, FINGERPRINT_ERROR_UNABLE_TO_PROCESS, 0);
++    }
++
++    return G_SOURCE_REMOVE;
++}
++
++static int
++fingerprint_aidl_handle_challenge_generated(BiomFingerprintAidl* self, GBinderReader* reader)
++{
++    gint64 challenge;
++
++    /* void onChallengeGenerated(in long challenge); */
++    if (!gbinder_reader_read_int64(reader, &challenge)) {
++        g_warning("Failed to parse ISessionCallback::onChallengeGenerated payload");
++        return GBINDER_STATUS_FAILED;
++    }
++
++    g_debug("onChallengeGenerated");
++
++    self->challenge = challenge;
++    self->challenge_active = TRUE;
++
++    if (self->enroll_pending && !self->enroll_idle_id)
++        self->enroll_idle_id = g_idle_add(fingerprint_aidl_enroll_idle, self);
++
++    return GBINDER_STATUS_OK;
++}
++
+ static int
+ fingerprint_aidl_handle_acquired(BiomFingerprintAidl* self, GBinderReader* reader)
+ {
+@@ -614,6 +760,9 @@ fingerprint_aidl_handle_error(BiomFingerprintAidl* self, GBinderReader* reader)
+ 
+         g_debug("onError error: %d, vendor_code: %d", error, vendor_code);
+ 
++        /* an error ends the operation; the challenge was only for it */
++        fingerprint_aidl_schedule_revoke(self);
++
+         if (self->callbacks.error)
+             self->callbacks.error(self->user_data,
+                                   fingerprint_aidl_map_error(error),
+@@ -638,6 +787,9 @@ fingerprint_aidl_handle_enrollment_progress(BiomFingerprintAidl* self, GBinderRe
+         g_debug("onEnrollmentProgress enrollment_id: %d, remaining: %d",
+                 enrollment_id, remaining);
+ 
++        if (remaining == 0)
++            fingerprint_aidl_schedule_revoke(self);
++
+         if (self->callbacks.enroll_result)
+             self->callbacks.enroll_result(self->user_data, (guint32)enrollment_id,
+                                           0 /* no group on AIDL */, (guint32)remaining);
+@@ -770,6 +922,8 @@ fingerprint_aidl_session_callback(GBinderLocalObject* obj, GBinderRemoteRequest*
+             *status = GBINDER_STATUS_OK;
+             break;
+         case CB_ON_CHALLENGE_GENERATED:
++            *status = fingerprint_aidl_handle_challenge_generated(self, &reader);
++            break;
+         case CB_ON_CHALLENGE_REVOKED:
+         case CB_ON_LOCKOUT_CLEARED:
+         case CB_ON_INTERACTION_DETECTED:
+@@ -984,13 +1138,6 @@ fingerprint_aidl_perform_enrollment(BiomFingerprintAidl* self, const gchar* pass
+                                     guint32 timeout_sec)
+ {
+     GBinderLocalRequest* req;
+-    GBinderRemoteReply* reply;
+-    GBinderWriter writer;
+-    GBinderReader reader;
+-    int status = GBINDER_STATUS_FAILED;
+-    AidlHardwareAuthToken auth_token;
+-    gboolean have_token = FALSE;
+-    gboolean success = FALSE;
+     void* handle = NULL;
+     guint32 handle_size = 0;
+ 
+@@ -1004,48 +1151,60 @@ fingerprint_aidl_perform_enrollment(BiomFingerprintAidl* self, const gchar* pass
+ 
+     g_debug("Starting AIDL fingerprint enrollment sequence");
+ 
+-    memset(&auth_token, 0, sizeof(auth_token));
+-
+     if (!password)
+         password = "default_password";
+ 
+-    if (self->gatekeeper_client) {
+-        if (!fingerprint_aidl_gatekeeper_load_handle(0, &handle, &handle_size)) {
+-            g_debug("No existing handle found, enrolling password first");
+-            fingerprint_aidl_gatekeeper_delete_user(self, 0);
+-            fingerprint_aidl_gatekeeper_enroll(self, 0, password);
+-            fingerprint_aidl_gatekeeper_load_handle(0, &handle, &handle_size);
+-        }
+-
+-        if (handle) {
+-            /* the challenge is not checked at enroll time, so use 0 rather
+-             * than waiting for generateChallenge() */
+-            have_token = fingerprint_aidl_gatekeeper_verify(self, 0, 0, handle, handle_size,
+-                                                            password, &auth_token);
+-            g_free(handle);
++    if (!self->gatekeeper_client) {
++        GBinderRemoteReply* reply;
++        GBinderWriter writer;
++        GBinderReader reader;
++        int status = GBINDER_STATUS_FAILED;
++        gboolean success = FALSE;
++
++        g_warning("No Gatekeeper; enrolling with an empty auth token");
++
++        req = gbinder_client_new_request2(self->session_client, SESSION_ENROLL);
++        gbinder_local_request_init_writer(req, &writer);
++        fingerprint_aidl_write_auth_token(&writer, NULL);
++        reply = gbinder_client_transact_sync_reply(self->session_client, SESSION_ENROLL,
++                                                    req, &status);
++        if (fingerprint_aidl_reply_ok(reply, status, &reader, "ISession::enroll")) {
++            fingerprint_aidl_take_cancel_signal(self, &reader);
++            success = TRUE;
+         }
+-
+-        if (!have_token)
+-            g_warning("Could not mint an auth token; enrolling with an empty one");
++        gbinder_remote_reply_unref(reply);
++        gbinder_local_request_unref(req);
++        return success;
+     }
+ 
+-    /* ICancellationSignal enroll(in HardwareAuthToken hat); */
+-    req = gbinder_client_new_request2(self->session_client, SESSION_ENROLL);
+-    gbinder_local_request_init_writer(req, &writer);
+-    fingerprint_aidl_write_auth_token(&writer, have_token ? &auth_token : NULL);
+-
+-    reply = gbinder_client_transact_sync_reply(self->session_client, SESSION_ENROLL,
+-                                                req, &status);
+-
+-    if (fingerprint_aidl_reply_ok(reply, status, &reader, "ISession::enroll")) {
+-        fingerprint_aidl_take_cancel_signal(self, &reader);
+-        success = TRUE;
++    if (!fingerprint_aidl_gatekeeper_load_handle(0, &handle, &handle_size)) {
++        g_debug("No existing handle found, enrolling password first");
++        fingerprint_aidl_gatekeeper_delete_user(self, 0);
++        fingerprint_aidl_gatekeeper_enroll(self, 0, password);
+     }
++    g_free(handle);
+ 
+-    gbinder_remote_reply_unref(reply);
+-    gbinder_local_request_unref(req);
++    /* a challenge left over from an earlier attempt is not reused */
++    if (self->revoke_idle_id) {
++        g_source_remove(self->revoke_idle_id);
++        self->revoke_idle_id = 0;
++    }
++    fingerprint_aidl_revoke_challenge_idle(self);
++
++    fingerprint_aidl_forget_password(self);
++    self->enroll_password = g_strdup(password);
++    self->enroll_pending = TRUE;
++
++    /* void generateChallenge(); the rest follows onChallengeGenerated */
++    req = gbinder_client_new_request2(self->session_client, SESSION_GENERATE_CHALLENGE);
++    if (!fingerprint_aidl_call_void(self->session_client, SESSION_GENERATE_CHALLENGE, req,
++                                    "ISession::generateChallenge")) {
++        self->enroll_pending = FALSE;
++        fingerprint_aidl_forget_password(self);
++        return FALSE;
++    }
+ 
+-    return success;
++    return TRUE;
+ }
+ 
+ gboolean
+@@ -1091,6 +1250,22 @@ fingerprint_aidl_cancel_operation(BiomFingerprintAidl* self)
+     if (!self || !self->available)
+         return FALSE;
+ 
++    if (self->enroll_pending) {
++        /* cancelled before enroll() was sent: there is nothing to cancel in
++         * the HAL, only the challenge to give back */
++        g_debug("Enrollment cancelled while waiting for the challenge");
++        self->enroll_pending = FALSE;
++        if (self->enroll_idle_id) {
++            g_source_remove(self->enroll_idle_id);
++            self->enroll_idle_id = 0;
++        }
++        fingerprint_aidl_forget_password(self);
++        fingerprint_aidl_schedule_revoke(self);
++        if (self->callbacks.error)
++            self->callbacks.error(self->user_data, FINGERPRINT_ERROR_CANCELED, 0);
++        return TRUE;
++    }
++
+     if (!self->cancel_client) {
+         g_debug("No operation to cancel");
+         return FALSE;
+@@ -1134,6 +1309,14 @@ fingerprint_aidl_cleanup(BiomFingerprintAidl* self)
+ 
+     self->available = FALSE;
+ 
++    if (self->enroll_idle_id)
++        g_source_remove(self->enroll_idle_id);
++    if (self->revoke_idle_id)
++        g_source_remove(self->revoke_idle_id);
++    self->enroll_idle_id = self->revoke_idle_id = 0;
++    self->enroll_pending = FALSE;
++    fingerprint_aidl_forget_password(self);
++
+     if (self->session_client) {
+         /* void close(); */
+         GBinderLocalRequest* req = gbinder_client_new_request2(self->session_client,

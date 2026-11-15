@@ -28,6 +28,7 @@ SRC_URI = " \
     file://biomd-hal-wait.sh \
     file://10-hal-wait.conf \
     file://0001-fingerprint-put-the-non-null-marker-in-front-of-AIDL-parcelables.patch \
+    file://0002-fingerprint-enrol-with-a-token-for-the-HAL-s-challenge-on-AIDL.patch \
 "
 
 S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}"
