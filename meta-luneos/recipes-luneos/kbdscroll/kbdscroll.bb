@@ -17,7 +17,7 @@ PE = "1"
 PV = "1.0+git"
 
 # Pinned, never AUTOREV: see org.webosports.service.torch.bb.
-SRCREV = "6bd79d32ad65904619a4f56ae031f89020855157"
+SRCREV = "a2cd1eaaa57d535ea1fd907048cf503ec718f002"
 WEBOS_GIT_PARAM_BRANCH = "main"
 
 inherit webos_ports_repo
