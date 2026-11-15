@@ -261,10 +261,41 @@ if [ "$MODE" = container ]; then
                 echo "$ODMMARK"
                 echo "# from the vendor init's chown and chmod of /dev nodes:$INITFOUND"
                 echo "# Do not edit; regenerated each time the container starts."
-                # ueventd defaults: a node nobody gives an owner or a mode is
-                # root:root 0600, which is what init's chown or chmod alone leaves.
-                awk '{ printf "/dev/%s %s %s %s\n", $1, ($4 != "-" ? $4 : "0600"),
-                           ($2 != "-" ? $2 : "root"), ($3 != "-" ? $3 : "root") }' "$INITPERMS"
+                # A field init leaves alone keeps what the ueventd rules
+                # already give the node, as on Android, where a chown alone
+                # does not touch the mode. This rule replaces theirs, so a
+                # made-up default would win: the MindPhone's vendor init only
+                # does "chown root radio /dev/ptmx", a default of 0600 then
+                # overrode the platform's "/dev/ptmx 0666", and gsm0710muxd
+                # (uid radio) could no longer open it, so the RIL never started.
+                # Only a node no ueventd rule covers gets ueventd's own default,
+                # root:root 0600. The last matching rule wins, as in ueventd.
+                awk -v initperms="$INITPERMS" '
+                    function globre(p,   r) {
+                        r = p
+                        gsub(/[.+^$(){}|\\]/, "\\\\&", r)
+                        gsub(/\*/, ".*", r)
+                        gsub(/\?/, ".", r)
+                        return "^" r "$"
+                    }
+                    { sub(/\r$/, "") }
+                    FILENAME != initperms {
+                        if ($1 !~ /^\/dev\// || $4 == "") next
+                        p = substr($1, 6)
+                        n++; bp[n] = p; bm[n] = $2; bo[n] = $3; bg[n] = $4
+                        br[n] = (p ~ /[*?]/) ? globre(p) : ""
+                        next
+                    }
+                    {
+                        m = "0600"; o = "root"; g = "root"
+                        for (i = n; i >= 1; i--)
+                            if (bp[i] == $1 || (br[i] != "" && $1 ~ br[i])) {
+                                m = bm[i]; o = bo[i]; g = bg[i]
+                                break
+                            }
+                        printf "/dev/%s %s %s %s\n", $1, ($4 != "-" ? $4 : m),
+                               ($2 != "-" ? $2 : o), ($3 != "-" ? $3 : g)
+                    }' $FOUND "$INITPERMS"
             } > "$ODMRC.tmp" && mv -f "$ODMRC.tmp" "$ODMRC"
             echo "halium-udev-rules: wrote $(grep -c '^/dev/' "$ODMRC") container ueventd rules to $ODMRC"
         else
