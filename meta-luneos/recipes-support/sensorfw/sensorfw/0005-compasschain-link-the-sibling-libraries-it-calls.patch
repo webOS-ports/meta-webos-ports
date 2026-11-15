@@ -1,54 +1,79 @@
+From 09ab061355046f9d171be7fecbcf418a2903a1b2 Mon Sep 17 00:00:00 2001
 From: Herman van Hazendonk <github.com@herrie.org>
-Subject: [PATCH] compasschain: link the sibling libraries it calls into
+Date: Fri, 6 Nov 2026 19:21:07 +0100
+Subject: [PATCH] [compasschain] Link the sibling libraries it calls into
 
-CompassChain::resetCalibration() forwards to MagCalibrationChain, but the
-plugin only added magcalibrationchain to INCLUDEPATH and never linked it. The
-library builds regardless, carrying an undefined
-_ZN19MagCalibrationChain16resetCalibrationEv with no DT_NEEDED that could
-resolve it, and sensorfwd then rejects it at load:
+CompassChain::resetCalibration() forwards to MagCalibrationChain, and
+CompassChain casts its downsample filter to DownsampleFilter and calls
+setTimeout() on it, but the plugin only ever put those libraries on
+INCLUDEPATH and never linked them. The library builds regardless,
+carrying undefined symbols with no DT_NEEDED that could resolve them.
+When the plugins are linked with -z now, as Yocto does by default,
+sensorfwd then rejects it at load:
 
   Plugin loading error: "compasschain" - "Cannot load library
   /usr/lib/sensord-qt6/libcompasschain-qt6.so: undefined symbol:
   _ZN19MagCalibrationChain16resetCalibrationEv"
   plugin marked invalid: "compasschain" / "compasssensor"
 
-compasssensor is invalidated along with it, and sensortestapp aborts outright
-with the shipped testapp.conf because loading that plugin fails.
-
-This is not a one-off. Resolving each undefined symbol only exposes the next,
-because none of the siblings on INCLUDEPATH were ever linked:
+compasssensor and rotationsensor are invalidated along with it, so
+QtSensors clients see no rotation sensor, and sensortestapp aborts with
+the shipped testapp.conf. Resolving the symbols one at a time only
+exposes the next one:
 
   undefined symbol: _ZN19MagCalibrationChain16resetCalibrationEv
   undefined symbol: _ZN16DownsampleFilter10setTimeoutEi
   undefined symbol: _ZN17DeclinationFilter21declinationCorrectionEv
 
-so all of them are linked here rather than chasing them one at a time. The
-original instance was: CompassChain also casts
-downsampleFilter to DownsampleFilter and calls setTimeout() on it, while
-downsamplefilter was likewise only on INCLUDEPATH. With just the
-magcalibrationchain link in place the loader simply reaches the next one:
+so link all of the siblings on INCLUDEPATH.
 
-  Cannot load library /usr/lib/sensord-qt6/libcompasschain-qt6.so:
-  undefined symbol: _ZN16DownsampleFilter10setTimeoutEi
+The plugins have no soname and are installed into PLUGINPATH, which is
+not on the dynamic linker's search path, and the Loader dlopen()s a
+plugin before its Dependencies(). Give compasschain a $ORIGIN runpath
+so that those DT_NEEDED entries resolve to the libraries next to it;
+otherwise the load fails with
 
-so both have to be linked. rotationsensor is invalidated along with
-compasschain, which is why QtSensors clients (Messwerk) saw no rotation while
-the UI - which reads orientation/accelerometer - still rotated.
+  libmagcalibrationchain-qt6.so: cannot open shared object file
 
-Link them the same way every other component here links a sibling library, and
-declare the build dependency that link implies. chains/ is not CONFIG+=ordered
-- only the top-level .pro is, and that only serialises chains against filters,
-sensors, ... not the subdirs inside chains/ - so without compasschain.depends
-make starts both subdirs at once and the link races the library it needs:
+instead. A library found this way is the same object the Loader later
+opens by its full path, so nothing is loaded twice.
+
+chains/ is not CONFIG+=ordered (only the top level is, and that only
+orders chains against filters, sensors and so on, not the subdirs
+inside chains/), so also declare compasschain.depends; without it make
+may build both at once and the link loses the race:
 
   ld: cannot find -lmagcalibrationchain-qt6
 
 Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
 Upstream-Status: Submitted [https://github.com/sailfishos/sensorfw/pull/36]
 ---
+ chains/chains.pro                    |  9 +++++++++
+ chains/compasschain/compasschain.pro | 27 +++++++++++++++++++++++++++
+ 2 files changed, 36 insertions(+)
+
+diff --git a/chains/chains.pro b/chains/chains.pro
+index da6d3b9..bbe951f 100644
+--- a/chains/chains.pro
++++ b/chains/chains.pro
+@@ -7,3 +7,12 @@ SUBDIRS  = accelerometerchain \
+            orientationchain \
+            magcalibrationchain \
+            compasschain
++
++# compasschain links -lmagcalibrationchain-qt$${QT_MAJOR_VERSION}, so it cannot
++# be built at the same time as the chain it links. This directory is not
++# CONFIG+=ordered (only the top level is, and that only serialises chains
++# against filters, sensors, ... - not the subdirs within it), so without an
++# explicit dependency make is free to start both at once and compasschain's
++# link step loses the race:
++#   ld: cannot find -lmagcalibrationchain-qt6
++compasschain.depends = magcalibrationchain
+diff --git a/chains/compasschain/compasschain.pro b/chains/compasschain/compasschain.pro
+index b579921..0a6d15e 100644
 --- a/chains/compasschain/compasschain.pro
 +++ b/chains/compasschain/compasschain.pro
-@@ -17,4 +17,25 @@
+@@ -17,4 +17,31 @@ INCLUDEPATH += ../../filters/coordinatealignfilter \
                 ../../filters/magcoordinatealignfilter \
                 ../../filters/declinationfilter
  
@@ -73,19 +98,10 @@ Upstream-Status: Submitted [https://github.com/sailfishos/sensorfw/pull/36]
 +LIBS += -L../../filters/magcoordinatealignfilter -lmagcoordinatealignfilter-qt$${QT_MAJOR_VERSION}
 +LIBS += -L../../filters/avgaccfilter        -lavgaccfilter-qt$${QT_MAJOR_VERSION}
 +
- include( ../chain-config.pri )
---- a/chains/chains.pro	2026-09-03 10:01:13.366234061 +0200
-+++ b/chains/chains.pro	2026-09-03 10:01:13.372234167 +0200
-@@ -7,3 +7,12 @@
-            orientationchain \
-            magcalibrationchain \
-            compasschain
++# The plugins are installed into PLUGINPATH, which is not on the dynamic linker's
++# search path, and have no soname, so the DT_NEEDED entries above would not be
++# found when sensorfwd dlopen()s compasschain (the Loader loads a plugin before
++# its Dependencies()). Look for them next to the plugin itself.
++QMAKE_LFLAGS += "-Wl,-rpath,\'\$$ORIGIN\'"
 +
-+# compasschain links -lmagcalibrationchain-qt$${QT_MAJOR_VERSION}, so it cannot
-+# be built at the same time as the chain it links. This directory is not
-+# CONFIG+=ordered (only the top level is, and that only serialises chains
-+# against filters, sensors, ... - not the subdirs within it), so without an
-+# explicit dependency make is free to start both at once and compasschain's
-+# link step loses the race:
-+#   ld: cannot find -lmagcalibrationchain-qt6
-+compasschain.depends = magcalibrationchain
+ include( ../chain-config.pri )
