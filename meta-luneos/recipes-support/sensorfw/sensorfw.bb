@@ -19,6 +19,7 @@ SRC_URI = " \
     file://0005-compasschain-link-the-sibling-libraries-it-calls.patch \
     file://0006-lunaservice-drop-the-LunaSysMgrIpcMessages-pkgconfig.patch \
     file://0007-sensormanager-never-block-the-main-thread-on-a-full-.patch \
+    file://0008-sensord-Handle-local-socket-errors-with-Qt-5.15-and.patch \
 "
 
 do_configure:prepend() {
