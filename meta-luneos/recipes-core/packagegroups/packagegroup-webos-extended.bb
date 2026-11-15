@@ -31,9 +31,14 @@ VIRTUAL-RUNTIME_com.webos.app.browser ?= "org.webosports.app.atlas"
 # LG's com.webos.app.camera is not shipped; org.webosports.app.camera is the
 # camera app, from packagegroup-luneos-extended.
 VIRTUAL-RUNTIME_com.webos.service.camera ?= "com.webos.service.camera"
-VIRTUAL-RUNTIME_com.webos.app.notification ?= "com.webos.app.notification"
-VIRTUAL-RUNTIME_com.webos.app.statusbar ?= "com.webos.app.statusbar"
-VIRTUAL-RUNTIME_com.webos.app.volume ?= "com.webos.app.volume"
+# LG's system UI web apps are not shipped either: luna-next-cardshell draws the
+# notifications, the status bar and the volume popup itself, and nothing shows
+# these apps' windows. bootd no longer launches the notification and volume apps
+# (its 0004 patch). Setting one in local.conf installs it again; bootd would still
+# not launch it.
+VIRTUAL-RUNTIME_com.webos.app.notification ?= ""
+VIRTUAL-RUNTIME_com.webos.app.statusbar ?= ""
+VIRTUAL-RUNTIME_com.webos.app.volume ?= ""
 #LuneOS doesn't have a homeapp
 VIRTUAL-RUNTIME_com.webos.app.home ?= ""
 VIRTUAL-RUNTIME_pdm ?= "com.webos.service.pdm"
