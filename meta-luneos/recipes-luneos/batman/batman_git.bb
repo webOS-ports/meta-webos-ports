@@ -10,22 +10,29 @@ DEPENDS = "glib-2.0 libgbinder libnl"
 
 # libbatman branch of the fork, proposed upstream as FuriLabs/batman#2
 SRC_URI = "git://github.com/Herrie82/batman.git;branch=libbatman;protocol=https"
-SRCREV = "656a8a348fea6ff36f52d6f0431e0917c6b4bae7"
+SRCREV = "a74d084a91ee997ea7d95f0346c33ad4508a37ed"
 PV = "1.0+git"
-PR = "r2"
+PR = "r3"
 
-inherit meson pkgconfig
+inherit pkgconfig
 
-# Library only: the FuriOS daemon needs upower, PulseAudio and wayland.
-EXTRA_OEMESON = "-Ddaemon=false -Dnfcd_plugin=disabled"
+# The Makefile takes CFLAGS/LDFLAGS from the environment; CC and the
+# install layout go on the command line because it sets CC itself.
+EXTRA_OEMAKE = "CC='${CC}' PREFIX='${prefix}' LIBDIR='${libdir}' INCLUDEDIR='${includedir}'"
 
 COMPATIBLE_MACHINE = "(halium)"
 
-do_install:append() {
-    # luna-batman ships /etc/batman/config, which takes precedence over
-    # /var/lib/batman/config; drop the FuriOS one so there is a single place
-    # to look.
-    rm -f ${D}/var/lib/batman/config
+# Library only: the FuriOS daemon needs upower, PulseAudio and wayland.
+do_compile() {
+    oe_runmake lib
+}
+
+do_install() {
+    oe_runmake install-lib DESTDIR='${D}'
+    # luna-batman ships /etc/batman/config; libbatman still reads nice.conf
+    # from its state directory.
+    install -d ${D}/var/lib/batman
+    install -m 0644 ${S}/data/nice.conf ${D}/var/lib/batman/nice.conf
 }
 
 PACKAGES =+ "libbatman"
