@@ -13,7 +13,6 @@ DEPENDS = "qtbase luna-sysmgr-common luna-service2 json-c glib-2.0"
 
 SRC_URI = " \
     git://github.com/sailfishos/sensorfw.git;protocol=https;branch=master \
-    file://0002-sensorfwd-Preload-sensors-listed-in-preload_sensors-.patch \
     file://0003-iioadaptor-Accept-input-attributes-for-IIO_CHAN_INFO.patch \
     file://0004-qt-api-do-not-marshal-invalid-QVariant-arguments.patch \
     file://0005-compasschain-link-the-sibling-libraries-it-calls.patch \
