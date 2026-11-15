@@ -14,6 +14,7 @@ inherit allarch
 inherit webos_filesystem_paths
 inherit webos_ports_fork_repo
 inherit webos_app
+inherit webos_tweaks
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
