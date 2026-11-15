@@ -10,6 +10,7 @@ SRC_URI += " \
     file://0005-Add-dbus-policy-for-Bluez4.patch \
     file://0006-alsa-ucm-Check-UCM-verb.patch \
     file://0007-alsa-ucm-Replace-port-device-UCM-context-assertion.patch \
+    file://0008-database-simple-do-not-abort-on-a-corrupt-database-file.patch \
 "
 
 do_install:append() {
@@ -57,7 +58,7 @@ do_install:append() {
 # superseded component and collides on the next restage, taking out every
 # pulsecore consumer with the FileExistsError described above. Bumping PR gives
 # those trees a clean re-stage; it is a no-op for a fresh build.
-PR = "r1"
+PR = "r2"
 
 inherit systemd
 
