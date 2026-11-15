@@ -48,9 +48,10 @@ ROOTFS_POSTPROCESS_COMMAND += "${@oe.utils.conditional('LUNEOS_DEBUG_ACCESS', '1
 # These are addresses, not interfaces: sshd cannot match an interface. Port 22
 # is open only on usb+/rndis+ (iptables.rules), so the address can be reached
 # from elsewhere only once SSH over Wi-Fi is on (or with LUNEOS_DEBUG_ACCESS)
-# and a Wi-Fi network hands the device one of these very addresses. On qemu the
-# NAT interface is eth0, which is likewise reachable only through SSH over
-# Wi-Fi's LUNEOS-DEVMODE rule, not through the USB rules.
+# and a Wi-Fi network hands the device one of these very addresses. On qemu and
+# VirtualBox images port 22 is also open on eth0, the NAT interface, in place of
+# the USB cable (iptables_%.bbappend, qemuall only), so the host's port forward
+# reaches sshd without SSH over Wi-Fi.
 #
 # With LUNEOS_DEBUG_ACCESS PasswordAuthentication is left as it was: the empty
 # root password logs in through it. An empty list leaves out the Match block
