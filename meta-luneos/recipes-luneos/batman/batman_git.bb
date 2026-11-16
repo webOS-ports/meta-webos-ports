@@ -10,9 +10,9 @@ DEPENDS = "glib-2.0 libgbinder libnl"
 
 # libbatman branch of the fork, proposed upstream as FuriLabs/batman#2
 SRC_URI = "git://github.com/Herrie82/batman.git;branch=libbatman;protocol=https"
-SRCREV = "a74d084a91ee997ea7d95f0346c33ad4508a37ed"
+SRCREV = "09c2c769b268062c62738b3907cc669a699df43b"
 PV = "1.0+git"
-PR = "r3"
+PR = "r4"
 
 inherit pkgconfig
 
