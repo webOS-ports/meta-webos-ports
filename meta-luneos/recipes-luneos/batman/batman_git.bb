@@ -8,11 +8,10 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 
 DEPENDS = "glib-2.0 libgbinder libnl"
 
-# libbatman branch of the fork, proposed upstream as FuriLabs/batman#2
-SRC_URI = "git://github.com/Herrie82/batman.git;branch=libbatman;protocol=https"
-SRCREV = "09c2c769b268062c62738b3907cc669a699df43b"
+SRC_URI = "git://github.com/FuriLabs/batman.git;branch=forky;protocol=https"
+SRCREV = "53a107d3015be05ee90bddda61d5e178c69fdfaa"
 PV = "1.0+git"
-PR = "r4"
+PR = "r5"
 
 inherit pkgconfig
 
