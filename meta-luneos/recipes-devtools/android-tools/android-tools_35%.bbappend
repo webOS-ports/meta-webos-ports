@@ -93,6 +93,10 @@ PACKAGES =+ "${PN}-adbd-initramfs ${PN}-libs"
 FILES:${PN}-libs = "${libdir}/android/*"
 PRIVATE_LIBS:${PN}-libs = "liblog.so.0 libbase.so.0 libcutils.so.0"
 RDEPENDS:${PN}:append:class-target = " ${PN}-libs"
+# ${PN} itself is left with no files on the target, and an empty package is
+# not written unless allowed: images that install android-tools would then
+# fail in do_rootfs ("No candidates to install android-tools").
+ALLOW_EMPTY:${PN} = "1"
 # adbd links them too; the QA check wants the provider named directly.
 RDEPENDS:${PN}-adbd += "${PN}-libs"
 FILES:${PN}-adbd-initramfs = "${bindir}/adbd-initramfs"
