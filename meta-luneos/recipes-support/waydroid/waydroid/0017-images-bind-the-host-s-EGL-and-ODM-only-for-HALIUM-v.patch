@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 12 Nov 2026 06:14:06 +0100
+Subject: [PATCH] images: bind the host's EGL and ODM only for HALIUM
+ vendors
+
+mount_rootfs() bind-mounts the host's /vendor/lib*/egl over the
+container's, and the host's /odm (or /vendor/odm) to odm_extra, on every
+host that has them. Both are only meant for HALIUM vendor images, which
+run on the host's vendor blobs. A MAINLINE vendor image ships its own
+EGL (Mesa, ANGLE), and the EGL bind hides it.
+
+This happens on any host that has a /vendor/lib*/egl but whose vendor
+type comes out MAINLINE. The BraX3, a Halium host with an SDK 36 vendor
+and no ro.vndk.version, was one before e7d73e7. There the container saw
+only the host's Mali libraries, which are of no use with the image's
+gralloc. SurfaceFlinger and hwcomposer aborted with "couldn't find an
+OpenGL ES implementation", and Android never booted.
+
+Skip both binds when the vendor type is MAINLINE, as is already done for
+vendor_extra in the LXC config.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/waydroid/waydroid/pull/2479]
+---
+ tools/helpers/images.py | 21 +++++++++++----------
+ 1 file changed, 11 insertions(+), 10 deletions(-)
+
+diff --git a/tools/helpers/images.py b/tools/helpers/images.py
+index 807cdde..e5cadca 100644
+--- a/tools/helpers/images.py
++++ b/tools/helpers/images.py
+@@ -235,17 +235,18 @@ def mount_rootfs(args, images_dir, session):
+                                     upper_dir=tools.config.defaults["overlay_rw"] + "/vendor",
+                                     work_dir=tools.config.defaults["overlay_work"] + "/vendor")
+ 
+-    for egl_path in ["/vendor/lib/egl", "/vendor/lib64/egl"]:
+-        if os.path.isdir(egl_path):
++    if cfg["waydroid"]["vendor_type"] != "MAINLINE":
++        for egl_path in ["/vendor/lib/egl", "/vendor/lib64/egl"]:
++            if os.path.isdir(egl_path):
++                helpers.mount.bind(
++                    args, egl_path, tools.config.defaults["rootfs"] + egl_path)
++        if helpers.mount.ismount("/odm"):
+             helpers.mount.bind(
+-                args, egl_path, tools.config.defaults["rootfs"] + egl_path)
+-    if helpers.mount.ismount("/odm"):
+-        helpers.mount.bind(
+-            args, "/odm", tools.config.defaults["rootfs"] + "/odm_extra")
+-    else:
+-        if os.path.isdir("/vendor/odm"):
+-            helpers.mount.bind(
+-                args, "/vendor/odm", tools.config.defaults["rootfs"] + "/odm_extra")
++                args, "/odm", tools.config.defaults["rootfs"] + "/odm_extra")
++        else:
++            if os.path.isdir("/vendor/odm"):
++                helpers.mount.bind(
++                    args, "/vendor/odm", tools.config.defaults["rootfs"] + "/odm_extra")
+ 
+     make_prop(args, session, args.work + "/waydroid.prop")
+     helpers.mount.bind_file(args, args.work + "/waydroid.prop",
