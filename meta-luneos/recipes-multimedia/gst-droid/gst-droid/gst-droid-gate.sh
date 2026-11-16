@@ -35,11 +35,17 @@ omx_up() {
     binder-ping -d /dev/hwbinder "${SERVICE}" >/dev/null 2>&1
 }
 
+# One budget for both waits (this one and the camera service's below), so the two together stay
+# inside the unit's TimeoutStartSec.
+WAIT="${GST_DROID_GATE_WAIT:-30}"
+START=$(date +%s)
+waited() {
+    [ $(( $(date +%s) - START )) -ge "${WAIT}" ]
+}
+
 if ! omx_up && getprop 2>/dev/null | grep -qiE '^\[init\.svc\.[^]]*(omx|mediacodec|media\.codec)'; then
-    i=0
-    while [ "$i" -lt "${GST_DROID_GATE_WAIT:-30}" ] && ! omx_up; do
+    while ! waited && ! omx_up; do
         sleep 1
-        i=$((i + 1))
     done
 fi
 
@@ -106,9 +112,38 @@ if [ -n "${REASON}" ]; then
         ,,) GST_PLUGIN_FEATURE_RANK="${RANKS}" ;;
         *)  GST_PLUGIN_FEATURE_RANK="${GST_PLUGIN_FEATURE_RANK},${RANKS}" ;;
     esac
+    # The same trap as the OMX one, through droidcamsrc: its class_init counts the cameras, the
+    # count asks Android's media.camera, and libcamera_client waits for that service without a
+    # limit. class_init runs in gst-plugin-scanner, so where media.camera never registers the
+    # scan hangs and surface-manager with it. It never registers on a device whose adaptation
+    # says it has no camera (deviceinfo_has_camera="false"): start-android-hals.sh keeps the
+    # camera HAL down there, and minimediaservice, which hosts media.camera, then fails to
+    # start. The MindPhone sat on its boot logo for that after a reflash. GST_DROID_NO_CAMERA
+    # (0030) makes droidcamsrc report no cameras without asking; for its consumers that is
+    # the same as a device without any.
+    NO_CAMERA_MARKER=/run/luneos-device/no-camera
+    camera_up() {
+        binder-ping -d /dev/binder media.camera >/dev/null 2>&1
+    }
+    NO_CAMERA=""
+    if [ -e "${NO_CAMERA_MARKER}" ]; then
+        NO_CAMERA="the device has no camera (${NO_CAMERA_MARKER})"
+    else
+        while ! waited && ! camera_up; do
+            sleep 1
+        done
+        camera_up || NO_CAMERA="media.camera did not register within ${WAIT}s"
+    fi
+    CAMERA_ENV=""
+    if [ -n "${NO_CAMERA}" ]; then
+        CAMERA_ENV="GST_DROID_NO_CAMERA=1"
+        echo "gst-droid-gate: ${NO_CAMERA}; droidcamsrc will report no cameras"
+    else
+        systemctl unset-environment GST_DROID_NO_CAMERA
+    fi
     systemctl set-environment "GST_PLUGIN_PATH=${NEW}" \
         "GST_REGISTRY=${CACHE}/gstreamer-1.0/registry-droid.bin" \
-        "GST_PLUGIN_FEATURE_RANK=${GST_PLUGIN_FEATURE_RANK}"
+        "GST_PLUGIN_FEATURE_RANK=${GST_PLUGIN_FEATURE_RANK}" ${CAMERA_ENV}
     # GStreamer writes its registry 0600, and XDG_CACHE_HOME is the same root-owned directory for
     # every user, so the media services (umediaserver, mediaindexer, mediacontroller and each
     # g-media-pipeline, all running as "media") could neither read it nor write their own: every
