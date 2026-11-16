@@ -22,6 +22,8 @@
 #       refuses them with EINVAL. FunctionFS has AIO from Linux 3.15 only, so
 #       on older kernels without a backport (mako-halium, 3.4.113) every
 #       connection failed at its first read and the host saw "offline".
+# 0007: with LUNEOS_ADBD_ANY_KEY defined, no authorisation at all. Only
+#       adbd-initramfs (below) is built with it.
 #
 # adbd checks signatures with BoringSSL itself, so 5.1.1's OpenSSL fix for
 # mincrypt's RSA_verify() has no counterpart here.
@@ -35,6 +37,7 @@ SRC_URI += " \
     file://0004-adb-read-a-host-s-key-no-further-than-its-packet.patch \
     file://0005-adbd-notice-that-the-USB-worker-has-exited-on-glibc.patch \
     file://0006-adbd-fall-back-to-blocking-FunctionFS-I-O-without-AI.patch \
+    file://0007-adbd-let-any-host-in-when-built-for-the-initramfs-debug.patch \
 "
 
 # adbd starts only while USB debugging and developer mode are both on; see
@@ -52,3 +55,48 @@ FILES:${PN}-adbd += " \
     ${systemd_system_unitdir}/android-tools-adbd.service.d/05-devmode.conf \
     ${localstatedir}/lib/adbd \
 "
+
+# adbd for the Halium initramfs's debug shell (INITRAMFS_DEBUG_SHELL = "1",
+# meta-android/conf/layer.conf), which starts it when the boot fails. The
+# rootfs's adbd is no use there: it asks the developer mode service about
+# every host, and the initramfs has neither that service nor adb_keys, so it
+# would let nobody in. This one lets every host in (patch 0007), so it is
+# built only in debug-shell builds and a release feed never has it.
+#
+# Its own package, installed as /usr/bin/adbd-initramfs, so it can never
+# replace the rootfs's adbd. It is built without systemd (the initramfs has
+# none) and depends on ${PN}-libs alone, not on ${PN}: ${PN} pulls in 7-Zip
+# and android-tools-conf-configfs, about 7 MB the initramfs has no use for
+# and which some boot partitions cannot spare.
+LUNEOS_ADBD_INITRAMFS = "${@'1' if d.getVar('INITRAMFS_DEBUG_SHELL') == '1' else '0'}"
+
+do_compile:append:class-target() {
+    if [ "${LUNEOS_ADBD_INITRAMFS}" = "1" ]; then
+        # adbd.mk names its objects and its output after NAME, so this
+        # neither reuses nor overwrites the rootfs adbd's objects.
+        CXXFLAGS="${CXXFLAGS} -DLUNEOS_ADBD_ANY_KEY" \
+            oe_runmake -f ${S}/debian/system/adbd.mk -C ${S} NAME=adbd-initramfs
+    fi
+}
+
+do_install:append:class-target() {
+    if [ "${LUNEOS_ADBD_INITRAMFS}" = "1" ]; then
+        install -D -p -m0755 ${S}/debian/out/system/adbd-initramfs \
+            ${D}${bindir}/adbd-initramfs
+    fi
+}
+
+# The Android libraries adbd links against, apart from ${PN}, so that
+# adbd-initramfs can have them without the rest. ${PN} still depends on
+# them, so the rootfs gets exactly the files it had before.
+PACKAGES =+ "${PN}-adbd-initramfs ${PN}-libs"
+FILES:${PN}-libs = "${libdir}/android/*"
+PRIVATE_LIBS:${PN}-libs = "liblog.so.0 libbase.so.0 libcutils.so.0"
+RDEPENDS:${PN}:append:class-target = " ${PN}-libs"
+# adbd links them too; the QA check wants the provider named directly.
+RDEPENDS:${PN}-adbd += "${PN}-libs"
+FILES:${PN}-adbd-initramfs = "${bindir}/adbd-initramfs"
+# Its libraries in ${libdir}/android are private, so the automatic
+# shared-library dependencies cannot find them.
+RDEPENDS:${PN}-adbd-initramfs = "${PN}-libs"
+RRECOMMENDS:${PN}-adbd-initramfs = "kernel-module-libcomposite kernel-module-usb-f-fs"
