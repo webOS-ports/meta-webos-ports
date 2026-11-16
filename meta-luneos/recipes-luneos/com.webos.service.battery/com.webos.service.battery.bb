@@ -11,7 +11,7 @@ DEPENDS = "nyx-lib luna-service2 json-c glib-2.0"
 
 PV = "1.0.0-1+git"
 PR = "r8"
-SRCREV = "1462652f05e712bb43f40c4403af57e0fec923db"
+SRCREV = "2c922a2453d06cd31847bd45d07946ce97304f98"
 
 inherit webos_ports_fork_repo
 inherit webos_cmake
