@@ -23,8 +23,8 @@
 #       on older kernels without a backport (mako-halium, 3.4.113) every
 #       connection failed at its first read and the host saw "offline".
 #
-# 5.1.1's patch 0003 (mincrypt RSA_verify() going to OpenSSL's) has no
-# counterpart: adbd 35 checks signatures with BoringSSL itself.
+# adbd checks signatures with BoringSSL itself, so 5.1.1's OpenSSL fix for
+# mincrypt's RSA_verify() has no counterpart here.
 # Named in full: ${BP} is "android-tools-35%" while a bbappend is parsed.
 FILESEXTRAPATHS:prepend := "${THISDIR}/android-tools-35.0.2:"
 SRC_URI:remove = "file://debian/deb-adbd-adbd-don-t-require-authorization-on-Linux.patch"
@@ -35,4 +35,20 @@ SRC_URI += " \
     file://0004-adb-read-a-host-s-key-no-further-than-its-packet.patch \
     file://0005-adbd-notice-that-the-USB-worker-has-exited-on-glibc.patch \
     file://0006-adbd-fall-back-to-blocking-FunctionFS-I-O-without-AI.patch \
+"
+
+# adbd starts only while USB debugging and developer mode are both on; see
+# the drop-in. adbd runs as root.
+SRC_URI += "file://adbd-devmode.conf"
+
+do_install:append:class-target() {
+    install -D -m 0644 ${UNPACKDIR}/adbd-devmode.conf \
+        ${D}${systemd_system_unitdir}/android-tools-adbd.service.d/05-devmode.conf
+    # The keys' directory: root's alone. devmode writes adb_keys in it (0600).
+    install -d -m 0700 ${D}${localstatedir}/lib/adbd
+}
+
+FILES:${PN}-adbd += " \
+    ${systemd_system_unitdir}/android-tools-adbd.service.d/05-devmode.conf \
+    ${localstatedir}/lib/adbd \
 "
