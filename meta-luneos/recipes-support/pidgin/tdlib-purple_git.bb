@@ -23,7 +23,9 @@ SRC_URI += " \
     file://0009-webOS-show-a-poll-s-votes-in-the-Messaging-app-and-a.patch \
     file://0010-webOS-hand-the-Messaging-app-received-files-file-URI.patch \
     file://0011-webOS-name-who-a-forward-is-from-whatever-it-came-fr.patch \
-    file://0012-Take-the-login-value-from-the-Telegram-chat-whatever-.patch \
+    file://0012-Ask-for-login-input-in-a-chat-that-goes-by-an-id-no-.patch \
+    file://0013-Keep-the-login-code-out-of-the-debug-log.patch \
+    file://0014-webOS-remove-a-deleted-account-s-store-again.patch \
 "
 SRCREV_upstream = "e460589266fa4132c85f270efb4f2c8d332dbcb5"
 
