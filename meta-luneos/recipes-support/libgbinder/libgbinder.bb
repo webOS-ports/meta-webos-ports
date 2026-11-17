@@ -13,8 +13,8 @@ SRC_URI = "git://github.com/mer-hybris/libgbinder.git;branch=master;protocol=htt
     file://0001-gbinder-Don-t-record-offsets-of-NULL-buffer-objects.patch \
 "
 
-PV = "1.1.52"
-SRCREV = "e906afcffbfa51b7fbefe042a13b933d9e8dfdd9"
+PV = "1.1.55+git"
+SRCREV = "6faaa1cf6d456ed34145a3e68b94bd091d1ce42a"
 
 EXTRA_OEMAKE = "KEEP_SYMBOLS=1"
 PARALLEL_MAKE = ""

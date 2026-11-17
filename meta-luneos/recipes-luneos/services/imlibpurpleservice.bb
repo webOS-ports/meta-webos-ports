@@ -30,7 +30,7 @@ inherit webos_systemd
 
 LUNEOS_SYSTEMD_SERVICE = "imlibpurpleservice.service"
 
-SRCREV = "752adbb4d7c4593ca3fe137e51a7824b5d082e29"
+SRCREV = "3ba7e7c0112a88ab4597dfee3f1b85ca499bc803"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
