@@ -8,7 +8,7 @@ DEPENDS = "jemalloc db8 boost curl libpalmsocket libsandbox pmloglib icu json-c 
 
 PV = "2.0.0-99+git"
 PR = "r1"
-SRCREV = "350073d1eaf5fa9382cd04e6b6a4ab598f3e2e3b"
+SRCREV = "ad8ceebdbac740c20ee24e6d46981e31b99877c7"
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/mojomail:"
 
