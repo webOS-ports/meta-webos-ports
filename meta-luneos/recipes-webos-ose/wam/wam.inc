@@ -22,7 +22,7 @@ SRCREV = "be46ccd0fbc967a4f0007c6b6c776dcaff51d2b6"
 
 PV = "1.0.2-100"
 
-INC_PR = "r100"
+INC_PR = "r101"
 
 WAM_BUILD_SYSTEM ?= "webos_cmake"
 WAM_BUILD_DEFAULT_PLUGIN ?= "1"
