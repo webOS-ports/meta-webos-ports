@@ -61,6 +61,7 @@ SRC_URI += " \
     file://0020-webOS-keep-a-received-WhatsApp-sticker-as-WebP.patch \
     file://0021-webOS-Facebook-typing-receipts-edits-deletes-rich-se.patch \
     file://0022-webOS-show-the-old-WhatsApp-messages-the-phone-sends.patch \
+    file://0023-webOS-connect-the-account-removed-handler-once-libpu.patch \
     file://meowcaller/0001-Build-against-upstream-whatsmeow.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0002-mlow-speed-up-the-encoder-for-32-bit-ARM.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0003-Fix-the-video-call-media-path-against-live-WhatsApp-.patch;patchdir=third_party/meowcaller \

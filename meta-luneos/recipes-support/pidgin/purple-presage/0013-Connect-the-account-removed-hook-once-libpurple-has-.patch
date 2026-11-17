@@ -1,0 +1,74 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 17 Nov 2026 20:23:12 +0100
+Subject: [PATCH] Connect the account-removed hook once libpurple has
+ registered it
+
+The hook that deletes a removed account's store was connected as the
+plug-in loads. purple_core_init loads protocol plug-ins
+(purple_plugins_probe) before purple_accounts_init registers the
+accounts' signals (core.c, libpurple 2.14.14), so libpurple refused the
+connection ("Something tried to register a callback for the
+'account-removed' signal, but we do not have any signals registered with
+the given handle"), the hook never ran, and the store outlived its
+account.
+
+It is now connected from an idle callback of high priority, which runs
+once purple_core_init has returned and before the main loop does anything
+else, and is cancelled if the plug-in is unloaded first.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/hoehermann/purple-presage/pull/57]
+---
+ src/c/init.c | 24 ++++++++++++++++++++++--
+ 1 file changed, 22 insertions(+), 2 deletions(-)
+
+diff --git a/src/c/init.c b/src/c/init.c
+index 8574bce..19ea2ab 100644
+--- a/src/c/init.c
++++ b/src/c/init.c
+@@ -30,6 +30,19 @@ static const char * list_icon(PurpleAccount *account, PurpleBuddy *buddy) {
+     return "signal";
+ }
+ 
++// The idle callback that is to connect the account-removed hook, while it has not run
++static guint account_removed_source = 0;
++
++// Run before anything else the main loop has to do, a request to delete an account among it
++static gboolean connect_account_removed(gpointer plugin) {
++    account_removed_source = 0;
++    if (!purple_signal_connect(purple_accounts_get_handle(), "account-removed", plugin,
++                               PURPLE_CALLBACK(presage_account_removed_cb), NULL)) {
++        purple_debug_error(PLUGIN_NAME, "account-removed: not connected, a removed account's store will be left\n");
++    }
++    return G_SOURCE_REMOVE;
++}
++
+ static gboolean libpurple2_plugin_load(PurplePlugin *plugin) {
+     if (rust_runtime != NULL) {
+         return FALSE;
+@@ -47,8 +60,11 @@ static gboolean libpurple2_plugin_load(PurplePlugin *plugin) {
+     // Per-account store teardown: when the transport deletes an account, purple_accounts_delete()
+     // emits "account-removed". Hook it (keyed to this plugin's accounts inside the callback) so the
+     // orphaned on-disk Signal store is removed. Handle is the plugin, so it is disconnected in unload.
+-    purple_signal_connect(purple_accounts_get_handle(), "account-removed", plugin,
+-                          PURPLE_CALLBACK(presage_account_removed_cb), NULL);
++    // Not here but once the main loop runs: purple_core_init loads protocol plug-ins before
++    // purple_accounts_init registers the accounts' signals, so a connection made now is refused.
++    if (!account_removed_source) {
++        account_removed_source = g_idle_add_full(G_PRIORITY_HIGH, connect_account_removed, plugin, NULL);
++    }
+ 
+     // Register com.palm.signal.call NOW, at plugin load - NOT at presage_login. The stock Phone app's
+     // CallSynergizer subscribes to every PHONE transport's callStateQuery ONCE at its own launch (device
+@@ -65,6 +81,10 @@ static gboolean libpurple2_plugin_load(PurplePlugin *plugin) {
+ }
+ 
+ static gboolean libpurple2_plugin_unload(PurplePlugin *plugin) {
++    if (account_removed_source) {
++        g_source_remove(account_removed_source);
++        account_removed_source = 0;
++    }
+     purple_signals_disconnect_by_handle(plugin);
+     if (rust_runtime != NULL) {
+         presage_rust_destroy(rust_runtime);
