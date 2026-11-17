@@ -1,0 +1,47 @@
+From 3a6766b711abf46c749a27f2b66e6e4aa2f51cc7 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Tue, 17 Nov 2026 09:32:21 +0100
+Subject: [PATCH 1/2] sysbus: make com.palm.storage a static service
+
+storaged is started by its own systemd unit (files/systemd/storaged.service,
+WantedBy=multi-user.target), but its luna-service2 service file declared
+Type=dynamic, so ls-hubd also launches it on the first call to
+com.palm.storage. At boot that call comes early: udev runs storage.sh on
+the gadget's first host state change, which luna-sends
+diskmode/changed. Whichever of the two copies starts second fails to take
+the pid file lock and aborts. On the FuriLabs FLX1s (radon) the hub's copy
+wins every boot, and systemd restarts its unit five times into the same
+abort until it gives up:
+
+  storaged[1887]: Failed to acquire lock, exiting.
+  systemd[1]: storaged.service: Main process exited, code=dumped, status=6/ABRT
+  systemd[1]: storaged.service: Start request repeated too quickly.
+
+so storaged.service is "failed" on every boot, and the storaged that does
+run lives in ls-hubd.service's cgroup, outside its unit and its
+Restart=on-failure. When the unit wins instead, the hub's copy aborts and
+the early call can fail.
+
+Declare the service Type=static, as the services that have their own unit
+do (audiod, sam, bootd, notificationmgr, powermgr and the rest). ls-hubd
+then never launches storaged itself; a call that arrives before storaged
+has registered is held in its QueryName wait list (up to
+g_conf_query_name_timeout_ms, 20 s by default) and delivered once the unit
+has started it, so the boot-time udev notification is not lost.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/webOS-ports/storaged/pull/15]
+---
+ files/sysbus/com.palm.storage.service.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/files/sysbus/com.palm.storage.service.in b/files/sysbus/com.palm.storage.service.in
+index f79f518..e423ca4 100644
+--- a/files/sysbus/com.palm.storage.service.in
++++ b/files/sysbus/com.palm.storage.service.in
+@@ -21,4 +21,4 @@
+ [D-BUS Service]
+ Name=com.palm.storage
+ Exec=@WEBOS_INSTALL_SBINDIR@/storaged -d -s
+-Type=dynamic
++Type=static

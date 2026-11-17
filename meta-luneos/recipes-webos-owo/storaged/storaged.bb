@@ -19,8 +19,11 @@ LUNEOS_SYSTEMD_SERVICE = "${PN}.service"
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = "1"
 WEBOS_SYSTEM_BUS_FILES_LOCATION = "${S}/files/sysbus"
 
-SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE} \
+    file://0001-sysbus-make-com.palm.storage-a-static-service.patch \
+    file://0002-udev-fix-the-usb_gadget-rule-and-match-android_usb-o.patch \
+"
 
 PV = "2.1.0-5+git"
-PR = "r1"
+PR = "r3"
 SRCREV = "49b6e8477debb54c924f3352a663ab2db1ad3014"
