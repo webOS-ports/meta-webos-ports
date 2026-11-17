@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/GPL-3.0-only;md5=c79ff39f19dfec
 
 PE = "2"
 PV = "0.3.0-7+git"
-SRCREV = "65fac5570b2d73b378bc217eaa85691582935dae"
+SRCREV = "767c1793ddb4cf533b1b8cce59a2ee061995fd02"
 
 DEPENDS += "qtbase qtdeclarative qtdeclarative-native"
 
