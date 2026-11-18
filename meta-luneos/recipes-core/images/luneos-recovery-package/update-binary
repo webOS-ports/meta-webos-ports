@@ -1,0 +1,152 @@
+#!/system/bin/sh
+# Installs LuneOS from an Android recovery ("Apply update", adb sideload) on a
+# device whose recovery has no use for the classic luneos-package: A/B slots,
+# an encrypted f2fs /data, no /sbin/mount. It writes the same images as the
+# fastboot package, so the result is the same as flash.sh.
+#
+# Recovery runs this as: update-binary <api version> <status fd> <zip path>
+# Everything it needs comes from the recovery ramdisk: sh, toybox and ziptool.
+
+OUTFD=$2
+ZIP=$3
+DEVICE="###DEVICE###"
+BLOCK=/dev/block/by-name
+SUMS=/tmp/luneos-sha256sums
+LOG=/tmp/luneos-install.log
+FAILED=/tmp/luneos-extract-failed
+# Size of the pieces a large image is split into, in MiB.
+PART_MIB=###PART_MIB###
+
+# Writing to the fd by path works whatever its number; a shell redirect to it
+# is limited to single digits on some shells.
+to_recovery() {
+    printf '%s\n' "$1" > "/proc/self/fd/$OUTFD"
+}
+
+ui_print() {
+    to_recovery "ui_print $1"
+    to_recovery "ui_print"
+    echo "$1"
+}
+
+show_log() {
+    [ -s "$LOG" ] || return 0
+    tail -n 5 "$LOG" | while IFS= read -r line; do
+        ui_print "$line"
+    done
+}
+
+die() {
+    ui_print "ERROR: $1"
+    show_log
+    ui_print "LuneOS was not installed completely."
+    ui_print "Run this package again, or flash the fastboot package."
+    exit 1
+}
+
+device_matches() {
+    for prop in ro.product.vendor.device ro.lineage.device ro.product.device ro.build.product; do
+        [ "$(getprop "$prop")" = "$DEVICE" ] && return 0
+    done
+    return 1
+}
+
+# The partition an image goes to. Only userdata has no slot.
+partition_of() {
+    case $1 in
+    userdata) echo "$BLOCK/userdata" ;;
+    *) echo "$BLOCK/$1$SLOT" ;;
+    esac
+}
+
+# Sets SHA, SIZE and PARTS from this package's checksum list ("<sha256> <size>
+# <parts> <name>"); fails if the image is not in the package. PARTS is 0 for an
+# image stored whole.
+image_info() {
+    line=$(grep " $1\.img\$" "$SUMS") || return 1
+    SHA=${line%% *}
+    line=${line#* }
+    SIZE=${line%% *}
+    line=${line#* }
+    PARTS=${line%% *}
+}
+
+# Writes one zip entry to the partition, starting <mib> MiB in. ziptool unpacks
+# an entry into memory before it writes any of it, which is why a large image
+# comes in pieces. A pipeline only reports its last command, so a failed unzip
+# leaves a mark instead.
+write_entry() {
+    { unzip -p "$ZIP" "$1" 2>>"$LOG" || : > "$FAILED"; } |
+        dd of="$part" bs=1048576 seek="$2" conv=notrunc 2>>"$LOG"
+    [ ! -e "$FAILED" ] || die "cannot unpack $1 from the package"
+}
+
+check_image() {
+    image_info "$1" || return 0
+    part=$(partition_of "$1")
+    [ -b "$part" ] || die "no partition $part"
+    part_size=$(blockdev --getsize64 "$part") || die "cannot read the size of $part"
+    # Not [ -le ]: mksh's integers can be 32-bit, and these sizes are not.
+    smaller=$(printf '%s\n%s\n' "$SIZE" "$part_size" | sort -n | head -n 1)
+    [ "$smaller" = "$SIZE" ] || die "$1.img ($SIZE bytes) does not fit $part ($part_size bytes)"
+}
+
+flash_image() {
+    image_info "$1" || return 0
+    part=$(partition_of "$1")
+    ui_print "Writing $1$([ "$1" = userdata ] || echo "$SLOT")..."
+    blockdev --setrw "$part" 2>/dev/null
+    if [ "$PARTS" = 0 ]; then
+        write_entry "$1.img" 0
+    else
+        i=0
+        while [ "$i" -lt "$PARTS" ]; do
+            write_entry "$(printf '%s.img.%03d' "$1" "$i")" "$((i * PART_MIB))"
+            i=$((i + 1))
+        done
+    fi
+    blockdev --flushbufs "$part" 2>/dev/null
+    sync
+    # So the check below reads the flash, not what was just written to the cache.
+    echo 3 2>/dev/null > /proc/sys/vm/drop_caches
+    ui_print "Checking $1..."
+    actual=$(head -c "$SIZE" "$part" | sha256sum | cut -d' ' -f1)
+    [ "$actual" = "$SHA" ] || die "$1 does not match the package after writing"
+}
+
+ui_print "LuneOS installer for $DEVICE"
+
+device_matches || die "this package is for $DEVICE; this is $(getprop ro.product.vendor.device)"
+
+SLOT=$(getprop ro.boot.slot_suffix)
+[ -n "$SLOT" ] && ui_print "Active slot: $SLOT"
+
+rm -f "$LOG" "$FAILED"
+unzip -p "$ZIP" SHA256SUMS > "$SUMS" 2>"$LOG" || die "cannot read the package"
+[ -s "$SUMS" ] || die "the package has no checksum list"
+image_info userdata || die "the package has no userdata image"
+image_info boot || die "the package has no boot image"
+
+# Check everything before the first write.
+for image in userdata vbmeta boot init_boot; do
+    check_image "$image"
+done
+
+if grep -q ' /data ' /proc/mounts; then
+    umount /data || die "cannot unmount /data"
+fi
+
+ui_print "This erases everything on the device."
+
+# The boot images come last: until they are written, an interrupted install
+# leaves whatever was there before in charge of booting.
+to_recovery "progress 0.85 300"
+flash_image userdata
+to_recovery "progress 0.15 10"
+for image in vbmeta boot init_boot; do
+    flash_image "$image"
+done
+sync
+
+ui_print "LuneOS is installed. Choose Reboot system now."
+exit 0
