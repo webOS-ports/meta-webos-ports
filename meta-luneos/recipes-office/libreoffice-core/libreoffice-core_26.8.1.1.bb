@@ -94,9 +94,13 @@ EXTRA_OECONF = " \
 "
 
 # The build machine's half: same compilers bitbake uses for native code, and
-# pkg-config pointed at the native sysroot.
-export CC_FOR_BUILD = "${BUILD_CC}"
-export CXX_FOR_BUILD = "${BUILD_CXX}"
+# pkg-config pointed at the native sysroot. Its configure unsets CFLAGS and
+# never reads the *_FOR_BUILD flags, so the native sysroot's include and
+# library paths ride along in the compiler command. Without them it found
+# zlib.h only on hosts with zlib headers installed, and failed in the CI
+# container ("zlib.h not found").
+export CC_FOR_BUILD = "${BUILD_CC} ${BUILD_CPPFLAGS} ${BUILD_LDFLAGS}"
+export CXX_FOR_BUILD = "${BUILD_CXX} ${BUILD_CPPFLAGS} ${BUILD_LDFLAGS}"
 export PKG_CONFIG_FOR_BUILD = "pkg-config-native"
 export PYTHON_FOR_BUILD = "${PYTHON}"
 # The build machine's pyuno: its configure asks distutils for the headers, and
