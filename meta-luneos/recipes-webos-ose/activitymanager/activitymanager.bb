@@ -12,7 +12,7 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "luna-service2 db8 boost libpbnjson glib-2.0 pmloglib ${VIRTUAL-RUNTIME_init_manager}"
 
-SRCREV = "bf16f54a85e5577bc755b3cc6deb9a7f047bb274"
+SRCREV = "c948e6eeb41380a4b018bb0d89871fbbaf13f06e"
 PV = "3.0.0-45"
 PR = "r19"
 
