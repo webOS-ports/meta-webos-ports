@@ -84,10 +84,12 @@ WEBRUNTIME_REPO_VERSION = "151"
 # main, which has pull requests #20 (browser-shell video state), #21 (the
 # Widevine bridge's media changes), #26 (a finger in a field's padding means
 # the line of text beside it), #27 (hold to place the caret and carry it,
-# as on legacy webOS), #29 (keep a web app window hidden until it is shown)
-# and #30 (give the contents the window's height back after a rotation).
+# as on legacy webOS), #29 (keep a web app window hidden until it is shown),
+# #30 (give the contents the window's height back after a rotation), #32
+# (stop WebGL from crashing WebAppMgr on a native-GLES2 webOS GPU) and #33
+# (make WebGL work on native-GLES2 webOS GPUs via ANGLE, opt-in).
 SRC_URI = "git://github.com/webos-ports/chromium151.git;protocol=https;branch=main;name=chromium"
-SRCREV = "9098c9997953f7a8af3be632ce9320c4d50cf6d2"
+SRCREV = "29fa2d3cc5b08ffb81fd9680e0885ab182394c90"
 
 ERROR_QA:remove = "webos-enh-sub-warning"
 WARN_QA:remove = "webos-enh-sub-warning"
