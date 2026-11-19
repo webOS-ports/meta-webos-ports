@@ -16,8 +16,8 @@ PE = "5"
 SRC_URI += " \
     git://github.com/EionRobb/purple-discord.git;branch=master;protocol=https;name=upstream;destsuffix=purple-discord \
     file://0001-Allow-the-plugin-id-to-be-set-at-build-time.patch \
-    file://0002-Make-file-uploads-survive-a-briefly-unavailable-conn.patch \
-    file://0003-Send-Ogg-Opus-uploads-as-voice-messages.patch \
+    file://0002-Send-Ogg-Opus-uploads-as-voice-messages.patch \
+    file://0003-Check-voice-uploads-are-complete-Opus-streams-and-bu.patch \
     file://0004-webOS-deduplicate-messages-and-bridge-message-ids-re.patch \
     file://0005-webOS-add-DM-partners-to-the-buddy-list-and-backfill.patch \
     file://0006-webOS-sign-in-with-a-token-password-or-QR-code-and-r.patch \
@@ -29,7 +29,7 @@ SRC_URI += " \
     file://0012-webOS-rename-group-DMs-and-take-people-out-of-them-a.patch \
     file://0013-webOS-Say-who-pinned-a-message-not-the-message-again.patch \
 "
-SRCREV_upstream = "33f21e5af74c1489f6c6e2db0b84b30d15783596"
+SRCREV_upstream = "d1a7f60ff1df055296d64b060033f50c82108c53"
 
 DEPENDS = "pidgin json-glib glib-2.0 zlib qrencode openssl"
 

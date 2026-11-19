@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Herman van Hazendonk <github.com@herrie.org>
 Date: Tue, 20 Oct 2026 16:23:01 +0200
-Subject: [PATCH] webOS: deduplicate messages, and bridge message ids,
+Subject: [PATCH 04/13] webOS: deduplicate messages, and bridge message ids,
  reactions and replies to the transport
 
 * Deduplicate messages and store own channel messages as sent
@@ -59,7 +59,7 @@ Upstream-Status: Inappropriate [webOS specific]
  1 file changed, 351 insertions(+), 46 deletions(-)
 
 diff --git a/libdiscord.c b/libdiscord.c
-index 5278846..de4833b 100644
+index 4413ce6..5a3f6e9 100644
 --- a/libdiscord.c
 +++ b/libdiscord.c
 @@ -422,7 +422,19 @@ typedef struct {
@@ -82,7 +82,7 @@ index 5278846..de4833b 100644
  	GQueue *received_message_queue; /* A store of the last 10 received message id's for de-dup */
  
  	GHashTable *new_users;
-@@ -2771,7 +2783,7 @@ discord_get_formatted_thread_timestamp(time_t ts) {
+@@ -2770,7 +2782,7 @@ discord_get_formatted_thread_timestamp(time_t ts) {
  static gboolean discord_get_room_force_large(DiscordAccount *da, guint64 id);
  static gboolean discord_get_room_force_small(DiscordAccount *da, guint64 id);
  
@@ -91,7 +91,7 @@ index 5278846..de4833b 100644
  
  static gchar *
  discord_truncate_message(const gchar *msg_text, guint trunc_len)
-@@ -3181,6 +3193,109 @@ discord_process_stickers(DiscordAccount *da, JsonArray *stickers, PurpleConversa
+@@ -3180,6 +3192,109 @@ discord_process_stickers(DiscordAccount *da, JsonArray *stickers, PurpleConversa
  
  static void discord_thread_parent_cb(DiscordAccount *da, JsonNode *node, gpointer user_data);
  
@@ -201,7 +201,7 @@ index 5278846..de4833b 100644
  static guint64
  discord_process_message(DiscordAccount *da, JsonObject *data, unsigned special_type)
  {
-@@ -3190,6 +3305,28 @@ discord_process_message(DiscordAccount *da, JsonObject *data, unsigned special_t
+@@ -3189,6 +3304,28 @@ discord_process_message(DiscordAccount *da, JsonObject *data, unsigned special_t
  	guint64 msg_id = to_int(json_object_get_string_member(data, "id"));
  	guint64 msg_type = json_object_get_int_member(data, "type");
  
@@ -230,7 +230,7 @@ index 5278846..de4833b 100644
  	if (!json_object_get_object_member(data, "author")) {
  		/* Possibly edited message? */
  		purple_debug_info("discord", "No author in message processed\n");
-@@ -3203,6 +3340,15 @@ discord_process_message(DiscordAccount *da, JsonObject *data, unsigned special_t
+@@ -3202,6 +3339,15 @@ discord_process_message(DiscordAccount *da, JsonObject *data, unsigned special_t
  	guint64 channel_id;
  	gchar *channel_id_s;
  
@@ -246,7 +246,7 @@ index 5278846..de4833b 100644
  	const gchar *content = json_object_get_string_member(data, "content");
  	const gchar *timestamp_str = json_object_get_string_member(data, "timestamp");
  	time_t timestamp = discord_str_to_time(timestamp_str);
-@@ -3529,6 +3675,20 @@ discord_process_message(DiscordAccount *da, JsonObject *data, unsigned special_t
+@@ -3528,6 +3674,20 @@ discord_process_message(DiscordAccount *da, JsonObject *data, unsigned special_t
  		}
  	}
  
@@ -267,7 +267,7 @@ index 5278846..de4833b 100644
  	if (channel_id_s && g_hash_table_contains(da->one_to_ones, channel_id_s)) {
  		/* private message */
  
-@@ -3549,6 +3709,7 @@ discord_process_message(DiscordAccount *da, JsonObject *data, unsigned special_t
+@@ -3548,6 +3708,7 @@ discord_process_message(DiscordAccount *da, JsonObject *data, unsigned special_t
  				}
  
  				if (escaped_content && *escaped_content) {
@@ -275,7 +275,7 @@ index 5278846..de4833b 100644
  					msg = purple_message_new_outgoing(username, escaped_content, flags);
  					purple_message_set_time(msg, timestamp);
  					purple_conversation_write_message(conv, msg);
-@@ -3584,6 +3745,13 @@ discord_process_message(DiscordAccount *da, JsonObject *data, unsigned special_t
+@@ -3583,6 +3744,13 @@ discord_process_message(DiscordAccount *da, JsonObject *data, unsigned special_t
  			}
  
  			if (escaped_content && *escaped_content && msg_type != MESSAGE_CALL) {
@@ -289,7 +289,7 @@ index 5278846..de4833b 100644
  				purple_serv_got_im(da->pc, merged_username, escaped_content, flags, timestamp);
  			} else if (msg_type == MESSAGE_CALL) {
  				gchar *call_txt = g_strdup_printf(_("%s started a call"), merged_username);
-@@ -3743,11 +3911,50 @@ discord_process_message(DiscordAccount *da, JsonObject *data, unsigned special_t
+@@ -3742,11 +3910,50 @@ discord_process_message(DiscordAccount *da, JsonObject *data, unsigned special_t
  				msg_type != MESSAGE_THREAD_STARTER_MESSAGE
  			)
  		{
@@ -341,7 +341,7 @@ index 5278846..de4833b 100644
  
  		} else if (msg_type == MESSAGE_GUILD_MEMBER_JOIN) {
  			gchar *join_txt = g_strdup_printf(_("%s joined the guild!"), name);
-@@ -5327,8 +5534,6 @@ discord_process_dispatch(DiscordAccount *da, const gchar *type, JsonObject *data
+@@ -5326,8 +5533,6 @@ discord_process_dispatch(DiscordAccount *da, const gchar *type, JsonObject *data
  
  	} else if (purple_strequal(type, "MESSAGE_REACTION_ADD") && purple_account_get_bool(da->account, "show-reactions", TRUE)) {
  
@@ -350,7 +350,7 @@ index 5278846..de4833b 100644
  		guint64 message_id = to_int(json_object_get_string_member(data, "message_id"));
  		guint64 user_id = to_int(json_object_get_string_member(data, "user_id"));
  		JsonObject *emoji = json_object_get_object_member(data, "emoji");
-@@ -5338,51 +5543,36 @@ discord_process_dispatch(DiscordAccount *da, const gchar *type, JsonObject *data
+@@ -5337,51 +5542,36 @@ discord_process_dispatch(DiscordAccount *da, const gchar *type, JsonObject *data
  			emoji_name = "?";
  		}
  
@@ -425,7 +425,7 @@ index 5278846..de4833b 100644
  
  	} else {
  		purple_debug_info("discord", "Unhandled message type '%s'\n", type);
-@@ -6695,6 +6885,77 @@ discord_got_login_fingerprint(DiscordAccount *da, JsonNode *node, gpointer user_
+@@ -6694,6 +6884,77 @@ discord_got_login_fingerprint(DiscordAccount *da, JsonNode *node, gpointer user_
  	discord_send_login(da);
  }
  
@@ -503,7 +503,7 @@ index 5278846..de4833b 100644
  void
  discord_login(PurpleAccount *account)
  {
-@@ -6702,6 +6963,8 @@ discord_login(PurpleAccount *account)
+@@ -6701,6 +6962,8 @@ discord_login(PurpleAccount *account)
  	PurpleConnection *pc = purple_account_get_connection(account);
  	PurpleConnectionFlags pc_flags;
  
@@ -512,7 +512,7 @@ index 5278846..de4833b 100644
  
  	pc_flags = purple_connection_get_flags(pc);
  	pc_flags |= PURPLE_CONNECTION_FLAG_HTML;
-@@ -6736,7 +6999,16 @@ discord_login(PurpleAccount *account)
+@@ -6735,7 +6998,16 @@ discord_login(PurpleAccount *account)
  	da->one_to_ones_rev = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
  	da->last_message_id_dm = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
  	da->sent_message_ids = g_hash_table_new_full(g_str_insensitive_hash, g_str_insensitive_equal, g_free, NULL);
@@ -529,7 +529,7 @@ index 5278846..de4833b 100644
  	da->received_message_queue = g_queue_new();
  
  	/* TODO make these the roots of all discord data */
-@@ -6839,8 +7111,18 @@ discord_close(PurpleConnection *pc)
+@@ -6838,8 +7110,18 @@ discord_close(PurpleConnection *pc)
  	da->last_message_id_dm = NULL;
  	g_hash_table_unref(da->sent_message_ids);
  	da->sent_message_ids = NULL;
@@ -548,7 +548,7 @@ index 5278846..de4833b 100644
  
  	g_hash_table_unref(da->new_users);
  	da->new_users = NULL;
-@@ -9244,7 +9526,15 @@ discord_chat_send(PurpleConnection *pc, gint id,
+@@ -9243,7 +9525,15 @@ discord_chat_send(PurpleConnection *pc, gint id,
  	}
  
  	g_return_val_if_fail(discord_get_channel_global_int(da, room_id), -1); /* TODO rejoin room? */
@@ -565,7 +565,7 @@ index 5278846..de4833b 100644
  
  	if (ret > 0) {
  		gchar *tmp = g_regex_replace_eval(emoji_regex, d_message, -1, 0, 0, discord_replace_emoji, PURPLE_CONVERSATION(chatconv), NULL);
-@@ -9358,7 +9648,16 @@ discord_send_im(PurpleConnection *pc,
+@@ -9357,7 +9647,16 @@ discord_send_im(PurpleConnection *pc,
  		return -1;
  	}
  
@@ -583,7 +583,7 @@ index 5278846..de4833b 100644
  }
  
  static void
-@@ -11457,9 +11756,15 @@ discord_xfer_send_init(PurpleXfer *xfer)
+@@ -11468,9 +11767,15 @@ discord_xfer_send_init(PurpleXfer *xfer)
  	filename = g_path_get_basename(fullpath);
  	purple_xfer_set_filename(xfer, filename);
  
