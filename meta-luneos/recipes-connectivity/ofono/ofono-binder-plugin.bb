@@ -31,10 +31,12 @@ SRC_URI = "git://github.com/mer-hybris/ofono-binder-plugin.git;branch=master;pro
            file://0019-ofono-binder-Report-a-present-card-without-applicati.patch \
            file://0020-unit-Test-when-the-SIM-driver-reports-a-SIM-inserted.patch \
            file://0021-unit-Test-the-SIM-driver-s-card-reset.patch \
+           file://0022-ofono-binder-Ask-for-IMS-registration-when-the-IMS-a.patch \
+           file://0023-ofono-binder-Give-an-IMS-extension-a-default-IMS-dat.patch \
 "
 
 PV = "1.1.39"
-PR = "r3"
+PR = "r4"
 SRCREV = "67c3c85c58fb387d1303560f757144ed275c67d6"
 
 CFLAGS += "--sysroot=${RECIPE_SYSROOT} "

@@ -1,0 +1,206 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [ofono-binder] Give an IMS extension a default IMS data
+ profile
+
+The modem only brings up IMS on a data profile of the IMS type, and
+those come from a context of type "ims". Sailfish's oFono provisions
+one, upstream oFono doesn't, so IMS never started.
+
+When the slot's extension does IMS and no context says otherwise, send
+a profile with the well-known APN from 3GPP TS 23.003. A context of
+type "ims" still takes precedence.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/binder_network.c       | 26 ++++++++++++++++++++++++++
+ src/binder_network.h       |  5 +++++
+ src/binder_plugin.c        |  8 ++++++++
+ src/binder_util.c          | 13 +++++++++++++
+ src/binder_util.h          |  6 ++++++
+ unit/unit_util/unit_util.c | 21 +++++++++++++++++++++
+ 6 files changed, 79 insertions(+)
+
+diff --git a/src/binder_network.c b/src/binder_network.c
+index 8a34fc3..72bfd81 100644
+--- a/src/binder_network.c
++++ b/src/binder_network.c
+@@ -158,6 +158,7 @@ typedef struct binder_network_object {
+     gboolean force_gsm_when_radio_off;
+     BinderDataProfileConfig data_profile_config;
+     GSList* data_profiles;
++    gboolean default_ims_profile;
+ } BinderNetworkObject;
+ 
+ struct binder_network_api {
+@@ -930,6 +931,13 @@ binder_network_check_data_profiles(
+             DBG_(self, "ims apn \"%s\"", ims->apn);
+             l = g_slist_append(l, binder_network_data_profile_new(ims,
+                 RADIO_DATA_PROFILE_IMS));
++        } else if (self->default_ims_profile) {
++            struct ofono_gprs_primary_context def;
++
++            binder_default_ims_context(&def);
++            DBG_(self, "default ims apn \"%s\"", def.apn);
++            l = g_slist_append(l, binder_network_data_profile_new(&def,
++                RADIO_DATA_PROFILE_IMS));
+         }
+ 
+         if (binder_network_data_profiles_equal(self->data_profiles, l)) {
+@@ -2978,6 +2986,24 @@ binder_network_unref(
+     }
+ }
+ 
++/*
++ * Without an IMS data profile the modem has no APN to bring IMS up on, and
++ * nothing provisions an IMS context on upstream oFono.
++ */
++void
++binder_network_enable_default_ims_profile(
++    BinderNetwork* net)
++{
++    BinderNetworkObject* self = binder_network_cast(net);
++
++    if (self && !self->default_ims_profile) {
++        self->default_ims_profile = TRUE;
++        if (self->data_profile_config.use_data_profiles) {
++            binder_network_check_data_profiles(self);
++        }
++    }
++}
++
+ void
+ binder_network_query_registration_state(
+     BinderNetwork* net)
+diff --git a/src/binder_network.h b/src/binder_network.h
+index 176623b..11217ea 100644
+--- a/src/binder_network.h
++++ b/src/binder_network.h
+@@ -97,6 +97,11 @@ binder_network_max_supported_mode(
+     BinderNetwork* self)
+     BINDER_INTERNAL;
+ 
++void
++binder_network_enable_default_ims_profile(
++    BinderNetwork* net)
++    BINDER_INTERNAL;
++
+ void
+ binder_network_query_registration_state(
+     BinderNetwork* net)
+diff --git a/src/binder_plugin.c b/src/binder_plugin.c
+index e790f20..f6deb24 100644
+--- a/src/binder_plugin.c
++++ b/src/binder_plugin.c
+@@ -44,6 +44,7 @@
+ #include "binder_voicecall.h"
+ 
+ #include "binder_ext_plugin.h"
++#include "binder_ext_ims.h"
+ #include "binder_ext_slot.h"
+ 
+ #include <ofono/conf.h>
+@@ -1434,6 +1435,13 @@ binder_slot_check(
+             slot->ext_slot = binder_ext_slot_new(slot->ext_plugin,
+                 binder_slot_find_service(slot, RADIO_MODEM_INTERFACE)->
+                 instance, slot->ext_params);
++
++            /* An extension doing IMS needs a data profile to do it on */
++            if ((slot->config.features & BINDER_FEATURE_IMS) &&
++                binder_ext_slot_get_interface(slot->ext_slot,
++                    BINDER_EXT_TYPE_IMS)) {
++                binder_network_enable_default_ims_profile(io->network);
++            }
+         }
+ 
+         if (!slot->handle->enabled) {
+diff --git a/src/binder_util.c b/src/binder_util.c
+index df9f1ec..7dd76c1 100644
+--- a/src/binder_util.c
++++ b/src/binder_util.c
+@@ -28,6 +28,8 @@
+ #include <gutil_idlepool.h>
+ #include <gutil_misc.h>
+ 
++#include <string.h>
++
+ static GUtilIdlePool* binder_util_pool = NULL;
+ static const char binder_empty_str[] = "";
+ static const char PROTO_IP_STR[] = "IP";
+@@ -91,6 +93,17 @@ binder_radio_access_network_for_tech(
+     return RADIO_ACCESS_NETWORK_UNKNOWN;
+ }
+ 
++/* The well-known IMS APN of 3GPP TS 23.003, for when no context names one */
++void
++binder_default_ims_context(
++    struct ofono_gprs_primary_context* ctx)
++{
++    memset(ctx, 0, sizeof(*ctx));
++    g_strlcpy(ctx->apn, "ims", sizeof(ctx->apn));
++    ctx->proto = OFONO_GPRS_PROTO_IPV4V6;
++    ctx->auth_method = OFONO_GPRS_AUTH_METHOD_NONE;
++}
++
+ RADIO_APN_TYPES
+ binder_radio_apn_types_for_profile(
+     guint profile_id,
+diff --git a/src/binder_util.h b/src/binder_util.h
+index 0d41299..6968459 100644
+--- a/src/binder_util.h
++++ b/src/binder_util.h
+@@ -20,6 +20,7 @@
+ #include "binder_types.h"
+ 
+ #include <ofono/gprs.h>
++#include <ofono/gprs-context.h>
+ #include <ofono/radio-settings.h>
+ 
+ #include <radio_request.h>
+@@ -65,6 +66,11 @@ binder_radio_access_network_for_tech(
+     RADIO_TECH tech)
+     BINDER_INTERNAL;
+ 
++void
++binder_default_ims_context(
++    struct ofono_gprs_primary_context* ctx)
++    BINDER_INTERNAL;
++
+ RADIO_APN_TYPES
+ binder_radio_apn_types_for_profile(
+     guint profile_id,
+diff --git a/unit/unit_util/unit_util.c b/unit/unit_util/unit_util.c
+index 3dca1a2..0ca9173 100644
+--- a/unit/unit_util/unit_util.c
++++ b/unit/unit_util/unit_util.c
+@@ -229,9 +229,30 @@ test_copy_hidl_string(
+ #define TEST_PREFIX "/util/"
+ #define TEST_(t) TEST_PREFIX t
+ 
++/*==========================================================================*
++ * default_ims_context
++ *==========================================================================*/
++
++static
++void
++test_default_ims_context(
++    void)
++{
++    struct ofono_gprs_primary_context ctx;
++
++    memset(&ctx, 0xff, sizeof(ctx));
++    binder_default_ims_context(&ctx);
++    g_assert_cmpstr(ctx.apn, == ,"ims");
++    g_assert_cmpstr(ctx.username, == ,"");
++    g_assert_cmpstr(ctx.password, == ,"");
++    g_assert_cmpint(ctx.proto, == ,OFONO_GPRS_PROTO_IPV4V6);
++    g_assert_cmpint(ctx.auth_method, == ,OFONO_GPRS_AUTH_METHOD_NONE);
++}
++
+ int main(int argc, char* argv[])
+ {
+     g_test_init(&argc, &argv, NULL);
++    g_test_add_func(TEST_("default_ims_context"), test_default_ims_context);
+     g_test_add_func(TEST_("array_count"), test_array_count);
+     g_test_add_func(TEST_("copy_hidl_string"), test_copy_hidl_string);
+ 
