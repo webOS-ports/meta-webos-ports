@@ -14,6 +14,7 @@ SRC_URI = "git://github.com/mer-hybris/ofono-binder-plugin.git;branch=master;pro
 S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}/lib"
 
 PV = "1.1.39"
+PR = "r1"
 SRCREV = "f07d3ae5e6536d50c62fae36be1798bd77c05fa0"
 
 CFLAGS += "--sysroot=${RECIPE_SYSROOT} "
@@ -23,6 +24,6 @@ EXTRA_OEMAKE = "KEEP_SYMBOLS=1 CROSS_COMPILE=${TARGET_PREFIX} CC='${CC}'"
 PARALLEL_MAKE = ""
 
 do_install() {
-    make install DESTDIR=${D}
+    make install-dev DESTDIR=${D}
 }
 
