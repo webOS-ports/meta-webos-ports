@@ -103,6 +103,14 @@ export CC_FOR_BUILD = "${BUILD_CC} ${BUILD_CPPFLAGS} ${BUILD_LDFLAGS}"
 export CXX_FOR_BUILD = "${BUILD_CXX} ${BUILD_CPPFLAGS} ${BUILD_LDFLAGS}"
 export PKG_CONFIG_FOR_BUILD = "pkg-config-native"
 export PYTHON_FOR_BUILD = "${PYTHON}"
+
+# The bundled externals (libcdr, libvisio, librevenge, ...) compile with
+# LibreOffice's own gb_CXXFLAGS rather than CXXFLAGS, so DEBUG_PREFIX_MAP never
+# reaches them, and the bundled boost headers come in through an absolute -I:
+# boost's __FILE__ strings put TMPDIR in libwpftdrawlo.so [buildpaths]. All of
+# them pass $(CPPFLAGS) from the environment to their configure. ccache hid
+# this locally: it rewrites paths under its base_dir to relative ones.
+CPPFLAGS:append = " ${DEBUG_PREFIX_MAP}"
 # The build machine's pyuno: its configure asks distutils for the headers, and
 # Python 3.12 has no distutils. The target side has --disable-python.
 export PYTHON_CFLAGS = "-I${STAGING_INCDIR_NATIVE}/python${PYTHON_BASEVERSION}"
