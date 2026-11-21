@@ -38,9 +38,14 @@ RECOVERY_PACKAGE_DEVICE ??= ""
 # initramfs-scripts-halium). The private key is in luneos-secrets; this is its path.
 RECOVERY_PACKAGE_SIGNING_KEY ??= ""
 
-# The recovery's unzip holds a whole entry in memory, so userdata goes into the
-# zip in pieces of this many MiB. The installer writes them back to back.
-RECOVERY_PACKAGE_PART_MIB ?= "256"
+# The Android system image the initramfs mounts. A machine whose rootfs carries it
+# (VIRTUAL-RUNTIME_android-system-image names a recipe) needs nothing here. A
+# machine that sets that variable empty - the GSI is not in the rootfs, as on q25 -
+# gets the pinned GSI next to rootfs.img as android-rootfs.img, the halium
+# "file_layout" name halium-boot.sh looks for. Without it the container has no
+# /android/system and the phone boots to nothing.
+RECOVERY_IMAGE_ANDROID_ROOTFS ?= "${@'halium-gsi-${MACHINE}.img' if d.getVar('VIRTUAL-RUNTIME_android-system-image') == '' else ''}"
+do_image_userdataimg[depends] += "${@'halium-gsi-image:do_deploy' if d.getVar('USERDATA_IMAGE_ANDROID_ROOTFS') else ''}"
 
 do_deploy[vardepsexclude] += "RECOVERY_PACKAGE_SIGNING_KEY"
 
@@ -58,21 +63,36 @@ python () {
 }
 
 do_deploy() {
-    USERDATA="${DEPLOY_DIR_IMAGE}/${IMAGE_NAME}-${MACHINE}${IMAGE_NAME_SUFFIX}.userdataimg"
     BOOT="${DEPLOY_DIR_IMAGE}/${FASTBOOT_BOOT_IMAGE}"
     INSTALLER=META-INF/com/google/android
 
-    [ -e "$USERDATA" ] || bbfatal "No userdata image at $USERDATA. Add userdataimg to IMAGE_FSTYPES for this machine."
     [ -e "$BOOT" ] || bbfatal "Required boot image $BOOT doesn't exist."
 
     rm -rf ${WORKDIR}/build
     mkdir -p ${WORKDIR}/build/$INSTALLER
 
     cp "$BOOT" ${WORKDIR}/build/boot.img
-    USERDATA_SHA=$(sha256sum "$USERDATA" | cut -d' ' -f1)
-    USERDATA_SIZE=$(stat -L -c %s "$USERDATA")
-    split -b ${RECOVERY_PACKAGE_PART_MIB}M -d -a 3 "$USERDATA" ${WORKDIR}/build/userdata.img.
-    USERDATA_PARTS=$(ls ${WORKDIR}/build/userdata.img.* | wc -l)
+
+    # Prefer the stable link; the versioned name carries the DATETIME of the
+    # run that built the ext4, which is not this one when that task did not
+    # have to re-run.
+    rootfs_img="${DEPLOY_DIR_IMAGE}/${IMAGE_LINK_NAME}.ext4"
+    if [ ! -e "$rootfs_img" ] ; then
+        rootfs_img=`ls -1t ${DEPLOY_DIR_IMAGE}/*.ext4 2>/dev/null | head -n 1`
+    fi
+    if [ -z "$rootfs_img" ] ; then
+        bbfatal "userdataimg: no ext4 rootfs in ${DEPLOY_DIR_IMAGE} to wrap"
+    fi
+
+    cp "$rootfs_img" ${WORKDIR}/build/rootfs.img
+
+    if [ -n "${RECOVERY_IMAGE_ANDROID_ROOTFS}" ] ; then
+        android_img="${DEPLOY_DIR_IMAGE}/${RECOVERY_IMAGE_ANDROID_ROOTFS}"
+        if [ ! -e "$android_img" ] ; then
+            bbfatal "userdataimg: no Android system image at $android_img"
+        fi
+        cp -L "$android_img" ${WORKDIR}/build/android-rootfs.img
+    fi
 
     if [ -n "${FASTBOOT_INIT_BOOT_IMAGE}" ] ; then
         [ -e "${DEPLOY_DIR_IMAGE}/${FASTBOOT_INIT_BOOT_IMAGE}" ] || \
@@ -114,8 +134,7 @@ PYEOF
     (cd ${WORKDIR}/build
      for image in *.img ; do
          echo "$(sha256sum $image | cut -d' ' -f1) $(stat -L -c %s $image) 0 $image"
-     done > SHA256SUMS
-     echo "$USERDATA_SHA $USERDATA_SIZE $USERDATA_PARTS userdata.img" >> SHA256SUMS)
+     done > SHA256SUMS)
 
     (cd ${WORKDIR}/build ; zip -r ${DEPLOYDIR}/${ZIP_NAME}.zip *)
     python3 ${UNPACKDIR}/sign-recovery-zip.py "${RECOVERY_PACKAGE_SIGNING_KEY}" \
