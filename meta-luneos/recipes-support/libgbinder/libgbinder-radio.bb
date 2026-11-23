@@ -9,13 +9,11 @@ DEPENDS = "libgbinder glib-2.0 libglibutil"
 
 inherit pkgconfig
 
-SRC_URI = "git://github.com/mer-hybris/libgbinder-radio.git;branch=master;protocol=https \
-           file://0001-gbinder-radio-Don-t-call-functions-through-mismatche.patch \
-"
+SRC_URI = "git://github.com/mer-hybris/libgbinder-radio.git;branch=master;protocol=https"
 
-PV = "1.6.6+git"
+PV = "1.6.7"
 PE = "1"
-SRCREV = "7cf573a81d1674885c6cbfbb3f2b1e0ff5d203ec"
+SRCREV = "4937906a3d5574333f285dd073a08ece028e9de1"
 
 CFLAGS += "--sysroot=${RECIPE_SYSROOT} "
 LDFLAGS += "--sysroot=${RECIPE_SYSROOT} "
