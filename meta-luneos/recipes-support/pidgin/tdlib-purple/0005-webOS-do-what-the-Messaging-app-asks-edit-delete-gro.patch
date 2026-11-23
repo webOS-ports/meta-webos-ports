@@ -52,8 +52,8 @@ webos-im-group-create for every account with the group's name and its
 members, buddy names joined by "\x1f".
 
 For a Telegram account, find each member's Telegram user the way
-send_im finds whom a message is for (by "id<n>" buddy name, phone
-number, display name or username), and ask TDLib to
+/invite finds whom to add (by "id<n>" buddy name, phone number,
+display name or username: the user picked them), and ask TDLib to
 createNewBasicGroupChat with them. The handler returns FALSE, without
 creating anything, if the name is empty, if there are no members, or
 if any member is not exactly one known user: a group without someone
@@ -77,8 +77,8 @@ emits webos-im-group-invite for every account with the group chat's
 purple name and the members, buddy names joined by "\x1f".
 
 For a Telegram account, find the group, which has to be one we are a
-member of, and each member's user the way send_im finds whom a message
-is for. Add them to a supergroup with one addChatMembers, and to a
+member of, and each member's user the way /invite finds whom to
+add. Add them to a supergroup with one addChatMembers, and to a
 basic group with one addChatMember each (TDLib's addChatMembers is for
 supergroups and channels only), forwarding none of the earlier
 messages, as the plug-in's libpurple invite does. The handler returns
@@ -165,7 +165,8 @@ serv_chat_send: records "<id>\x1f<name>" joined by "\x1e", the id being
 the mentioned buddy's name.
 
 Copy it in send_im and chat_send, never freeing or clearing it. Find
-each mentioned user the way send_im finds whom a message is for, find
+each mentioned user by id, or by the display name of the member the
+user picked, as /invite does, find
 each "@<name>" in the text TDLib is given (after markup is stripped and
 the message split, in each part), and give it a textEntityTypeMentionName
 entity for that user. The text stays as it is, so it reads the same to
@@ -211,7 +212,7 @@ Upstream-Status: Inappropriate [webOS specific]
  account-data.h               |  14 +-
  client-utils.cpp             | 150 +++++-
  client-utils.h               |   6 +-
- td-client.cpp                | 291 ++++++++++-
+ td-client.cpp                | 292 ++++++++++-
  td-client.h                  |  32 +-
  tdlib-purple.cpp             | 142 +++++-
  test/CMakeLists.txt          |   2 +
@@ -221,7 +222,7 @@ Upstream-Status: Inappropriate [webOS specific]
  test/webos-commands-test.cpp | 910 +++++++++++++++++++++++++++++++++++
  webos-send.cpp               | 328 +++++++++++++
  webos-send.h                 |  83 ++++
- 14 files changed, 1936 insertions(+), 45 deletions(-)
+ 14 files changed, 1937 insertions(+), 45 deletions(-)
  create mode 100644 test/webos-commands-test.cpp
  create mode 100644 webos-send.cpp
  create mode 100644 webos-send.h
@@ -239,7 +240,7 @@ index 0efa5aa..86a779c 100644
  
  #target_compile_options(telegram-tdlib PRIVATE -Wmissing-declarations)
 diff --git a/account-data.h b/account-data.h
-index 4b1f144..001a2d0 100644
+index c2fdde6..6c1aa92 100644
 --- a/account-data.h
 +++ b/account-data.h
 @@ -5,6 +5,7 @@
@@ -271,7 +272,7 @@ index 4b1f144..001a2d0 100644
      NewPrivateChatForMessage(uint64_t requestId, const char *username, PurpleXfer *upload)
      : PendingRequest(requestId), username(username), fileUpload(upload) {}
 diff --git a/client-utils.cpp b/client-utils.cpp
-index c6f23e7..1938b91 100644
+index 4998dab..561d2fd 100644
 --- a/client-utils.cpp
 +++ b/client-utils.cpp
 @@ -1,4 +1,5 @@
@@ -280,7 +281,7 @@ index c6f23e7..1938b91 100644
  #include "purple-info.h"
  #include "buildopt.h"
  #include "config.h"
-@@ -1622,9 +1623,113 @@ static size_t getAlbumSize(const std::vector<MessagePart> &parts, size_t first)
+@@ -1617,9 +1618,113 @@ static size_t getAlbumSize(const std::vector<MessagePart> &parts, size_t first)
      return size;
  }
  
@@ -355,8 +356,8 @@ index c6f23e7..1938b91 100644
  {
 +    std::vector<int64_t> userIds;
 +    for (const webos::MentionRecord &mention: mentions) {
-+        // The way send_im finds whom a message is for
-+        std::vector<const td::td_api::user *> users = getUsersByPurpleName(mention.id.c_str(), account, "mention");
++        // By id, or by the display name of a member the user picked
++        std::vector<const td::td_api::user *> users = getUsersByPurpleName(mention.id.c_str(), account, "mention", true);
 +        userIds.push_back((users.size() == 1) ? users[0]->id_ : 0);
 +    }
 +    return userIds;
@@ -396,7 +397,7 @@ index c6f23e7..1938b91 100644
      std::vector<MessagePart> parts;
      parseMessage(message, parts, account);
      if (parts.size() > MAX_MESSAGE_PARTS)
-@@ -1647,6 +1752,8 @@ int transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiv
+@@ -1642,6 +1747,8 @@ int transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiv
          }
      }
  
@@ -405,7 +406,7 @@ index c6f23e7..1938b91 100644
      bool first = true;
      for (size_t i = 0; i < parts.size(); i++) {
          const MessagePart &input = parts[i];
-@@ -1657,22 +1764,16 @@ int transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiv
+@@ -1652,22 +1759,16 @@ int transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiv
                  auto sendMessageRequest = td::td_api::make_object<td::td_api::sendMessage>();
                  sendMessageRequest->chat_id_ = chatId.value();
                  sendMessageRequest->input_message_content_ = makeAttachment(input);
@@ -432,7 +433,7 @@ index c6f23e7..1938b91 100644
                  requestId = transceiver.sendQuery(std::move(sendAlbumRequest), response);
              }
              account.addPendingRequest<SendMessageRequest>(requestId, chatId, nullptr);
-@@ -1684,12 +1785,9 @@ int transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiv
+@@ -1679,12 +1780,9 @@ int transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiv
          td::td_api::object_ptr<td::td_api::sendMessage> sendMessageRequest = td::td_api::make_object<td::td_api::sendMessage>();
          sendMessageRequest->chat_id_ = chatId.value();
          // webOS native reply: set a real reply_to on the FIRST part only (a multi-part send shouldn't
@@ -448,7 +449,7 @@ index c6f23e7..1938b91 100644
          first = false;
          char *tempFileName = NULL;
          bool  hasImage     = false;
-@@ -1705,13 +1803,15 @@ int transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiv
+@@ -1700,13 +1798,15 @@ int transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiv
  #else
              content->photo_ = td::td_api::make_object<td::td_api::inputFileLocal>(tempFileName);
  #endif
@@ -466,7 +467,7 @@ index c6f23e7..1938b91 100644
              sendMessageRequest->input_message_content_ = std::move(content);
          }
  
-@@ -1724,6 +1824,16 @@ int transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiv
+@@ -1719,6 +1819,16 @@ int transmitMessage(ChatId chatId, const char *message, TdTransceiver &transceiv
      return 0;
  }
  
@@ -501,10 +502,10 @@ index cf59026..da220b8 100644
  void requestRecoveryEmailConfirmation(PurpleConnection *gc, const char *emailInfo);
  
 diff --git a/td-client.cpp b/td-client.cpp
-index c44ed51..cf3cf91 100644
+index c44ed51..bd16ef0 100644
 --- a/td-client.cpp
 +++ b/td-client.cpp
-@@ -3283,7 +3283,275 @@ void PurpleTdClient::sendReaction(int64_t chatId, int64_t messageId, const std::
+@@ -3283,7 +3283,276 @@ void PurpleTdClient::sendReaction(int64_t chatId, int64_t messageId, const std::
      }
  }
  
@@ -585,8 +586,9 @@ index c44ed51..cf3cf91 100644
 +{
 +    userIds.clear();
 +    for (const std::string &name: memberNames) {
-+        // The way send_im finds whom a message is for; this logs why it found none or many
-+        std::vector<const td::td_api::user *> users = getUsersByPurpleName(name.c_str(), m_data, command);
++        // As /invite finds whom to add: by id, or by the display name a person picked from the
++        // address book; this logs why it found none or many
++        std::vector<const td::td_api::user *> users = getUsersByPurpleName(name.c_str(), m_data, command, true);
 +        if (users.size() != 1)
 +            return false;
 +        if (std::find(userIds.begin(), userIds.end(), users[0]->id_) == userIds.end())
@@ -715,7 +717,7 @@ index c44ed51..cf3cf91 100644
 +    // display name. Neither is logged, the user's id being enough to go on.
 +    std::vector<int64_t> userIds;
 +    for (size_t i = 0; i < memberNames.size(); i++) {
-+        std::vector<const td::td_api::user *> users = getUsersByPurpleName(memberNames[i].c_str(), m_data, nullptr);
++        std::vector<const td::td_api::user *> users = getUsersByPurpleName(memberNames[i].c_str(), m_data, nullptr, true);
 +        if (users.size() != 1) {
 +            purple_debug_warning(config::pluginId,
 +                                 "Cannot remove member %zu of %zu from chat %" G_GINT64_FORMAT ": %s\n",
@@ -781,7 +783,7 @@ index c44ed51..cf3cf91 100644
  {
      // Auth-input fallback: while waiting for a login code, 2FA password or display name (asked
      // for through the "Telegram" chat because there is no request UI), take a message sent to that
-@@ -3340,7 +3608,8 @@ int PurpleTdClient::sendMessage(const char *buddyName, const char *message, int6
+@@ -3340,7 +3609,8 @@ int PurpleTdClient::sendMessage(const char *buddyName, const char *message, int6
      }
  
      if (chat) {
@@ -791,7 +793,7 @@ index c44ed51..cf3cf91 100644
          if (ret < 0)
              return ret;
          // Message shall not be echoed: tdlib will shortly present it as a new message and it will be displayed then
-@@ -3350,7 +3619,7 @@ int PurpleTdClient::sendMessage(const char *buddyName, const char *message, int6
+@@ -3350,7 +3620,7 @@ int PurpleTdClient::sendMessage(const char *buddyName, const char *message, int6
          td::td_api::object_ptr<td::td_api::createPrivateChat> createChat =
              td::td_api::make_object<td::td_api::createPrivateChat>(privateUser->id_, false);
          uint64_t requestId = m_transceiver.sendQuery(std::move(createChat), &PurpleTdClient::sendMessageCreatePrivateChatResponse);
@@ -800,7 +802,7 @@ index c44ed51..cf3cf91 100644
          return 0;
      }
  
-@@ -4068,7 +4337,8 @@ bool PurpleTdClient::joinChat(const char *chatName, bool lookUp)
+@@ -4068,7 +4338,8 @@ bool PurpleTdClient::joinChat(const char *chatName, bool lookUp)
      return conv ? true : false;
  }
  
@@ -810,7 +812,7 @@ index c44ed51..cf3cf91 100644
  {
      const td::td_api::chat *chat = m_data.getChatByPurpleId(purpleChatId);
  
-@@ -4078,7 +4348,8 @@ int PurpleTdClient::sendGroupMessage(int purpleChatId, const char *message, int6
+@@ -4078,7 +4349,8 @@ int PurpleTdClient::sendGroupMessage(int purpleChatId, const char *message, int6
          purple_debug_misc(config::pluginId, "purple id %d (chat %s) is not a group we a member of\n",
                               purpleChatId, chat->title_.c_str());
      else {
@@ -820,7 +822,7 @@ index c44ed51..cf3cf91 100644
          if (ret < 0)
              return ret;
          return 0;
-@@ -4392,9 +4663,14 @@ void PurpleTdClient::chatActionResponse(uint64_t requestId, td::td_api::object_p
+@@ -4392,9 +4664,14 @@ void PurpleTdClient::chatActionResponse(uint64_t requestId, td::td_api::object_p
      int32_t expectedId = 0;
      switch (request->type) {
          case ChatActionRequest::Type::Kick:
@@ -836,7 +838,7 @@ index c44ed51..cf3cf91 100644
          case ChatActionRequest::Type::GenerateInviteLink:
              expectedId = td::td_api::chatInviteLink::ID;
              break;
-@@ -4778,7 +5054,8 @@ void PurpleTdClient::sendMessageCreatePrivateChatResponse(uint64_t requestId, td
+@@ -4778,7 +5055,8 @@ void PurpleTdClient::sendMessageCreatePrivateChatResponse(uint64_t requestId, td
  
          if (chat) {
              int ret = transmitMessage(getId(*chat), request->message.c_str(), m_transceiver, m_data,

@@ -81,18 +81,14 @@ tdlib-purple does not give it:
   sender is a user; the transport splits on \x1f, using the id as the
   routable address (so the app can open a 1:1 with the sender) and the
   rest as the name.
-- Handle-style addressing. webOS reduces a contact's display name to a
-  handle - ASCII alphanumerics only, lowercased ("Herman van Hazendonk" ->
-  "hermanvanhazendonk") - and may address a conversation by it. Resolve
-  such names as a last resort, after display name and @username.
 
 The presence mapping and the sender's id are for the Messaging app
 only, whose front-end, imlibpurpleservice, gives libpurple the UI name
 "Palm Messaging" (isWebosUi()). Other front-ends keep upstream's
 mapping and get the sender as before.
 
-Not for upstream: the blist keys, the \x1f convention and the handle
-normalization are contracts with the webOS transport.
+Not for upstream: the blist keys and the \x1f convention are contracts
+with the webOS transport.
 
 * Expose mute and archive state, and leave archived chats out
 
@@ -146,9 +142,9 @@ half, and the login-through-chat tests expect the cryptofs store.
 Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
 Upstream-Status: Inappropriate [webOS specific]
 ---
- account-data.cpp            |  48 +++++++++++++
- account-data.h              |  10 +++
- client-utils.cpp            |  46 ++++++++++++-
+ account-data.cpp            |  22 ++++++
+ account-data.h              |   5 ++
+ client-utils.cpp            |  41 ++++++++++-
  config.cpp.in               |   2 +-
  identifiers.cpp             |   5 ++
  identifiers.h               |   2 +
@@ -165,10 +161,10 @@ Upstream-Status: Inappropriate [webOS specific]
  test/login-test.cpp         |  34 ++++-----
  test/secret-chat-test.cpp   |   4 +-
  transceiver.cpp             |   8 ++-
- 19 files changed, 443 insertions(+), 43 deletions(-)
+ 19 files changed, 407 insertions(+), 43 deletions(-)
 
 diff --git a/account-data.cpp b/account-data.cpp
-index 84213e4..73d2b3d 100644
+index 84213e4..dd428c7 100644
 --- a/account-data.cpp
 +++ b/account-data.cpp
 @@ -89,6 +89,21 @@ static bool isUnansweredStranger(const td::td_api::chat &chat)
@@ -207,41 +203,8 @@ index 84213e4..73d2b3d 100644
  void TdAccountData::updateSmallChatPhoto(ChatId chatId, td::td_api::object_ptr<td::td_api::file> photo)
  {
      auto it = m_chatInfo.find(chatId);
-@@ -675,6 +697,32 @@ void TdAccountData::getUsersByUsername(const char *username,
-     }
- }
- 
-+// webOS: reduce a name to a handle the way webOS does: keep only ASCII alphanumerics, lowercased.
-+static std::string normalizeHandle(const std::string &s)
-+{
-+    std::string out;
-+    out.reserve(s.size());
-+    for (unsigned char c: s)
-+        if (std::isalnum(c))
-+            out += (char) std::tolower(c);
-+    return out;
-+}
-+
-+void TdAccountData::getUsersByNormalizedDisplayName(const char *name,
-+                                                    std::vector<const td::td_api::user*> &users)
-+{
-+    users.clear();
-+    if (!name || (*name == '\0'))
-+        return;
-+    std::string want = normalizeHandle(name);
-+    if (want.empty())
-+        return;
-+
-+    for (const UserMap::value_type &entry: m_userInfo)
-+        if (normalizeHandle(entry.second.displayName) == want)
-+            users.push_back(entry.second.user.get());
-+}
-+
- const td::td_api::basicGroup *TdAccountData::getBasicGroup(BasicGroupId groupId) const
- {
-     auto it = m_groups.find(groupId);
 diff --git a/account-data.h b/account-data.h
-index 8114181..41e6b4f 100644
+index 8114181..104cce4 100644
 --- a/account-data.h
 +++ b/account-data.h
 @@ -146,6 +146,9 @@ struct TgMessageInfo {
@@ -270,20 +233,8 @@ index 8114181..41e6b4f 100644
      void updateSmallChatPhoto(ChatId chatId, td::td_api::object_ptr<td::td_api::file> photo);
      void setContacts(const td::td_api::users &users);
      void getContactsWithNoChat(std::vector<UserId> &userIds);
-@@ -458,6 +463,11 @@ public:
-     // that a message addressed to a handle rather than an "id<n>" buddy can find its user.
-     void                          getUsersByUsername(const char *username,
-                                                      std::vector<const td::td_api::user*> &users);
-+    // webOS: match a NORMALIZED display name (lowercase, only [a-z0-9] kept). webOS turns a
-+    // contact's display name into a handle this way ("Herman van Hazendonk" -> "hermanvanhazendonk",
-+    // "Pine64 Protocol Bot" -> "pine64protocolbot"), and addresses conversations by that handle.
-+    void                          getUsersByNormalizedDisplayName(const char *name,
-+                                                     std::vector<const td::td_api::user*> &users);
- 
-     const td::td_api::basicGroup *getBasicGroup(BasicGroupId groupId) const;
-     const td::td_api::basicGroupFullInfo *getBasicGroupInfo(BasicGroupId groupId) const;
 diff --git a/client-utils.cpp b/client-utils.cpp
-index 2ec4feb..c787b99 100644
+index 2ec4feb..3f8c9d5 100644
 --- a/client-utils.cpp
 +++ b/client-utils.cpp
 @@ -181,10 +181,25 @@ std::string proxyTypeToString(PurpleProxyType proxyType)
@@ -314,19 +265,7 @@ index 2ec4feb..c787b99 100644
  }
  
  PurpleBlistNode *findChatBlistNode(TdAccountData &account, const td::td_api::chat &chat)
-@@ -269,6 +284,11 @@ std::vector<const td::td_api::user *> getUsersByPurpleName(const char *buddyName
-             account.getUsersByDisplayName(buddyName, result);
-         if (result.empty())
-             account.getUsersByUsername(buddyName, result);
-+        // webOS turns a display name into a handle ("Herman van Hazendonk" -> "hermanvanhazendonk")
-+        // and may address the conversation by that; fall back to a normalized-display-name match,
-+        // for the Messaging app only.
-+        if (result.empty() && isWebosUi())
-+            account.getUsersByNormalizedDisplayName(buddyName, result);
-         if (action) {
-             if (result.empty())
-                 purple_debug_warning(config::pluginId, "Cannot %s: no user with display name or username '%s'\n",
-@@ -616,6 +636,28 @@ void updatePrivateChat(TdAccountData &account, const td::td_api::chat *chat, con
+@@ -616,6 +631,28 @@ void updatePrivateChat(TdAccountData &account, const td::td_api::chat *chat, con
              purple_buddy_icons_set_for_user(account.purpleAccount, purpleUserName.c_str(), NULL, 0, NULL);
          }
      }
