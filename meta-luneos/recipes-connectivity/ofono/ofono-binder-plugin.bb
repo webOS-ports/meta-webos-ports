@@ -20,24 +20,20 @@ SRC_URI = "git://github.com/mer-hybris/ofono-binder-plugin.git;branch=master;pro
            file://0008-ofono-binder-Don-t-make-supplementary-service-reques.patch \
            file://0009-unit-test-the-call-settings-requests.patch \
            file://0010-unit-free-failed-voicecall-requests-the-way-libgbind.patch \
-           file://0011-ofono-binder-Don-t-let-a-failed-submit-stall-the-rad.patch \
-           file://0012-unit-Add-radio-caps-transaction-test.patch \
-           file://0013-ofono-binder-Send-radio-caps-data-requests-in-the-tr.patch \
-           file://0014-ofono-binder-Switch-the-radios-back-on-after-a-radio.patch \
-           file://0015-ofono-binder-Don-t-keep-the-slot-blocked-for-a-card-.patch \
-           file://0016-unit-Add-SIM-card-status-transaction-test.patch \
-           file://0017-ofono-binder-Reset-the-SIM-card-on-request-by-poweri.patch \
-           file://0018-unit-Test-the-SIM-card-power-cycle.patch \
-           file://0019-ofono-binder-Report-a-present-card-without-applicati.patch \
-           file://0020-unit-Test-when-the-SIM-driver-reports-a-SIM-inserted.patch \
-           file://0021-unit-Test-the-SIM-driver-s-card-reset.patch \
-           file://0022-ofono-binder-Ask-for-IMS-registration-when-the-IMS-a.patch \
-           file://0023-ofono-binder-Give-an-IMS-extension-a-default-IMS-dat.patch \
+           file://0011-ofono-binder-Don-t-keep-the-slot-blocked-for-a-card-.patch \
+           file://0012-unit-Add-SIM-card-status-transaction-test.patch \
+           file://0013-ofono-binder-Reset-the-SIM-card-on-request-by-poweri.patch \
+           file://0014-unit-Test-the-SIM-card-power-cycle.patch \
+           file://0015-ofono-binder-Report-a-present-card-without-applicati.patch \
+           file://0016-unit-Test-when-the-SIM-driver-reports-a-SIM-inserted.patch \
+           file://0017-unit-Test-the-SIM-driver-s-card-reset.patch \
+           file://0018-ofono-binder-Ask-for-IMS-registration-when-the-IMS-a.patch \
+           file://0019-ofono-binder-Give-an-IMS-extension-a-default-IMS-dat.patch \
 "
 
-PV = "1.1.39"
+PV = "1.1.41"
 PR = "r4"
-SRCREV = "67c3c85c58fb387d1303560f757144ed275c67d6"
+SRCREV = "204dea1593be95e60bad9f2c0282c35a9f8ba272"
 
 CFLAGS += "--sysroot=${RECIPE_SYSROOT} "
 LDFLAGS += "--sysroot=${RECIPE_SYSROOT} "
