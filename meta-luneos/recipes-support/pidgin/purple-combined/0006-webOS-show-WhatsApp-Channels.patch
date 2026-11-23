@@ -3,11 +3,12 @@ Subject: [PATCH] webOS: show WhatsApp Channels
 
 * Show WhatsApp Channels
 
-The names and icons of followed Channels (newsletters) are fetched on
-connect, which also creates their buddies. Joining a channel fetches
-its last 50 posts. Posts that arrive twice (offline sync and history)
-are dropped by id; the seen ids are kept next to the message cache.
-The "ignore-newsletters" option therefore defaults to off.
+Upstream fetches the names of followed Channels (newsletters) on
+connect, which also creates their buddies; their icons are now set
+there too. Joining a channel fetches its last 50 posts. Posts that
+arrive twice (offline sync and history) are dropped by id; the seen ids
+are kept next to the message cache. The "ignore-newsletters" option
+therefore defaults to off, here and where the names are fetched.
 
 * Route status updates to a status chat per sender
 
@@ -21,12 +22,13 @@ Upstream-Status: Inappropriate [webOS specific]
  bridge.go            |   9 +++
  glue/groups.c        |  11 +++
  glue/options.c       |   2 +-
+ groups.go            |   4 ++
  handle_message.go    | 165 ++++++++++++++++++++++++++++---------------
- handle_newsletter.go | 143 +++++++++++++++++++++++++++++++++++++
- handler.go           |   8 ++-
+ handle_newsletter.go | 112 +++++++++++++++++++++++++++++
+ handler.go           |   5 +-
  login.go             |   2 +
  newsletter_seen.go   |  65 +++++++++++++++++
- 8 files changed, 343 insertions(+), 62 deletions(-)
+ 9 files changed, 315 insertions(+), 60 deletions(-)
  create mode 100644 handle_newsletter.go
  create mode 100644 newsletter_seen.go
 
@@ -88,8 +90,22 @@ index 500368b..7f21c89 100644
          );
      account_options = g_list_append(account_options, option);
  
+diff --git a/groups.go b/groups.go
+index ed3d97c..ca51bb0 100644
+--- a/groups.go
++++ b/groups.go
+@@ -48,5 +48,9 @@ func (handler *Handler) fetch_channel_names() {
+ 		if channel != nil && channel.ThreadMeta.Name.Text != "" {
+ 			purple_update_name(handler.account, channel.ID.String(), channel.ThreadMeta.Name.Text)
+ 		}
++		// webOS: and its icon (handle_newsletter.go)
++		if channel != nil {
++			handler.set_newsletter_icon(channel)
++		}
+ 	}
+ }
 diff --git a/handle_message.go b/handle_message.go
-index e376993..dcf42d6 100644
+index e376993..8bde7a5 100644
 --- a/handle_message.go
 +++ b/handle_message.go
 @@ -39,59 +39,15 @@ func GetAnyPollCreationMessage(message *waE2E.Message) *waE2E.PollCreationMessag
@@ -207,7 +223,7 @@ index e376993..dcf42d6 100644
 +				name = purple_get_alias(handler.account, info.MessageSource.Sender.ToNonAD().String())
 +			}
 +			if name != "" {
-+				// creates/aliases the synthetic status buddy, same sink fetch_newsletter_names uses
++				// creates/aliases the synthetic status buddy, same sink fetch_channel_names uses
 +				purple_update_name(handler.account, statusJid.String(), name)
 +			}
 +			info.MessageSource.Chat = statusJid
@@ -292,10 +308,10 @@ index e376993..dcf42d6 100644
 +}
 diff --git a/handle_newsletter.go b/handle_newsletter.go
 new file mode 100644
-index 0000000..a273c29
+index 0000000..4f2203a
 --- /dev/null
 +++ b/handle_newsletter.go
-@@ -0,0 +1,143 @@
+@@ -0,0 +1,112 @@
 +package main
 +
 +import (
@@ -311,42 +327,11 @@ index 0000000..a273c29
 +/*
 + * WhatsApp Channels (newsletters) support.
 + *
-+ * whatsmeow delivers a followed Channel as a 1:1 message whose peer JID is "<id>@newsletter", and it
-+ * carries no channel name - the only name on a message is the SENDER push-name, which is empty for a
-+ * channel. So without help the buddy is created showing the raw "<id>@newsletter" JID.
-+ *
-+ * The readable title lives in the newsletter metadata, reachable only via an explicit query. Fetch the
-+ * account's subscribed channels once on connect and push each real name through purple_update_name -
-+ * the same sink used for contact push-names. That both CREATES the newsletter buddy (so followed but
-+ * quiet channels still show up) and ALIASES it with its real title, which the webOS transport then
-+ * files under the "WhatsApp Channels" server.
++ * Upstream's fetch_channel_names (groups.go) fetches the subscribed channels on connect and pushes each
++ * name through purple_update_name. That both CREATES the newsletter buddy (so followed but quiet
++ * channels still show up) and ALIASES it with its real title, which the webOS transport files under
++ * the "WhatsApp Channels" server. webOS adds the channel's icon to it, below.
 + */
-+func (handler *Handler) fetch_newsletter_names() {
-+	cli := handler.client
-+	if cli == nil {
-+		return
-+	}
-+	metas, err := cli.GetSubscribedNewsletters(context.TODO())
-+	if err != nil {
-+		handler.log.Warnf("GetSubscribedNewsletters failed: %#v", err)
-+		return
-+	}
-+	handler.log.Infof("Fetched %d subscribed WhatsApp Channels.", len(metas))
-+	for _, meta := range metas {
-+		if meta == nil {
-+			continue
-+		}
-+		name := meta.ThreadMeta.Name.Text
-+		if name != "" {
-+			// meta.ID is the "<id>@newsletter" JID; purple_update_name creates/aliases the buddy under it.
-+			purple_update_name(handler.account, meta.ID.String(), name)
-+		}
-+		// webOS: also set the channel ICON. Newsletters aren't regular contacts, so the contact
-+		// avatar path (events.Picture -> GetProfilePictureInfo) never fires for them - but the picture
-+		// URL is right here in the metadata. Set it so BBC/Dumpert/etc. show their logo.
-+		handler.set_newsletter_icon(meta)
-+	}
-+}
 +
 +// set_newsletter_icon downloads a subscribed Channel's icon from its metadata and pushes it through
 +// purple_set_profile_picture (the same sink contact avatars use). Prefers the small preview (matches
@@ -440,7 +425,7 @@ index 0000000..a273c29
 +	}
 +}
 diff --git a/handler.go b/handler.go
-index 5a388ea..9d3d17f 100644
+index 5a388ea..a299c6c 100644
 --- a/handler.go
 +++ b/handler.go
 @@ -28,6 +28,8 @@ type Handler struct {
@@ -452,19 +437,16 @@ index 5a388ea..9d3d17f 100644
  	pictureRequests  chan ProfilePictureRequest
  	httpClient       *http.Client // for executing picture requests
  }
-@@ -68,9 +70,9 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
+@@ -68,7 +70,8 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
  	case *events.Connected:
  		// connected – start downloading profile pictures now.
  		go handler.profile_picture_downloader()
 -		if !purple_get_bool(handler.account, C.GOWHATSAPP_IGNORE_NEWSLETTERS_OPTION, true) {
--			go handler.fetch_channel_names()
--		}
-+		// webOS: fetch the real names of followed WhatsApp Channels (newsletters) so they show a title
-+		// instead of the raw "<id>@newsletter" JID. Also creates their buddies so quiet channels appear.
-+		go handler.fetch_newsletter_names()
++		// webOS: channels are not ignored by default (glue/options.c)
++		if !purple_get_bool(handler.account, C.GOWHATSAPP_IGNORE_NEWSLETTERS_OPTION, false) {
+ 			go handler.fetch_channel_names()
+ 		}
  		handler.handle_connected()
- 	case *events.Disconnected:
- 		// TODO: Find out if it would be more sensible to handle this as a non-error disconnect.
 diff --git a/login.go b/login.go
 index 69d6a84..3b5251a 100644
 --- a/login.go

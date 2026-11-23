@@ -68,6 +68,11 @@ media all the same (an older sender's ViewOnceMessage), the media is
 neither downloaded nor kept: the message says "📷 View once photo.
 Open it on your phone." (video, voice message).
 
+An unavailable message of type sender_drop, which upstream now drops
+without a word, still says "sent a message which was not available
+when requested. Wake up your main device, then the message will be
+displayed here. Probably.", so that the user knows to wake the phone.
+
 disappearing_test checks the words, which messages set the timer (a
 revoke, protocol type 0, does not), a group's change on and off, and
 which messages count as view-once.
@@ -78,8 +83,8 @@ Upstream-Status: Inappropriate [webOS specific]
  bridge.go                           |  10 ++
  bridge.h                            |   1 +
  constants.h                         |   1 +
- disappearing.go                     | 128 ++++++++++++++
- disappearing_test.go                | 138 +++++++++++++++
+ disappearing.go                     | 131 ++++++++++++++
+ disappearing_test.go                | 139 +++++++++++++++
  glue/display_message.c              |  19 ++
  glue/login.c                        |  14 ++
  glue/options.c                      |  10 ++
@@ -89,10 +94,10 @@ Upstream-Status: Inappropriate [webOS specific]
  go.mod                              |   2 +-
  group_events.go                     |   9 +
  handle_message.go                   |  53 +++++-
- handler.go                          |  26 +--
+ handler.go                          |  35 ++--
  history_sync.go                     | 258 ++++++++++++++++++++++++++++
  history_sync_test.go                | 167 ++++++++++++++++++
- 17 files changed, 864 insertions(+), 24 deletions(-)
+ 17 files changed, 871 insertions(+), 30 deletions(-)
  create mode 100644 disappearing.go
  create mode 100644 disappearing_test.go
  create mode 100644 history_sync.go
@@ -152,10 +157,10 @@ index bf60767..4d8ddb9 100644
  CHARCONSTANT(GOWHATSAPP_DISCARD_OLD_MESSAGES_OPTION, "discard-old-messages");
 diff --git a/disappearing.go b/disappearing.go
 new file mode 100644
-index 0000000..e0ce293
+index 0000000..94cb2f5
 --- /dev/null
 +++ b/disappearing.go
-@@ -0,0 +1,128 @@
+@@ -0,0 +1,131 @@
 +package main
 +
 +import (
@@ -277,7 +282,10 @@ index 0000000..e0ce293
 +	if evt.IsUnavailable && evt.UnavailableType == events.UnavailableTypeViewOnce {
 +		return "View once message. Open it on your phone."
 +	}
-+	// Otherwise as upstream says it. A "sender_drop" is not shown at all (handler.go).
++	if evt.UnavailableType == "sender_drop" {
++		return "sent a message which was not available when requested. Wake up your main device, then the message will be displayed here. Probably."
++	}
++	// Otherwise as upstream says it.
 +	unavailable_type := ""
 +	if evt.UnavailableType != "" {
 +		unavailable_type = fmt.Sprintf(" %s", evt.UnavailableType)
@@ -286,10 +294,10 @@ index 0000000..e0ce293
 +}
 diff --git a/disappearing_test.go b/disappearing_test.go
 new file mode 100644
-index 0000000..39e4bad
+index 0000000..8d92f86
 --- /dev/null
 +++ b/disappearing_test.go
-@@ -0,0 +1,138 @@
+@@ -0,0 +1,139 @@
 +package main
 +
 +import (
@@ -420,6 +428,7 @@ index 0000000..39e4bad
 +		{events.UndecryptableMessage{IsUnavailable: true, UnavailableType: events.UnavailableTypeViewOnce}, "View once message. Open it on your phone."},
 +		{events.UndecryptableMessage{IsUnavailable: true}, "sent an undecryptable message. The message might arrive here later."},
 +		{events.UndecryptableMessage{}, "sent an undecryptable message. The message might arrive here later."},
++		{events.UndecryptableMessage{UnavailableType: "sender_drop"}, "sent a message which was not available when requested. Wake up your main device, then the message will be displayed here. Probably."},
 +		{events.UndecryptableMessage{UnavailableType: "hosted_unavailable_fanout"}, "sent an undecryptable hosted_unavailable_fanout message. The message might arrive here later."},
 +	}
 +	for _, c := range cases {
@@ -685,7 +694,7 @@ index 125b083..171ae1f 100644
  }
  
 diff --git a/handle_message.go b/handle_message.go
-index 11c8b22..b761d24 100644
+index 46da8a2..fa8f1da 100644
 --- a/handle_message.go
 +++ b/handle_message.go
 @@ -502,6 +502,18 @@ func escape_text(text string) string {
@@ -788,10 +797,10 @@ index 11c8b22..b761d24 100644
  	handler.add_to_cache(message, info.ID, info.MessageSource.Chat, info.MessageSource.Sender, evt.Info.MessageSource, info.Timestamp)
  	// webOS: keep what a read receipt needs for each message received, under the chat's name as
 diff --git a/handler.go b/handler.go
-index 0259fac..63cc609 100644
+index 8385c3c..2f48380 100644
 --- a/handler.go
 +++ b/handler.go
-@@ -117,17 +117,9 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
+@@ -118,17 +118,9 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
  	case *events.Picture:
  		handler.request_profile_picture(evt.JID, "", evt.PictureID)
  	case *events.HistorySync:
@@ -812,27 +821,34 @@ index 0259fac..63cc609 100644
  	case *events.AppState:
  		log.Debugf("App state event: %+v / %+v", evt.Index, evt.SyncActionValue)
  	case *events.LoggedOut:
-@@ -202,14 +194,14 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
- 		if evt.UnavailableType == "sender_drop" {
- 			handler.log.Warnf("Silently ignroing sender_drop message. I do not know what they mean.")
- 		} else {
-+			// webOS: a view-once message is said as one (disappearing.go), in the chat as the
-+			// conversation knows it: by phone number, not by LID, as handle_message gives a message.
- 			info := evt.Info
- 			source := info.MessageSource
+@@ -200,18 +192,15 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
+ 	// TODO
+ 	// &events.Blocklist{Action:"", DHash:"REDACTED", PrevDHash:"REDACTED", Changes:[]events.BlocklistChange{events.BlocklistChange{JID:types.JID{User:"REDACTED", RawAgent:0x0, Device:0x0, Integrator:0x0, Server:"s.whatsapp.net"}, Action:"block"}}}
+ 	case *events.UndecryptableMessage:
+-		if evt.UnavailableType == "sender_drop" {
+-			handler.log.Warnf("Silently ignroing sender_drop message. I do not know what they mean.")
+-		} else {
+-			info := evt.Info
+-			source := info.MessageSource
 -			unavailable_type := ""
 -			if evt.UnavailableType != "" {
 -				unavailable_type = fmt.Sprintf(" %s", evt.UnavailableType)
 -			}
 -			text := fmt.Sprintf("sent an undecryptable%s message. The message might arrive here later.", unavailable_type)
 -			purple_display_text_message(handler.account, source.Chat.ToNonAD().String(), source.IsGroup, false, source.Sender.ToNonAD().String(), &info.PushName, info.Timestamp, text, &info.ID, "", "", "")
-+			text := undecryptable_text(evt)
-+			chat := handler.lidToPn(source.Chat, "handling undecryptable message chat")
-+			sender := handler.lidToPn(source.Sender, "handling undecryptable message sender")
-+			purple_display_text_message(handler.account, chat.ToNonAD().String(), source.IsGroup, false, sender.ToNonAD().String(), &info.PushName, info.Timestamp, text, &info.ID, "", "", "")
- 		}
+-		}
++		// webOS: every unavailable message is said (disappearing.go), a "sender_drop" too, so the
++		// user knows to wake the phone; in the chat as the conversation knows it: by phone number,
++		// not by LID, as handle_message gives a message.
++		info := evt.Info
++		source := info.MessageSource
++		text := undecryptable_text(evt)
++		chat := handler.lidToPn(source.Chat, "handling undecryptable message chat")
++		sender := handler.lidToPn(source.Sender, "handling undecryptable message sender")
++		purple_display_text_message(handler.account, chat.ToNonAD().String(), source.IsGroup, false, sender.ToNonAD().String(), &info.PushName, info.Timestamp, text, &info.ID, "", "", "")
  	default:
  		log.Warnf("Event type not handled: %#v", rawEvt)
+ 	}
 diff --git a/history_sync.go b/history_sync.go
 new file mode 100644
 index 0000000..c12206b
