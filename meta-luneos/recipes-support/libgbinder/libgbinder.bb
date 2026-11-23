@@ -14,7 +14,10 @@ SRC_URI = "git://github.com/mer-hybris/libgbinder.git;branch=master;protocol=htt
 "
 
 PV = "1.1.55+git"
-SRCREV = "6faaa1cf6d456ed34145a3e68b94bd091d1ce42a"
+# The pin moved to 2a1a957, which sorts below the previous 6faaa1c in git0+<hash>
+# (version-going-backwards); the epoch keeps package feeds moving forward.
+PE = "1"
+SRCREV = "2a1a957b5a738a4002b722d0993e47fdfd2c4089"
 
 EXTRA_OEMAKE = "KEEP_SYMBOLS=1"
 PARALLEL_MAKE = ""
