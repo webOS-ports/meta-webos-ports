@@ -10,19 +10,19 @@ require purple-connectors.inc
 
 # Built from luneos-synergy-connectors, the version ended in its commit alone (1.0+git0+d22c6be58f).
 # With the upstream commit now in front it can sort lower, so bump the epoch to keep package feeds
-# moving forward.
-PE = "4"
+# moving forward. 5: purple-gowhatsapp's 9f23883 sorts below the a8dc170 before it.
+PE = "5"
 
 # Three upstreams, unpacked side by side:
 #
-#   purple-gowhatsapp   the WhatsApp prpl, one feature per patch. 0001-0005 are generic fixes sent
-#                       upstream (pull requests 297, 298, 299, 303 and 310), 0006-0012 and
-#                       0016-0022 the webOS Messaging integration, 0013 the calling integration
-#                       (voice and video through the Phone app). 0014 adds prpl-gometa (Facebook
-#                       Messenger on mautrix-meta's messagix) and 0015 prpl-matrix (Matrix on
-#                       mautrix-go, with end-to-end encryption): LuneOS work, not part of
-#                       purple-gowhatsapp, which has to live in this .so because two Go c-archives
-#                       cannot share one process. 0021 is the rest of the Facebook integration.
+#   purple-gowhatsapp   the WhatsApp prpl, one feature per patch. 0001-0007 and 0011-0017 are the
+#                       webOS Messaging integration, 0008 the calling integration (voice and
+#                       video through the Phone app). 0009 adds prpl-gometa (Facebook Messenger
+#                       on mautrix-meta's messagix) and 0010 prpl-matrix (Matrix on mautrix-go,
+#                       with end-to-end encryption): LuneOS work, not part of purple-gowhatsapp,
+#                       which has to live in this .so because two Go c-archives cannot share one
+#                       process. 0016 is the rest of the Facebook integration and 0018 connects
+#                       the account-removed handler once libpurple has registered the signal.
 #   meowcaller          WhatsApp calling, which go.mod replaces with ./third_party/meowcaller.
 #                       main imports whatsmeow as github.com/polymorfa/hypermeow, a renamed copy;
 #                       meowcaller/0001 points it back at go.mau.fi/whatsmeow, the module
@@ -39,29 +39,24 @@ PE = "4"
 SRC_URI += " \
     git://github.com/hoehermann/purple-gowhatsapp.git;branch=whatsmeow;protocol=https;name=upstream;destsuffix=purple-combined \
     git://github.com/purpshell/meowcaller.git;branch=main;protocol=https;name=meowcaller;destsuffix=purple-combined/third_party/meowcaller \
-    file://0001-Show-the-quote-when-the-quoted-message-is-an-extende.patch \
-    file://0002-Do-not-dereference-a-missing-device-ID-when-pruning-.patch \
-    file://0003-Drop-profile-picture-requests-while-disconnected.patch \
-    file://0004-Print-the-message-timestamp-with-a-64-bit-format.patch \
-    file://0005-Give-sent-documents-a-file-name.patch \
-    file://0006-webOS-show-reactions-on-the-message-they-react-to.patch \
-    file://0007-webOS-report-sent-message-ids-and-delivery-and-read-.patch \
-    file://0008-webOS-update-edited-and-deleted-messages-in-place-an.patch \
-    file://0009-webOS-show-locations-contact-cards-events-link-previ.patch \
-    file://0010-webOS-show-polls-and-vote-on-them-from-the-app.patch \
-    file://0011-webOS-show-WhatsApp-Channels.patch \
-    file://0012-webOS-store-and-cache-defaults-device-removal-messag.patch \
-    file://0013-webOS-WhatsApp-voice-and-video-calls-through-the-Pho.patch \
-    file://0014-webOS-add-a-Facebook-Messenger-protocol-prpl-gometa-.patch \
-    file://0015-webOS-add-a-Matrix-protocol-prpl-matrix-to-the-plugi.patch \
-    file://0016-webOS-send-read-receipts-once-a-chat-is-read.patch \
-    file://0017-webOS-count-WhatsApp-poll-votes-on-the-poll-one-vote.patch \
-    file://0018-webOS-edit-delete-groups-places-contact-cards-and-me.patch \
-    file://0019-webOS-keep-the-id-of-what-we-send-into-a-WhatsApp-gr.patch \
-    file://0020-webOS-keep-a-received-WhatsApp-sticker-as-WebP.patch \
-    file://0021-webOS-Facebook-typing-receipts-edits-deletes-rich-se.patch \
-    file://0022-webOS-show-the-old-WhatsApp-messages-the-phone-sends.patch \
-    file://0023-webOS-connect-the-account-removed-handler-once-libpu.patch \
+    file://0001-webOS-show-reactions-on-the-message-they-react-to.patch \
+    file://0002-webOS-report-sent-message-ids-and-delivery-and-read-.patch \
+    file://0003-webOS-update-edited-and-deleted-messages-in-place-an.patch \
+    file://0004-webOS-show-locations-contact-cards-events-link-previ.patch \
+    file://0005-webOS-show-polls-and-vote-on-them-from-the-app.patch \
+    file://0006-webOS-show-WhatsApp-Channels.patch \
+    file://0007-webOS-store-and-cache-defaults-device-removal-messag.patch \
+    file://0008-webOS-WhatsApp-voice-and-video-calls-through-the-Pho.patch \
+    file://0009-webOS-add-a-Facebook-Messenger-protocol-prpl-gometa-.patch \
+    file://0010-webOS-add-a-Matrix-protocol-prpl-matrix-to-the-plugi.patch \
+    file://0011-webOS-send-read-receipts-once-a-chat-is-read.patch \
+    file://0012-webOS-count-WhatsApp-poll-votes-on-the-poll-one-vote.patch \
+    file://0013-webOS-edit-delete-groups-places-contact-cards-and-me.patch \
+    file://0014-webOS-keep-the-id-of-what-we-send-into-a-WhatsApp-gr.patch \
+    file://0015-webOS-keep-a-received-WhatsApp-sticker-as-WebP.patch \
+    file://0016-webOS-Facebook-typing-receipts-edits-deletes-rich-se.patch \
+    file://0017-webOS-show-the-old-WhatsApp-messages-the-phone-sends.patch \
+    file://0018-webOS-connect-the-account-removed-handler-once-libpu.patch \
     file://meowcaller/0001-Build-against-upstream-whatsmeow.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0002-mlow-speed-up-the-encoder-for-32-bit-ARM.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0003-Fix-the-video-call-media-path-against-live-WhatsApp-.patch;patchdir=third_party/meowcaller \
@@ -70,7 +65,7 @@ SRC_URI += " \
     file://meowcaller/0006-webOS-fix-multi-device-calls-relay-election-video-or.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0007-rtp-accept-MLOW-on-its-separate-payload-type-122.patch;patchdir=third_party/meowcaller \
 "
-SRCREV_upstream = "a8dc1702c22c206dc8ed068e596f986b20839b16"
+SRCREV_upstream = "9f23883571daeaf03c939b25a63397e410cdf6e7"
 SRCREV_meowcaller = "c48c3e2a243c672c942cbf0c941d14161720d540"
 SRCREV_FORMAT = "upstream_meowcaller_connectors"
 
@@ -119,7 +114,7 @@ export GOPROXY = "https://proxy.golang.org,direct"
 do_compile[network] = "1"
 
 # The video bridge. glue/voipkit.cpp binds libpalmgstskype.so, a gstreamer-0.10 plugin that
-# exists only in legacy webOS firmware, and glue/voipkit_none.c is a NULL backend. 0013 adds
+# exists only in legacy webOS firmware, and glue/voipkit_none.c is a NULL backend. 0008 adds
 # glue/voipkit_rtcengine.c, which hands the call's H.264 to luneos-rtc-engine
 # (packagegroup-luneos-extended) to decode and, where there is a camera and an encoder, encode.
 # Without the engine on the device a video call stays voice-only.
@@ -154,7 +149,7 @@ do_compile() {
     # cross settings that DO matter -- CC, CGO_ENABLED, CGO_CFLAGS, GOARCH -- come from the
     # environment the class exports, not from these flags.
     #
-    # -tags goolm: Matrix's end-to-end encryption (0015) uses mautrix-go's pure-Go Olm. Without
+    # -tags goolm: Matrix's end-to-end encryption (0010) uses mautrix-go's pure-Go Olm. Without
     # the tag mautrix/crypto binds libolm through cgo instead, which is deprecated upstream and not
     # in this layer set.
     ${GO} build -tags goolm -trimpath -modcacherw -buildmode=c-archive -o ${B}/libwhatsmeow.a .
@@ -171,7 +166,7 @@ do_compile() {
              -I${S}/glue -I${S} -I${B} \
              $(pkg-config --cflags purple glib-2.0 opus opusfile ogg alsa luna-service2)"
 
-    # 2. the C glue, including the webOS files 0013 and 0014 add.
+    # 2. the C glue, including the webOS files 0008 and 0009 add.
     OBJS=""
     for s in init login qrcode bridge process_message display_message groups blist \
              send_message handle_attachment send_file presence options receipt pixbuf commands \

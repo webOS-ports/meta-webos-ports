@@ -1,6 +1,4 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Herman van Hazendonk <github.com@herrie.org>
-Date: Tue, 20 Oct 2026 16:29:05 +0200
 Subject: [PATCH] webOS: update edited and deleted messages in place, and carry
  replies as quotes
 
@@ -28,18 +26,18 @@ reply keeps its quote.
 Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
 Upstream-Status: Inappropriate [webOS specific]
 ---
- bridge.go                | 52 +++++++++++++++++++++++++++++++++---
+ bridge.go                | 52 ++++++++++++++++++++++++++++++++---
  bridge.h                 |  5 ++++
- glue/bridge.c            |  3 +++
- glue/display_message.c   | 28 ++++++++++++++++++--
+ glue/bridge.c            |  3 ++
+ glue/display_message.c   | 28 +++++++++++++++++--
  glue/gowhatsapp.h        |  2 +-
- glue/handle_attachment.c | 12 ++++-----
- glue/process_message.c   | 30 +++++++++++++++++++--
- glue/send_message.c      | 24 ++++++++++++++---
- handle_message.go        | 57 ++++++++++++++++++++++++++++++----------
- handler.go               |  6 ++---
+ glue/handle_attachment.c | 12 ++++----
+ glue/process_message.c   | 30 ++++++++++++++++++--
+ glue/send_message.c      | 24 +++++++++++++---
+ handle_message.go        | 59 ++++++++++++++++++++++++++++------------
+ handler.go               |  6 ++--
  send_message.go          | 23 +++++++++++-----
- 11 files changed, 199 insertions(+), 43 deletions(-)
+ 11 files changed, 198 insertions(+), 46 deletions(-)
 
 diff --git a/bridge.go b/bridge.go
 index d7b9d26..1bdca33 100644
@@ -416,10 +414,10 @@ index 2afab1c..637b325 100644
                      // Group chats need an explicit local echo since the implicit echo is implemented for direct messages only.
                      // See https://keep.imfreedom.org/pidgin/pidgin/file/v2.14.12/libpurple/conversation.c#l191.
 diff --git a/handle_message.go b/handle_message.go
-index 4f49219..6eb4d88 100644
+index ab6a121..61cafc0 100644
 --- a/handle_message.go
 +++ b/handle_message.go
-@@ -135,33 +135,55 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+@@ -181,37 +181,55 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
  		return
  	}
  	isEdit := false
@@ -432,7 +430,10 @@ index 4f49219..6eb4d88 100644
 +				// pm.Key points at the ORIGINAL message being edited; its id is the serviceMessageId under
 +				// which we stored that message, so the transport can find & update that bubble in place.
 +				editTargetId = pm.GetKey().GetID()
-+			} else if pm.Type != nil && pm.GetType() == waE2E.ProtocolMessage_REVOKE {
+ 			} else if pm.Type != nil && pm.GetType() == waE2E.ProtocolMessage_REVOKE {
+-				// the sender deleted a message for everyone
+-				// Type must be checked for presence since REVOKE is the enum's zero value
+-				text += fmt.Sprintf("deleted %s.", handler.describe_cached_message(pm.GetKey().GetID()))
 +				// webOS "delete for everyone": the sender revoked a previously-sent message. Checking
 +				// pm.Type != nil (not just GetType()==REVOKE) matters since REVOKE is protobuf enum
 +				// value 0, the same zero-value GetType() returns for an unset Type field - only a
@@ -484,7 +485,7 @@ index 4f49219..6eb4d88 100644
  				}
  			}
  			if etm.Text != nil {
-@@ -278,12 +300,19 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+@@ -334,12 +352,19 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
  		}
  	}
  	if text != "" {
@@ -510,10 +511,10 @@ index 4f49219..6eb4d88 100644
  	if !isEdit { // edited messages contain the changed texts, but attachments are absent since they cannot be changed
  		handler.handle_attachment(message, info.ID, info.MessageSource, info.Timestamp)
 diff --git a/handler.go b/handler.go
-index 97a97a7..ebe5faa 100644
+index ccd1053..5a388ea 100644
 --- a/handler.go
 +++ b/handler.go
-@@ -143,14 +143,14 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
+@@ -146,14 +146,14 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
  		chat := handler.lidToPn(bcm.From, "handling call offer")
  		sender := handler.lidToPn(bcm.CallCreator, "handling call offer")
  		text := "This contact is trying to call you, but whatsmeow does not support calls."
@@ -530,15 +531,15 @@ index 97a97a7..ebe5faa 100644
  	case *events.CallRelayLatency:
  		// related to calls. ignore silently.
  	case *events.CallTerminate:
-@@ -178,7 +178,7 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
- 		if evt.UnavailableType == "sender_drop" {
- 			text = "sent a message which was not available when requested. Wake up your main device, then the message will be displayed here. Probably."
+@@ -181,7 +181,7 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
+ 				unavailable_type = fmt.Sprintf(" %s", evt.UnavailableType)
+ 			}
+ 			text := fmt.Sprintf("sent an undecryptable%s message. The message might arrive here later.", unavailable_type)
+-			purple_display_text_message(handler.account, source.Chat.ToNonAD().String(), source.IsGroup, false, source.Sender.ToNonAD().String(), &info.PushName, info.Timestamp, text, &info.ID)
++			purple_display_text_message(handler.account, source.Chat.ToNonAD().String(), source.IsGroup, false, source.Sender.ToNonAD().String(), &info.PushName, info.Timestamp, text, &info.ID, "", "", "")
  		}
--		purple_display_text_message(handler.account, source.Chat.ToNonAD().String(), source.IsGroup, false, source.Sender.ToNonAD().String(), &info.PushName, info.Timestamp, text, &info.ID)
-+		purple_display_text_message(handler.account, source.Chat.ToNonAD().String(), source.IsGroup, false, source.Sender.ToNonAD().String(), &info.PushName, info.Timestamp, text, &info.ID, "", "", "")
  	default:
  		log.Warnf("Event type not handled: %#v", rawEvt)
- 	}
 diff --git a/send_message.go b/send_message.go
 index 7632e07..47b8704 100644
 --- a/send_message.go

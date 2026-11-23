@@ -1,6 +1,4 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Herman van Hazendonk <github.com@herrie.org>
-Date: Mon, 9 Nov 2026 14:15:54 +0100
 Subject: [PATCH] webOS: show the old WhatsApp messages the phone sends
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -80,8 +78,8 @@ Upstream-Status: Inappropriate [webOS specific]
  bridge.go                           |  10 ++
  bridge.h                            |   1 +
  constants.h                         |   1 +
- disappearing.go                     | 131 ++++++++++++++
- disappearing_test.go                | 139 +++++++++++++++
+ disappearing.go                     | 128 ++++++++++++++
+ disappearing_test.go                | 138 +++++++++++++++
  glue/display_message.c              |  19 ++
  glue/login.c                        |  14 ++
  glue/options.c                      |  10 ++
@@ -91,10 +89,10 @@ Upstream-Status: Inappropriate [webOS specific]
  go.mod                              |   2 +-
  group_events.go                     |   9 +
  handle_message.go                   |  53 +++++-
- handler.go                          |  29 +---
+ handler.go                          |  26 +--
  history_sync.go                     | 258 ++++++++++++++++++++++++++++
  history_sync_test.go                | 167 ++++++++++++++++++
- 17 files changed, 868 insertions(+), 27 deletions(-)
+ 17 files changed, 864 insertions(+), 24 deletions(-)
  create mode 100644 disappearing.go
  create mode 100644 disappearing_test.go
  create mode 100644 history_sync.go
@@ -154,10 +152,10 @@ index bf60767..4d8ddb9 100644
  CHARCONSTANT(GOWHATSAPP_DISCARD_OLD_MESSAGES_OPTION, "discard-old-messages");
 diff --git a/disappearing.go b/disappearing.go
 new file mode 100644
-index 0000000..03d76d0
+index 0000000..e0ce293
 --- /dev/null
 +++ b/disappearing.go
-@@ -0,0 +1,131 @@
+@@ -0,0 +1,128 @@
 +package main
 +
 +import (
@@ -279,10 +277,7 @@ index 0000000..03d76d0
 +	if evt.IsUnavailable && evt.UnavailableType == events.UnavailableTypeViewOnce {
 +		return "View once message. Open it on your phone."
 +	}
-+	// Otherwise as upstream says it.
-+	if evt.UnavailableType == "sender_drop" {
-+		return "sent a message which was not available when requested. Wake up your main device, then the message will be displayed here. Probably."
-+	}
++	// Otherwise as upstream says it. A "sender_drop" is not shown at all (handler.go).
 +	unavailable_type := ""
 +	if evt.UnavailableType != "" {
 +		unavailable_type = fmt.Sprintf(" %s", evt.UnavailableType)
@@ -291,10 +286,10 @@ index 0000000..03d76d0
 +}
 diff --git a/disappearing_test.go b/disappearing_test.go
 new file mode 100644
-index 0000000..915b348
+index 0000000..39e4bad
 --- /dev/null
 +++ b/disappearing_test.go
-@@ -0,0 +1,139 @@
+@@ -0,0 +1,138 @@
 +package main
 +
 +import (
@@ -426,7 +421,6 @@ index 0000000..915b348
 +		{events.UndecryptableMessage{IsUnavailable: true}, "sent an undecryptable message. The message might arrive here later."},
 +		{events.UndecryptableMessage{}, "sent an undecryptable message. The message might arrive here later."},
 +		{events.UndecryptableMessage{UnavailableType: "hosted_unavailable_fanout"}, "sent an undecryptable hosted_unavailable_fanout message. The message might arrive here later."},
-+		{events.UndecryptableMessage{UnavailableType: "sender_drop"}, "sent a message which was not available when requested. Wake up your main device, then the message will be displayed here. Probably."},
 +	}
 +	for _, c := range cases {
 +		if got := undecryptable_text(&c.evt); got != c.want {
@@ -489,7 +483,7 @@ index b6d6403..d9a878d 100644
      }
      
 diff --git a/glue/login.c b/glue/login.c
-index 057536f..963233b 100644
+index 642494f..dfa415e 100644
 --- a/glue/login.c
 +++ b/glue/login.c
 @@ -162,6 +162,19 @@ static gboolean webos_group_rename_cb(PurpleAccount *account, const char *chat,
@@ -659,7 +653,7 @@ index 54bd820..e87dd92 100644
  STUB(gowhatsapp_go_send_reaction)
  STUB(gowhatsapp_receipts_init)
 diff --git a/go.mod b/go.mod
-index 22a7139..6ccdc3a 100644
+index fa3d8af..8e51a69 100644
 --- a/go.mod
 +++ b/go.mod
 @@ -1,6 +1,6 @@
@@ -691,10 +685,10 @@ index 125b083..171ae1f 100644
  }
  
 diff --git a/handle_message.go b/handle_message.go
-index e020aaf..c3c62f3 100644
+index 11c8b22..b761d24 100644
 --- a/handle_message.go
 +++ b/handle_message.go
-@@ -456,6 +456,18 @@ func escape_text(text string) string {
+@@ -502,6 +502,18 @@ func escape_text(text string) string {
  }
  
  func (handler *Handler) handle_message(message *waE2E.Message, info types.MessageInfo, evt *events.Message) {
@@ -713,7 +707,7 @@ index e020aaf..c3c62f3 100644
  	//handler.log.Infof("message: %#v", message)
  	if info.MessageSource.Chat.Server == types.NewsletterServer {
  		// Channel (newsletter) posts would show up as chats with a raw JID.
-@@ -520,8 +532,12 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+@@ -566,8 +578,12 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
  		}
  	}
  	// webOS: recent messages shared with new group members: a notice line, and the bundle dropped
@@ -728,7 +722,7 @@ index e020aaf..c3c62f3 100644
  		return
  	}
  	if message.SenderKeyDistributionMessage != nil {
-@@ -561,6 +577,14 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+@@ -607,6 +623,14 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
  					purple_handle_message_delete(handler.account, targetId)
  				}
  				return
@@ -743,7 +737,7 @@ index e020aaf..c3c62f3 100644
  			}
  		}
  	}
-@@ -686,6 +710,10 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+@@ -732,6 +756,10 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
  	}
  	{
  		pum := message.GetPollUpdateMessage()
@@ -754,7 +748,7 @@ index e020aaf..c3c62f3 100644
  		if pum != nil {
  			// webOS: a vote is counted on its poll, not told as a message of its own. The voter is one
  			// identity, the same for a vote from our phone as for one from this device, and is also who
-@@ -708,6 +736,20 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+@@ -754,6 +782,20 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
  			}
  		}
  	}
@@ -775,7 +769,7 @@ index e020aaf..c3c62f3 100644
  	if text != "" {
  		if isEdit && editTargetId != "" {
  			// webOS edit-in-place: update the ORIGINAL bubble's text (found by editTargetId ==
-@@ -720,12 +762,15 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
+@@ -766,12 +808,15 @@ func (handler *Handler) handle_message(message *waE2E.Message, info types.Messag
  			}
  			text := mention_marks_to_html(escape_text(text))
  			// note: info.PushName always denotes the sender (not the chat)
@@ -794,7 +788,7 @@ index e020aaf..c3c62f3 100644
  	handler.add_to_cache(message, info.ID, info.MessageSource.Chat, info.MessageSource.Sender, evt.Info.MessageSource, info.Timestamp)
  	// webOS: keep what a read receipt needs for each message received, under the chat's name as
 diff --git a/handler.go b/handler.go
-index 3020be3..ecca21e 100644
+index 0259fac..63cc609 100644
 --- a/handler.go
 +++ b/handler.go
 @@ -117,17 +117,9 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
@@ -818,30 +812,27 @@ index 3020be3..ecca21e 100644
  	case *events.AppState:
  		log.Debugf("App state event: %+v / %+v", evt.Index, evt.SyncActionValue)
  	case *events.LoggedOut:
-@@ -199,17 +191,14 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
- 	// TODO
- 	// &events.Blocklist{Action:"", DHash:"REDACTED", PrevDHash:"REDACTED", Changes:[]events.BlocklistChange{events.BlocklistChange{JID:types.JID{User:"REDACTED", RawAgent:0x0, Device:0x0, Integrator:0x0, Server:"s.whatsapp.net"}, Action:"block"}}}
- 	case *events.UndecryptableMessage:
-+		// webOS: a view-once message is said as one (disappearing.go), in the chat as the
-+		// conversation knows it: by phone number, not by LID, as handle_message gives a message.
- 		info := evt.Info
- 		source := info.MessageSource
--		unavailable_type := ""
--		if evt.UnavailableType != "" {
--			unavailable_type = fmt.Sprintf(" %s", evt.UnavailableType)
--		}
--		text := fmt.Sprintf("sent an undecryptable%s message. The message might arrive here later.", unavailable_type)
--		if evt.UnavailableType == "sender_drop" {
--			text = "sent a message which was not available when requested. Wake up your main device, then the message will be displayed here. Probably."
--		}
--		purple_display_text_message(handler.account, source.Chat.ToNonAD().String(), source.IsGroup, false, source.Sender.ToNonAD().String(), &info.PushName, info.Timestamp, text, &info.ID, "", "", "")
-+		text := undecryptable_text(evt)
-+		chat := handler.lidToPn(source.Chat, "handling undecryptable message chat")
-+		sender := handler.lidToPn(source.Sender, "handling undecryptable message sender")
-+		purple_display_text_message(handler.account, chat.ToNonAD().String(), source.IsGroup, false, sender.ToNonAD().String(), &info.PushName, info.Timestamp, text, &info.ID, "", "", "")
+@@ -202,14 +194,14 @@ func (handler *Handler) eventHandler(rawEvt interface{}) {
+ 		if evt.UnavailableType == "sender_drop" {
+ 			handler.log.Warnf("Silently ignroing sender_drop message. I do not know what they mean.")
+ 		} else {
++			// webOS: a view-once message is said as one (disappearing.go), in the chat as the
++			// conversation knows it: by phone number, not by LID, as handle_message gives a message.
+ 			info := evt.Info
+ 			source := info.MessageSource
+-			unavailable_type := ""
+-			if evt.UnavailableType != "" {
+-				unavailable_type = fmt.Sprintf(" %s", evt.UnavailableType)
+-			}
+-			text := fmt.Sprintf("sent an undecryptable%s message. The message might arrive here later.", unavailable_type)
+-			purple_display_text_message(handler.account, source.Chat.ToNonAD().String(), source.IsGroup, false, source.Sender.ToNonAD().String(), &info.PushName, info.Timestamp, text, &info.ID, "", "", "")
++			text := undecryptable_text(evt)
++			chat := handler.lidToPn(source.Chat, "handling undecryptable message chat")
++			sender := handler.lidToPn(source.Sender, "handling undecryptable message sender")
++			purple_display_text_message(handler.account, chat.ToNonAD().String(), source.IsGroup, false, sender.ToNonAD().String(), &info.PushName, info.Timestamp, text, &info.ID, "", "", "")
+ 		}
  	default:
  		log.Warnf("Event type not handled: %#v", rawEvt)
- 	}
 diff --git a/history_sync.go b/history_sync.go
 new file mode 100644
 index 0000000..c12206b
