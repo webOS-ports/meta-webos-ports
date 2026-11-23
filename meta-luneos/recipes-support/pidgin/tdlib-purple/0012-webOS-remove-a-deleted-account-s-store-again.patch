@@ -1,7 +1,5 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Herman van Hazendonk <github.com@herrie.org>
-Date: Tue, 17 Nov 2026 19:44:31 +0100
-Subject: [PATCH 14/14] webOS: remove a deleted account's store again
+Subject: [PATCH] webOS: remove a deleted account's store again
 
 A deleted account's TDLib store, its session keys among them, was to be
 removed when libpurple's "account-removed" fires. The hook was connected
@@ -22,17 +20,17 @@ Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
 Upstream-Status: Inappropriate [webOS specific]
 ---
  tdlib-purple.cpp             | 24 ++++++++++++++++++++++--
- test/libpurple-mock.cpp      | 16 +++++++++++++++-
+ test/libpurple-mock.cpp      | 28 ++++++++++++++++++++++++----
  test/libpurple-mock.h        |  4 ++++
  test/webos-commands-test.cpp | 20 ++++++++++++++++++++
- 4 files changed, 61 insertions(+), 3 deletions(-)
+ 4 files changed, 70 insertions(+), 6 deletions(-)
 
 diff --git a/tdlib-purple.cpp b/tdlib-purple.cpp
-index 4285399..64afdd1 100644
+index b41d3e1..0aacd82 100644
 --- a/tdlib-purple.cpp
 +++ b/tdlib-purple.cpp
-@@ -1706,8 +1706,15 @@ static void unregisterMessageLinks()
-     setViewedHandler(nullptr);
+@@ -1737,8 +1737,15 @@ static void quitting(void *)
+     }
  }
  
 +// The idle callback that is to connect the account-removed hook, while it has not run (see tgprpl_load)
@@ -46,8 +44,8 @@ index 4285399..64afdd1 100644
 +    }
      unregisterMessageLinks();
      pidginUiUnload();
-     return TRUE;
-@@ -1787,6 +1794,16 @@ static void tgprpl_account_removed_cb(PurpleAccount *account, gpointer unused)
+     AccountThread::finishAll();
+@@ -1819,6 +1826,16 @@ static void tgprpl_account_removed_cb(PurpleAccount *account, gpointer unused)
      removeDirRecursive(filesDir);
  }
  
@@ -64,7 +62,7 @@ index 4285399..64afdd1 100644
  static gboolean tgprpl_load (PurplePlugin *plugin)
  {
      if (!checkTdlibVersion())
-@@ -1796,8 +1813,11 @@ static gboolean tgprpl_load (PurplePlugin *plugin)
+@@ -1830,8 +1847,11 @@ static gboolean tgprpl_load (PurplePlugin *plugin)
  
      // Per-account store teardown: hook "account-removed" (emitted by purple_accounts_delete) so a
      // deleted Telegram account's tdlib DB + media cache are not orphaned. Handle is the plugin.
@@ -79,33 +77,47 @@ index 4285399..64afdd1 100644
      purple_cmd_register("kick", "s", PURPLE_CMD_P_PLUGIN,
                          (PurpleCmdFlag)(PURPLE_CMD_FLAG_CHAT | PURPLE_CMD_FLAG_PRPL_ONLY),
 diff --git a/test/libpurple-mock.cpp b/test/libpurple-mock.cpp
-index 3fcb2bc..e3204a9 100644
+index e233022..13e5a19 100644
 --- a/test/libpurple-mock.cpp
 +++ b/test/libpurple-mock.cpp
-@@ -1986,11 +1986,15 @@ gboolean purple_conversation_has_focus(PurpleConversation *conv)
- }
- 
- static std::map<std::string, PurpleCallback> g_connectedSignals;
+@@ -2237,16 +2237,22 @@ struct SignalHandler {
+     void          *data;
+ };
+ static std::vector<SignalHandler> g_signalHandlers;
 +static bool g_accountSignalsRegistered = true;
  
--// Kept, so that a test can call what the plug-in connected as the signal's emitter would
 +// Kept, so that a test can call what the plug-in connected as the signal's emitter would. As in
-+// libpurple, an account signal before purple_accounts_init has registered it is refused.
++// libpurple, an account signal before purple_accounts_init has registered it is refused (0), and
++// a connection made is numbered from 1.
  gulong purple_signal_connect(void *instance, const char *signal,
  	void *handle, PurpleCallback func, void *data)
  {
 +    if (!g_accountSignalsRegistered && !strcmp(signal, "account-removed"))
 +        return 0;
-     g_connectedSignals[signal] = func;
-     return g_connectedSignals.size();
+     // Once, as the plugin is loaded again for every test
+-    for (const SignalHandler &handler: g_signalHandlers)
+-        if ((handler.signal == signal) && (handler.func == func))
+-            return 0;
++    for (size_t i = 0; i < g_signalHandlers.size(); i++)
++        if ((g_signalHandlers[i].signal == signal) && (g_signalHandlers[i].func == func))
++            return i + 1;
+     g_signalHandlers.push_back({signal, func, data});
+-    return 0;
++    return g_signalHandlers.size();
  }
-@@ -2079,6 +2083,16 @@ void purple_conversation_set_name(PurpleConversation *conv, const char *name)
+ 
+ void purple_signal_disconnect(void *instance, const char *signal,
+@@ -2340,6 +2346,20 @@ void purple_conversation_set_name(PurpleConversation *conv, const char *name)
  
  };
  
 +extern "C++" void forgetConnectedSignal(const char *signal)
 +{
-+    g_connectedSignals.erase(signal);
++    g_signalHandlers.erase(std::remove_if(g_signalHandlers.begin(), g_signalHandlers.end(),
++                                          [signal](const SignalHandler &handler) {
++                                              return handler.signal == signal;
++                                          }),
++                           g_signalHandlers.end());
 +}
 +
 +extern "C++" void setAccountSignalsRegistered(bool registered)
@@ -115,12 +127,12 @@ index 3fcb2bc..e3204a9 100644
 +
  extern "C++" PurpleCallback getConnectedSignal(const char *signal)
  {
-     auto it = g_connectedSignals.find(signal);
+     for (const SignalHandler &handler: g_signalHandlers)
 diff --git a/test/libpurple-mock.h b/test/libpurple-mock.h
-index ae82aa8..f430ac9 100644
+index 87401dd..81eef82 100644
 --- a/test/libpurple-mock.h
 +++ b/test/libpurple-mock.h
-@@ -35,6 +35,10 @@ void setPresenceIdle(bool idle);
+@@ -51,6 +51,10 @@ void setPresenceIdle(bool idle);
  // What the plug-in connected to a signal, or NULL. Connections stay for the whole run, as the
  // plug-in makes some only once.
  PurpleCallback getConnectedSignal(const char *signal);
@@ -132,7 +144,7 @@ index ae82aa8..f430ac9 100644
  // The webOS signals the plug-in gives imlibpurpleservice that tests look at: "webos-im-edit"
  // (account, serviceMessageId, text) and "webos-im-delete" (account, serviceMessageId)
 diff --git a/test/webos-commands-test.cpp b/test/webos-commands-test.cpp
-index 8c1171b..54e5148 100644
+index 03c6fd4..251bed8 100644
 --- a/test/webos-commands-test.cpp
 +++ b/test/webos-commands-test.cpp
 @@ -7,6 +7,7 @@
@@ -143,7 +155,7 @@ index 8c1171b..54e5148 100644
  #include <cstring>
  
  // Who a notice in a group chat is from, as group-chat-test.cpp has it
-@@ -2403,3 +2404,22 @@ TEST_F(WebosTapTest, OtherFrontEndAsked)
+@@ -2404,3 +2405,22 @@ TEST_F(WebosTapTest, OtherFrontEndAsked)
      // Nothing is stashed for the transport
      ASSERT_EQ("", takeStashedId(imConversation()));
  }
