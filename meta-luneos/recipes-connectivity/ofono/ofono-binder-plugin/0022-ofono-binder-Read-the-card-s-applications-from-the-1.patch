@@ -1,0 +1,118 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [ofono-binder] Read the card's applications from the 1.5 list
+
+Since IRadio 1.5, getIccCardStatus answers with a CardStatus that
+carries the applications in a list of its own, as AppStatus 1.5, next to
+the 1.0 list inside its base. Android reads the new list only, and a RIL
+may leave the old one empty: the q25's MediaTek RIL does. The 1.5 status
+was read through its 1.0 base, so such a card came out present with no
+applications, oFono saw no SIM, and the modem never got as far as
+network registration. With radioInterface 1.5 or 1.6 the q25 showed
+card_state=1, num_apps=0 and stayed unregistered.
+
+Read the 1.5 list, with its own persoSubstate, and fall back to the 1.0
+list for a RIL that fills only that one.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/binder_sim_card.c | 54 +++++++++++++++++++++++++++++++++++++------
+ 1 file changed, 47 insertions(+), 7 deletions(-)
+
+diff --git a/src/binder_sim_card.c b/src/binder_sim_card.c
+index 959b62a..58d0f26 100644
+--- a/src/binder_sim_card.c
++++ b/src/binder_sim_card.c
+@@ -478,12 +478,21 @@ binder_sim_card_update_status(
+     }
+ }
+ 
++/*
++ * The card's applications come either as RadioAppStatus (the 1.0 list) or
++ * as RadioAppStatus_1_5, which starts with a RadioAppStatus and adds a
++ * newer persoSubstate. apps_1_5 says which of the two apps points to.
++ */
+ static
+ BinderSimCardStatus*
+-binder_sim_card_status_new(
+-    const RadioCardStatus* radio_status)
++binder_sim_card_status_new_with_apps(
++    const RadioCardStatus* radio_status,
++    const void* apps,
++    guint num_apps,
++    gboolean apps_1_5)
+ {
+-    const guint num_apps = radio_status->apps.count;
++    const gsize app_size = apps_1_5 ? sizeof(RadioAppStatus_1_5) :
++        sizeof(RadioAppStatus);
+     BinderSimCardStatus* status = g_malloc0(sizeof(BinderSimCardStatus) +
+         num_apps * sizeof(BinderSimCardApp));
+ 
+@@ -499,17 +508,19 @@ binder_sim_card_status_new(
+     status->ims_index = radio_status->imsSubscriptionAppIndex;
+ 
+     if ((status->num_apps = num_apps) > 0) {
+-        const RadioAppStatus* radio_apps = radio_status->apps.data.ptr;
+         guint i;
+ 
+         status->apps = (BinderSimCardApp*)(status + 1);
+         for (i = 0; i < num_apps; i++) {
+-            const RadioAppStatus* radio_app = radio_apps + i;
++            const void* entry = (const guint8*)apps + i * app_size;
++            const RadioAppStatus* radio_app = entry;
+             BinderSimCardApp* app = status->apps + i;
+ 
+             app->app_type = radio_app->appType;
+             app->app_state = radio_app->appState;
+-            app->perso_substate = radio_app->persoSubstate;
++            app->perso_substate = apps_1_5 ?
++                ((const RadioAppStatus_1_5*)entry)->persoSubstate :
++                radio_app->persoSubstate;
+             app->pin_replaced = radio_app->pinReplaced;
+             app->pin1_state = radio_app->pin1;
+             app->pin2_state = radio_app->pin2;
+@@ -527,6 +538,35 @@ binder_sim_card_status_new(
+     return status;
+ }
+ 
++static
++BinderSimCardStatus*
++binder_sim_card_status_new(
++    const RadioCardStatus* radio_status)
++{
++    return binder_sim_card_status_new_with_apps(radio_status,
++        radio_status->apps.data.ptr, radio_status->apps.count, FALSE);
++}
++
++/*
++ * From 1.5 on the applications are in their own list, the one Android
++ * reads. A RIL may leave the 1.0 list in the base empty, so use the 1.5
++ * list, and the 1.0 list only for a RIL that fills just that one.
++ */
++static
++BinderSimCardStatus*
++binder_sim_card_status_new_1_5(
++    const RadioCardStatus_1_5* status_1_5)
++{
++    const RadioCardStatus* base = &status_1_5->base.base;
++
++    if (status_1_5->applications.count) {
++        return binder_sim_card_status_new_with_apps(base,
++            status_1_5->applications.data.ptr,
++            status_1_5->applications.count, TRUE);
++    }
++    return binder_sim_card_status_new(base);
++}
++
+ static
+ void
+ binder_sim_card_status_cb(
+@@ -682,7 +722,7 @@ binder_sim_card_api_read_icc_card_status_hidl(
+                     RadioCardStatus_1_5);
+ 
+             if (status_1_5) {
+-                return binder_sim_card_status_new(&status_1_5->base.base);
++                return binder_sim_card_status_new_1_5(status_1_5);
+             }
+         }
+         break;

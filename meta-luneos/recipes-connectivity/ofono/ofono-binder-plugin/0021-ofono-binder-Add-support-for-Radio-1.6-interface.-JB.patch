@@ -1,0 +1,881 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Matti=20Lehtim=C3=A4ki?= <matti.lehtimaki@jolla.com>
+Date: Thu, 5 Jun 2025 03:10:01 +0300
+Subject: [PATCH] [ofono-binder] Add support for Radio@1.6 interface. JB#63650
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Backport [https://github.com/mer-hybris/ofono-binder-plugin/commit/ed5433a951d3c6849bf04af734cf2039b1012786, on upstream's radio_1_6 branch, not yet merged to master]
+---
+ src/binder_cell_info.c |  67 ++++++++++++++-
+ src/binder_data.c      | 180 +++++++++++++++++++++++++++++++++++++++--
+ src/binder_netreg.c    |  85 +++++++++++++++++++
+ src/binder_network.c   |  95 ++++++++++++++++++++++
+ src/binder_plugin.c    |   3 +-
+ src/binder_radio.c     |  13 +++
+ src/binder_sms.c       |  27 +++++++
+ src/binder_util.c      |   5 ++
+ src/binder_voicecall.c |  50 ++++++++++++
+ 9 files changed, 517 insertions(+), 8 deletions(-)
+
+diff --git a/src/binder_cell_info.c b/src/binder_cell_info.c
+index 7525f92..1892590 100644
+--- a/src/binder_cell_info.c
++++ b/src/binder_cell_info.c
+@@ -43,6 +43,7 @@ enum binder_cell_info_event {
+     CELL_INFO_EVENT_1_2,
+     CELL_INFO_EVENT_1_4,
+     CELL_INFO_EVENT_1_5,
++    CELL_INFO_EVENT_1_6,
+     CELL_INFO_EVENT_COUNT
+ };
+ 
+@@ -945,6 +946,58 @@ binder_cell_read_cell_info_list_1_5(
+     }
+ }
+ 
++static
++GPtrArray*
++binder_cell_read_cell_info_list_1_6(
++    BinderCellInfo* self,
++    GBinderReader* reader)
++{
++    gsize count;
++    const RadioCellInfo_1_6* cells = gbinder_reader_read_hidl_type_vec(reader,
++        RadioCellInfo_1_6, &count);
++
++    if (cells) {
++        gsize i;
++        GPtrArray* l = g_ptr_array_sized_new(count + 1);
++
++        for (i = 0; i < count; i++) {
++            const RadioCellInfo_1_6* cell = cells + i;
++            const gboolean reg = cell->registered;
++
++            switch ((RADIO_CELL_INFO_TYPE_1_5)cell->cellInfoType) {
++            case RADIO_CELL_INFO_1_5_GSM:
++                g_ptr_array_add(l, binder_cell_info_new_cell_gsm(reg,
++                    &cell->info.gsm.cellIdentityGsm.base.base,
++                    &cell->info.gsm.signalStrengthGsm));
++                continue;
++            case RADIO_CELL_INFO_1_5_LTE:
++                g_ptr_array_add(l, binder_cell_info_new_cell_lte(reg,
++                    &cell->info.lte.cellIdentityLte.base.base,
++                    &cell->info.lte.signalStrengthLte.base));
++                continue;
++            case RADIO_CELL_INFO_1_5_WCDMA:
++                g_ptr_array_add(l, binder_cell_info_new_cell_wcdma(reg,
++                    &cell->info.wcdma.cellIdentityWcdma.base.base,
++                    &cell->info.wcdma.signalStrengthWcdma.base));
++                continue;
++            case RADIO_CELL_INFO_1_5_NR:
++                g_ptr_array_add(l, binder_cell_info_new_cell_nr(reg,
++                    &cell->info.nr.cellIdentityNr.base,
++                    &cell->info.nr.signalStrengthNr.base));
++                continue;
++            case RADIO_CELL_INFO_1_5_TD_SCDMA:
++            case RADIO_CELL_INFO_1_5_CDMA:
++                break;
++            }
++            DBG("unsupported cell type %d", cell->cellInfoType);
++        }
++        return l;
++    } else {
++        ofono_warn("Failed to parse cellInfoList_1_5 payload");
++        return NULL;
++    }
++}
++
+ static
+ GPtrArray*
+ binder_cell_info_api_read_cell_info_list_ind_hidl(
+@@ -964,6 +1017,9 @@ binder_cell_info_api_read_cell_info_list_ind_hidl(
+      *
+      * 1.5/IRadioIndication.hal:
+      * oneway cellInfoList_1_5(RadioIndicationType type, vec<CellInfo> records);
++     *
++     * 1.6/IRadioIndication.hal:
++     * oneway cellInfoList_1_6(RadioIndicationType type, vec<CellInfo> records);
+      */
+     switch (ind) {
+     case RADIO_IND_CELL_INFO_LIST:
+@@ -974,6 +1030,8 @@ binder_cell_info_api_read_cell_info_list_ind_hidl(
+         return binder_cell_read_cell_info_list_1_4(self, reader);
+     case RADIO_IND_CELL_INFO_LIST_1_5:
+         return binder_cell_read_cell_info_list_1_5(self, reader);
++    case RADIO_IND_CELL_INFO_LIST_1_6:
++        return binder_cell_read_cell_info_list_1_6(self, reader);
+     default:
+         ofono_warn("Unexpected getCellInfoList ind %d", ind);
+         return NULL;
+@@ -1003,6 +1061,10 @@ binder_cell_info_api_read_cell_info_list_resp_hidl(
+      * 1.5/IRadioResponse.hal:
+      * oneway getCellInfoListResponse_1_5(RadioResponseInfo info,
+      *   vec<CellInfo> cellInfo);
++     *
++     * 1.6/IRadioResponse.hal:
++     * oneway getCellInfoListResponse_1_6(RadioResponseInfo info,
++     *   vec<CellInfo> cellInfo);
+      */
+     switch (resp) {
+     case RADIO_RESP_GET_CELL_INFO_LIST:
+@@ -1013,6 +1075,8 @@ binder_cell_info_api_read_cell_info_list_resp_hidl(
+         return binder_cell_read_cell_info_list_1_4(self, reader);
+     case RADIO_RESP_GET_CELL_INFO_LIST_1_5:
+         return binder_cell_read_cell_info_list_1_5(self, reader);
++    case RADIO_RESP_GET_CELL_INFO_LIST_1_6:
++        return binder_cell_read_cell_info_list_1_6(self, reader);
+     default:
+         ofono_warn("Unexpected getCellInfoList response %d", resp);
+         return NULL;
+@@ -1025,7 +1089,8 @@ static const BinderCellInfoApi binder_cell_info_api_hidl = {
+         RADIO_IND_CELL_INFO_LIST,
+         RADIO_IND_CELL_INFO_LIST_1_2,
+         RADIO_IND_CELL_INFO_LIST_1_4,
+-        RADIO_IND_CELL_INFO_LIST_1_5
++        RADIO_IND_CELL_INFO_LIST_1_5,
++        RADIO_IND_CELL_INFO_LIST_1_6
+     },
+     binder_cell_info_api_read_cell_info_list_ind_hidl,
+     RADIO_REQ_SET_CELL_INFO_LIST_RATE,
+diff --git a/src/binder_data.c b/src/binder_data.c
+index 0b20815..b381cf8 100644
+--- a/src/binder_data.c
++++ b/src/binder_data.c
+@@ -87,7 +87,8 @@ enum binder_data_io_event_id {
+     IO_EVENT_RESTRICTED_STATE_CHANGED,
+     IO_EVENT_DATA_CALL_LIST_CHANGED,
+     IO_EVENT_DATA_CALL_LIST_CHANGED_1,
+-    IO_EVENT_DATA_CALL_LIST_CHANGED_2, /* See data_call_list_changed_ind */
++    IO_EVENT_DATA_CALL_LIST_CHANGED_2,
++    IO_EVENT_DATA_CALL_LIST_CHANGED_3, /* See data_call_list_changed_ind */
+     IO_EVENT_DEATH,
+     IO_EVENT_COUNT
+ };
+@@ -217,7 +218,7 @@ struct binder_data_api {
+         int cid);
+     RADIO_IND network_restricted_state_changed_ind;
+     RADIO_IND restricted_state_changed_ind;
+-    RADIO_IND data_call_list_changed_ind[3];
++    RADIO_IND data_call_list_changed_ind[4];
+     GSList* (*read_data_call_list_changed_ind)(
+         GBinderReader* args,
+         RADIO_IND ind);
+@@ -1781,7 +1782,8 @@ static const BinderDataApi binder_data_api_hidl = {
+     {
+         RADIO_IND_DATA_CALL_LIST_CHANGED,
+         RADIO_IND_DATA_CALL_LIST_CHANGED_1_4,
+-        RADIO_IND_DATA_CALL_LIST_CHANGED_1_5
++        RADIO_IND_DATA_CALL_LIST_CHANGED_1_5,
++        RADIO_IND_DATA_CALL_LIST_CHANGED_1_6
+     },
+     binder_data_api_read_data_call_list_changed_ind_hidl
+ };
+@@ -1851,7 +1853,8 @@ static const BinderDataApi binder_data_api_hidl_1_2 = {
+     {
+         RADIO_IND_DATA_CALL_LIST_CHANGED,
+         RADIO_IND_DATA_CALL_LIST_CHANGED_1_4,
+-        RADIO_IND_DATA_CALL_LIST_CHANGED_1_5
++        RADIO_IND_DATA_CALL_LIST_CHANGED_1_5,
++        RADIO_IND_DATA_CALL_LIST_CHANGED_1_6
+     },
+     binder_data_api_read_data_call_list_changed_ind_hidl
+ };
+@@ -2027,7 +2030,8 @@ static const BinderDataApi binder_data_api_hidl_1_4 = {
+     {
+         RADIO_IND_DATA_CALL_LIST_CHANGED,
+         RADIO_IND_DATA_CALL_LIST_CHANGED_1_4,
+-        RADIO_IND_DATA_CALL_LIST_CHANGED_1_5
++        RADIO_IND_DATA_CALL_LIST_CHANGED_1_5,
++        RADIO_IND_DATA_CALL_LIST_CHANGED_1_6
+     },
+     binder_data_api_read_data_call_list_changed_ind_hidl_1_4
+ };
+@@ -2202,11 +2206,174 @@ static const BinderDataApi binder_data_api_hidl_1_5 = {
+     {
+         RADIO_IND_DATA_CALL_LIST_CHANGED,
+         RADIO_IND_DATA_CALL_LIST_CHANGED_1_4,
+-        RADIO_IND_DATA_CALL_LIST_CHANGED_1_5
++        RADIO_IND_DATA_CALL_LIST_CHANGED_1_5,
++        RADIO_IND_DATA_CALL_LIST_CHANGED_1_6
+     },
+     binder_data_api_read_data_call_list_changed_ind_hidl_1_5
+ };
+ 
++/*==========================================================================*
++ * HIDL 1.6 API flavor
++ *==========================================================================*/
++
++static
++BinderDataCall*
++binder_data_call_new_1_6(
++    const RadioDataCall_1_6* dc)
++{
++    BinderDataCall* call = binder_data_call_new();
++
++    call->cid = dc->cid;
++    call->status = dc->cause;
++    call->active = dc->active;
++    call->prot = dc->type;
++    call->retry_time = dc->suggestedRetryTime;
++    call->mtu = dc->mtuV4;
++    call->ifname = g_strdup(dc->ifname.data.str);
++    call->dnses = binder_strv_from_hidl_string_vec(&dc->dnses);
++    call->gateways = binder_strv_from_hidl_string_vec(&dc->gateways);
++    call->addresses = binder_strv_from_hidl_string_vec(&dc->addresses);
++    call->pcscf = binder_strv_from_hidl_string_vec(&dc->pcscf);
++
++    DBG("[status=%d,retry=%d,cid=%d,active=%d,type=%d,ifname=%s,"
++        "mtu=%d,address=%s,dns=%s,gateways=%s,pcscf=%s]",
++        call->status, call->retry_time, call->cid, call->active,
++        dc->type, call->ifname, call->mtu,
++        binder_print_strv(call->addresses, " "),
++        binder_print_strv(call->dnses, " "),
++        binder_print_strv(call->gateways, " "),
++        binder_print_strv(call->pcscf, " "));
++    return call;
++}
++
++static
++GSList*
++binder_data_call_list_1_6(
++    const RadioDataCall_1_6* calls,
++    gsize n)
++{
++    if (n) {
++        gsize i;
++        GSList* l = NULL;
++
++        DBG("num=%u", (guint) n);
++        for (i = 0; i < n; i++) {
++            l = g_slist_insert_sorted(l, binder_data_call_new_1_6(calls + i),
++                binder_data_call_compare);
++        }
++        return l;
++    } else {
++        DBG("no data calls");
++        return NULL;
++    }
++}
++
++static
++GSList*
++binder_data_api_read_get_data_call_list_resp_hidl_1_6(
++   GBinderReader* reader,
++   RADIO_RESP resp)
++{
++    if (resp == RADIO_RESP_GET_DATA_CALL_LIST_1_6) {
++        gsize count = 0;
++        const RadioDataCall_1_6* calls =
++            gbinder_reader_read_hidl_type_vec(reader,
++                RadioDataCall_1_6, &count);
++
++        return binder_data_call_list_1_6(calls, count);
++    } else {
++        return binder_data_api_read_get_data_call_list_resp_hidl_1_5(reader,
++            resp);
++    }
++}
++
++static
++void
++binder_data_api_write_setup_data_call_args_hidl_1_6(
++    GBinderWriter* args,
++    const BinderDataRequestSetup* setup,
++    const BinderDataProfileConfig* config,
++    RADIO_TECH tech)
++{
++    /*
++     * 1.6/IRadio.hal:
++     * oneway setupDataCall_1_6(int32_t serial, AccessNetwork accessNetwork,
++     *     DataProfileInfo dataProfileInfo, bool roamingAllowed,
++     *     DataRequestReason reason, vec<LinkAddress> addresses,
++     *     vec<string> dnses, int32_t pduSessionId, OptionalSliceInfo sliceInfo,
++     *     OptionalTrafficDescriptor trafficDescriptor,
++     *     bool matchAllRuleAllowed);
++     *
++     * Extends setupDataCall_1_5.
++     */
++    binder_data_api_write_setup_data_call_args_hidl_1_5(args, setup, config,
++        tech);
++    gbinder_writer_append_int32(args, 0);    /* pduSessionId */
++    gbinder_writer_append_int8(args, 0);     /* sliceInfoAvailable */
++    gbinder_writer_append_int8(args, 0);     /* trafficDescriptorAvailable */
++    gbinder_writer_append_bool(args, TRUE);  /* matchAllRuleAllowed */
++}
++
++static
++BinderDataCall*
++binder_data_api_read_setup_data_call_resp_hidl_1_6(
++    GBinderReader* reader,
++    RADIO_RESP resp)
++{
++    if (resp == RADIO_RESP_SETUP_DATA_CALL_1_6) {
++        const RadioDataCall_1_6* dc =
++            gbinder_reader_read_hidl_struct(reader, RadioDataCall_1_6);
++
++        if (dc) {
++            return  binder_data_call_new_1_6(dc);
++        }
++    } else {
++        return binder_data_api_read_setup_data_call_resp_hidl_1_5(reader,
++            resp);
++    }
++    return NULL;
++}
++
++static
++GSList*
++binder_data_api_read_data_call_list_changed_ind_hidl_1_6(
++    GBinderReader* reader,
++    RADIO_IND ind)
++{
++    if (ind == RADIO_IND_DATA_CALL_LIST_CHANGED_1_6) {
++        gsize count = 0;
++        const RadioDataCall_1_6* calls =
++            gbinder_reader_read_hidl_type_vec(reader,
++                RadioDataCall_1_6, &count);
++
++        return binder_data_call_list_1_6(calls, count);
++    } else {
++        return binder_data_api_read_data_call_list_changed_ind_hidl_1_5(reader,
++            ind);
++    }
++}
++
++static const BinderDataApi binder_data_api_hidl_1_6 = {
++    "hidl_1_6",
++    RADIO_REQ_SET_DATA_ALLOWED,
++    RADIO_REQ_GET_DATA_CALL_LIST_1_6,
++    binder_data_api_read_get_data_call_list_resp_hidl_1_6,
++    RADIO_REQ_SETUP_DATA_CALL_1_6,
++    binder_data_api_write_setup_data_call_args_hidl_1_6,
++    binder_data_api_read_setup_data_call_resp_hidl_1_6,
++    RADIO_REQ_DEACTIVATE_DATA_CALL_1_2,
++    binder_data_api_write_deactivate_data_call_args_hidl_1_2,
++    RADIO_IND_NONE,
++    RADIO_IND_RESTRICTED_STATE_CHANGED,
++    {
++        RADIO_IND_DATA_CALL_LIST_CHANGED,
++        RADIO_IND_DATA_CALL_LIST_CHANGED_1_4,
++        RADIO_IND_DATA_CALL_LIST_CHANGED_1_5,
++        RADIO_IND_DATA_CALL_LIST_CHANGED_1_6
++    },
++    binder_data_api_read_data_call_list_changed_ind_hidl_1_6
++};
++
+ /*==========================================================================*
+  * AIDL API flavor
+  *==========================================================================*/
+@@ -2618,6 +2785,7 @@ binder_data_new(
+         const BinderDataApi* api =
+             (radio_client_aidl_interface(clients->data_client) ==
+              RADIO_DATA_INTERFACE) ? &binder_data_api_aidl :
++            (hidl >= RADIO_INTERFACE_1_6) ? &binder_data_api_hidl_1_6 :
+             (hidl >= RADIO_INTERFACE_1_5) ? &binder_data_api_hidl_1_5 :
+             (hidl >= RADIO_INTERFACE_1_4) ? &binder_data_api_hidl_1_4 :
+             (hidl >= RADIO_INTERFACE_1_2) ? &binder_data_api_hidl_1_2 :
+diff --git a/src/binder_netreg.c b/src/binder_netreg.c
+index 73bc499..efa66c0 100644
+--- a/src/binder_netreg.c
++++ b/src/binder_netreg.c
+@@ -201,6 +201,7 @@ static const BinderNetRegApi binder_netreg_api_hidl;
+ static const BinderNetRegApi binder_netreg_api_hidl_1_2;
+ static const BinderNetRegApi binder_netreg_api_hidl_1_4;
+ static const BinderNetRegApi binder_netreg_api_hidl_1_5;
++static const BinderNetRegApi binder_netreg_api_hidl_1_6;
+ static const BinderNetRegApi binder_netreg_api_aidl;
+ 
+ static const BinderNetRegRadioType binder_netreg_radio_types[] = {
+@@ -1583,6 +1584,7 @@ binder_netreg_probe(
+     RADIO_AIDL_INTERFACE aidl = radio_client_aidl_interface(network_client);
+     const BinderNetRegApi* api =
+         (aidl == RADIO_NETWORK_INTERFACE) ? &binder_netreg_api_aidl :
++        (hidl >= RADIO_INTERFACE_1_6) ? &binder_netreg_api_hidl_1_6 :
+         (hidl >= RADIO_INTERFACE_1_5) ? &binder_netreg_api_hidl_1_5 :
+         (hidl >= RADIO_INTERFACE_1_4) ? &binder_netreg_api_hidl_1_4 :
+         (hidl >= RADIO_INTERFACE_1_2) ? &binder_netreg_api_hidl_1_2 :
+@@ -1743,6 +1745,26 @@ binder_netreg_read_signal_strength_hidl_1_4(
+     return FALSE;
+ }
+ 
++static
++gboolean
++binder_netreg_read_signal_strength_hidl_1_6(
++    GBinderReader* reader,
++    BinderRadioSignalStrength* out)
++{
++    const RadioSignalStrength_1_6* ss =
++        gbinder_reader_read_hidl_struct(reader, RadioSignalStrength_1_6);
++
++    if (ss) {
++        out->gsm = &ss->gsm;
++        out->lte = &ss->lte.base;
++        out->wcdma = &ss->wcdma;
++        out->tdscdma = &ss->tdscdma;
++        out->nr = &ss->nr.base;
++        return TRUE;
++    }
++    return FALSE;
++}
++
+ static
+ void
+ binder_netreg_api_read_signal_strength_hidl(
+@@ -1859,6 +1881,8 @@ binder_netreg_api_read_signal_strength_resp_hidl(
+         read_signal_strength = binder_netreg_read_signal_strength_hidl_1_2;
+     } else if (resp == RADIO_RESP_GET_SIGNAL_STRENGTH_1_4) {
+         read_signal_strength = binder_netreg_read_signal_strength_hidl_1_4;
++    } else if (resp == RADIO_RESP_GET_SIGNAL_STRENGTH_1_6) {
++        read_signal_strength = binder_netreg_read_signal_strength_hidl_1_6;
+     } else {
+         ofono_error("Unexpected getSignalStrength response %d", resp);
+         return FALSE;
+@@ -1893,6 +1917,8 @@ binder_netreg_api_read_signal_strength_ind_hidl(
+         read_signal_strength = binder_netreg_read_signal_strength_hidl_1_2;
+     } else if (ind == RADIO_IND_CURRENT_SIGNAL_STRENGTH_1_4) {
+         read_signal_strength = binder_netreg_read_signal_strength_hidl_1_4;
++    } else if (ind == RADIO_IND_CURRENT_SIGNAL_STRENGTH_1_6) {
++        read_signal_strength = binder_netreg_read_signal_strength_hidl_1_6;
+     } else {
+         ofono_error("Unexpected currentSignalStrength indication %d", ind);
+         return FALSE;
+@@ -2129,6 +2155,38 @@ binder_netreg_api_read_network_scan_hidl(
+             for (i = 0; i < result->networkInfos.count; i++) {
+                 const RadioCellInfo_1_5* cell = cells + i;
+ 
++                switch ((RADIO_CELL_INFO_TYPE_1_5)cell->cellInfoType) {
++                case RADIO_CELL_INFO_1_5_GSM:
++                    binder_netreg_scan_op_convert_gsm(cell->registered,
++                        &cell->info.gsm.cellIdentityGsm.base,
++                        binder_oplist_append_op(oplist));
++                    break;
++                case RADIO_CELL_INFO_1_5_WCDMA:
++                    binder_netreg_scan_op_convert_wcdma(cell->registered,
++                        &cell->info.wcdma.cellIdentityWcdma.base,
++                        binder_oplist_append_op(oplist));
++                    break;
++                case RADIO_CELL_INFO_1_5_LTE:
++                    binder_netreg_scan_op_convert_lte(cell->registered,
++                        &cell->info.lte.cellIdentityLte.base,
++                        binder_oplist_append_op(oplist));
++                    break;
++                case RADIO_CELL_INFO_1_5_NR:
++                    binder_netreg_scan_op_convert_nr(cell->registered,
++                        &cell->info.nr.cellIdentityNr.base,
++                        binder_oplist_append_op(oplist));
++                    break;
++                case RADIO_CELL_INFO_1_5_CDMA:
++                case RADIO_CELL_INFO_1_5_TD_SCDMA:
++                    break;
++                }
++            }
++        } else if (code == RADIO_IND_NETWORK_SCAN_RESULT_1_6) {
++            const RadioCellInfo_1_6* cells = result->networkInfos.data.ptr;
++
++            for (i = 0; i < result->networkInfos.count; i++) {
++                const RadioCellInfo_1_6* cell = cells + i;
++
+                 switch ((RADIO_CELL_INFO_TYPE_1_5)cell->cellInfoType) {
+                 case RADIO_CELL_INFO_1_5_GSM:
+                     binder_netreg_scan_op_convert_gsm(cell->registered,
+@@ -2420,6 +2478,33 @@ static const BinderNetRegApi binder_netreg_api_hidl_1_5 = {
+     RADIO_IND_NONE,
+ };
+ 
++/*==========================================================================*
++ * HIDL 1.5 API flavor
++ *==========================================================================*/
++
++static const BinderNetRegApi binder_netreg_api_hidl_1_6 = {
++    "hidl_1_6",
++    binder_read_string_arg_hidl,
++    binder_netreg_api_read_oplist_hidl,
++    binder_netreg_api_read_signal_strength_resp_hidl,
++    binder_netreg_api_read_signal_strength_ind_hidl,
++    binder_netreg_api_read_network_scan_hidl,
++    binder_netreg_api_write_start_network_scan_args_hidl_1_5,
++    binder_netreg_api_write_set_network_selection_mode_manual_args_hidl_1_5,
++    RADIO_REQ_START_NETWORK_SCAN_1_4,
++    RADIO_REQ_STOP_NETWORK_SCAN,
++    RADIO_REQ_GET_AVAILABLE_NETWORKS,
++    RADIO_REQ_GET_SIGNAL_STRENGTH_1_6,
++    RADIO_REQ_GET_NETWORK_SELECTION_MODE,
++    RADIO_REQ_SET_NETWORK_SELECTION_MODE_AUTOMATIC,
++    RADIO_REQ_SET_NETWORK_SELECTION_MODE_MANUAL_1_5,
++    RADIO_IND_NITZ_TIME_RECEIVED,
++    RADIO_IND_CURRENT_SIGNAL_STRENGTH_1_6,
++    RADIO_IND_NETWORK_SCAN_RESULT_1_6,
++    RADIO_IND_MODEM_RESET,
++    RADIO_IND_NONE,
++};
++
+ /*==========================================================================*
+  * AIDL API flavor
+  *==========================================================================*/
+diff --git a/src/binder_network.c b/src/binder_network.c
+index 72bfd81..d65f46b 100644
+--- a/src/binder_network.c
++++ b/src/binder_network.c
+@@ -1610,6 +1610,27 @@ binder_network_api_read_current_physical_channel_configs_hidl(
+             }
+             return TRUE;
+         }
++    } else if (code == RADIO_IND_CURRENT_PHYSICAL_CHANNEL_CONFIGS_1_6) {
++        gsize count;
++        const RadioPhysicalChannelConfig_1_6* configs =
++            gbinder_reader_read_hidl_type_vec(reader,
++                RadioPhysicalChannelConfig_1_6, &count);
++
++        /* An empty configs list indicates that the radio is idle */
++        if (configs && count > 0) {
++            guint i;
++
++            *nr_connected = FALSE;
++            for (i = 0; i < count; i++) {
++                if (configs[i].rat == RADIO_TECH_NR &&
++                    configs[i].connectionStatus ==
++                    RADIO_CELL_CONNECTION_SECONDARY_SERVING) {
++                    *nr_connected = TRUE;
++                    break;
++                }
++            }
++            return TRUE;
++        }
+     } else {
+         ofono_warn("Unexpected current physical channel configs code %d", code);
+     }
+@@ -1956,6 +1977,18 @@ binder_network_api_read_voice_registration_state_hidl(
+             gbinder_reader_read_hidl_struct(reader,
+                 RadioRegStateResult_1_5);
+ 
++        if (result) {
++            binder_network_location_1_5(&result->cellIdentity, &l);
++            binder_network_set_registration_state(state, result->regState,
++                result->rat, l.lac, l.ci);
++            *reason_for_denial = result->reasonDataDenied;
++            return TRUE;
++        }
++    } else if (resp == RADIO_RESP_GET_VOICE_REGISTRATION_STATE_1_6) {
++        const RadioRegStateResult_1_6* result =
++            gbinder_reader_read_hidl_struct(reader,
++                RadioRegStateResult_1_6);
++
+         if (result) {
+             binder_network_location_1_5(&result->cellIdentity, &l);
+             binder_network_set_registration_state(state, result->regState,
+@@ -2042,6 +2075,36 @@ binder_network_api_read_data_registration_state_hidl(
+             gbinder_reader_read_hidl_struct(reader,
+                 RadioRegStateResult_1_5);
+ 
++        if (result) {
++            RADIO_TECH rat = result->rat;
++
++            binder_network_location_1_5(&result->cellIdentity, &l);
++            binder_network_set_registration_state(state, result->regState,
++                rat, l.lac, l.ci);
++
++            *nr_connected = FALSE;
++            if (result->accessTechnologySpecificInfoType ==
++                RADIO_REG_ACCESS_TECHNOLOGY_SPECIFIC_INFO_EUTRAN) {
++                const RadioDataRegNrIndicators* nrIndicators = &result->
++                    accessTechnologySpecificInfo.eutranInfo.nrIndicators;
++
++                if ((rat == RADIO_TECH_LTE || rat == RADIO_TECH_LTE_CA) &&
++                    nrIndicators->isEndcAvailable &&
++                    !nrIndicators->isDcNrRestricted &&
++                    nrIndicators->isNrAvailable) {
++                    DBG_(self, "NSA 5G detected");
++                    *nr_connected = TRUE;
++                }
++            }
++            *reason_for_denial = result->reasonDataDenied;
++            *max_data_calls = MAX_DATA_CALLS;
++            return TRUE;
++        }
++    } else if (resp == RADIO_RESP_GET_DATA_REGISTRATION_STATE_1_6) {
++        const RadioRegStateResult_1_6* result =
++            gbinder_reader_read_hidl_struct(reader,
++                RadioRegStateResult_1_6);
++
+         if (result) {
+             RADIO_TECH rat = result->rat;
+ 
+@@ -2163,6 +2226,10 @@ binder_network_api_write_set_preferred_network_bitmap_args(
+      * oneway setPreferredNetworkTypeBitmap(int32_t serial,
+      *     bitfield<RadioAccessFamily> networkTypeBitmap);
+      *
++     * 1.6/IRadio.hal:
++     * oneway setAllowedNetworkTypeBitmap(int32_t serial,
++     *     bitfield<RadioAccessFamily> networkTypeBitmap);
++     *
+      * IRadioNetwork.aidl:
+      * void setAllowedNetworkTypesBitmap(in int serial,
+      *     in int networkTypeBitmap);
+@@ -2357,6 +2424,33 @@ static const BinderNetworkApi binder_network_api_hidl_1_5 = {
+     binder_network_api_write_set_initial_attach_apn_args_hidl_1_5
+ };
+ 
++/*==========================================================================*
++ * HIDL 1.5 API flavor
++ *==========================================================================*/
++
++static const BinderNetworkApi binder_network_api_hidl_1_6 = {
++    "hidl_1_6",
++    binder_read_string_arg_hidl,
++    RADIO_IND_NETWORK_STATE_CHANGED,
++    RADIO_IND_CURRENT_PHYSICAL_CHANNEL_CONFIGS_1_6,
++    binder_network_api_read_current_physical_channel_configs_hidl,
++    RADIO_IND_MODEM_RESET,
++    RADIO_IND_NONE,
++    RADIO_REQ_GET_OPERATOR,
++    RADIO_REQ_GET_ALLOWED_NETWORK_TYPES_BITMAP,
++    binder_network_api_query_preferred_network_type_bitmap_cb,
++    RADIO_REQ_SET_ALLOWED_NETWORK_TYPES_BITMAP,
++    binder_network_api_write_set_preferred_network_bitmap_args,
++    RADIO_REQ_GET_VOICE_REGISTRATION_STATE_1_6,
++    binder_network_api_read_voice_registration_state_hidl,
++    RADIO_REQ_GET_DATA_REGISTRATION_STATE_1_6,
++    binder_network_api_read_data_registration_state_hidl,
++    RADIO_REQ_SET_DATA_PROFILE_1_5,
++    binder_network_api_write_set_data_profile_args_hidl_1_5,
++    RADIO_REQ_SET_INITIAL_ATTACH_APN_1_5,
++    binder_network_api_write_set_initial_attach_apn_args_hidl_1_5
++};
++
+ /*==========================================================================*
+  * AIDL API flavor
+  *==========================================================================*/
+@@ -2868,6 +2962,7 @@ binder_network_new(
+     const BinderNetworkApi* api =
+         (radio_client_aidl_interface(clients->network_client) ==
+          RADIO_NETWORK_INTERFACE) ? &binder_network_api_aidl :
++        (hidl >= RADIO_INTERFACE_1_6) ? &binder_network_api_hidl_1_6 :
+         (hidl >= RADIO_INTERFACE_1_5) ? &binder_network_api_hidl_1_5 :
+         (hidl >= RADIO_INTERFACE_1_4) ? &binder_network_api_hidl_1_4 :
+         &binder_network_api_hidl;
+diff --git a/src/binder_plugin.c b/src/binder_plugin.c
+index 71ca5fd..90606d4 100644
+--- a/src/binder_plugin.c
++++ b/src/binder_plugin.c
+@@ -129,10 +129,11 @@
+ #define BINDER_SLOT_RADIO_INTERFACE_1_3 "1.3"
+ #define BINDER_SLOT_RADIO_INTERFACE_1_4 "1.4"
+ #define BINDER_SLOT_RADIO_INTERFACE_1_5 "1.5"
++#define BINDER_SLOT_RADIO_INTERFACE_1_6 "1.6"
+ 
+ /* v(version) */
+ #define BINDER_FOREACH_HIDL_INTERFACE(v) \
+-    v(1_0) v(1_1) v(1_2) v(1_3) v(1_4) v(1_5)
++    v(1_0) v(1_1) v(1_2) v(1_3) v(1_4) v(1_5) v(1_6)
+ 
+ /*
+  * The convention is that the keys which can only appear in the [Settings]
+diff --git a/src/binder_radio.c b/src/binder_radio.c
+index a18ad02..e0f2b40 100644
+--- a/src/binder_radio.c
++++ b/src/binder_radio.c
+@@ -295,6 +295,8 @@ binder_radio_state_changed(
+  * setRadioPower(int32 serial, bool on)
+  * setRadioPower_1_5(int32 serial, bool on, bool forEmergencyCall,
+  *     bool preferredForEmergencyCall)
++ * setRadioPower_1_6(int32 serial, bool on, bool forEmergencyCall,
++ *     bool preferredForEmergencyCall)
+  *
+  * AIDL:
+  * setRadioPower(int32 serial, bool on, bool forEmergencyCall,
+@@ -323,6 +325,9 @@ binder_radio_prepare_set_power_req_aidl(
+ #define binder_radio_prepare_set_power_req_hidl_1_5 \
+     binder_radio_prepare_set_power_req_aidl
+ 
++#define binder_radio_prepare_set_power_req_hidl_1_6 \
++    binder_radio_prepare_set_power_req_aidl
++
+ static const BinderRadioApi binder_radio_api_hidl = {
+     "hidl",
+     RADIO_IND_RADIO_STATE_CHANGED,
+@@ -337,6 +342,13 @@ static const BinderRadioApi binder_radio_api_hidl_1_5 = {
+     binder_radio_prepare_set_power_req_hidl_1_5
+ };
+ 
++static const BinderRadioApi binder_radio_api_hidl_1_6 = {
++    "hidl_1_6",
++    RADIO_IND_RADIO_STATE_CHANGED,
++    RADIO_REQ_SET_RADIO_POWER_1_6,
++    binder_radio_prepare_set_power_req_hidl_1_6
++};
++
+ static const BinderRadioApi binder_radio_api_aidl = {
+     "aidl",
+     RADIO_MODEM_IND_RADIO_STATE_CHANGED,
+@@ -358,6 +370,7 @@ binder_radio_new(
+     const RADIO_AIDL_INTERFACE aidl = radio_client_aidl_interface(client);
+     const BinderRadioApi* api =
+         (aidl == RADIO_MODEM_INTERFACE) ? &binder_radio_api_aidl :
++        (hidl >= RADIO_INTERFACE_1_6) ? &binder_radio_api_hidl_1_6 :
+         (hidl >= RADIO_INTERFACE_1_5) ? &binder_radio_api_hidl_1_5 :
+         &binder_radio_api_hidl;
+ 
+diff --git a/src/binder_sms.c b/src/binder_sms.c
+index 130450a..7a886ed 100644
+--- a/src/binder_sms.c
++++ b/src/binder_sms.c
+@@ -138,6 +138,7 @@ struct binder_sms_api {
+ };
+ 
+ static const BinderSmsApi binder_sms_api_hidl;
++static const BinderSmsApi binder_sms_api_hidl_1_6;
+ static const BinderSmsApi binder_sms_api_aidl;
+ 
+ static
+@@ -954,8 +955,10 @@ binder_sms_probe(
+     BinderModem* modem = binder_modem_get_data(data);
+     BinderSms* self = g_new0(BinderSms, 1);
+     RadioClient* messaging_client = modem->clients.messaging_client;
++    RADIO_INTERFACE hidl = radio_client_interface(messaging_client);
+     const BinderSmsApi* api = radio_client_aidl_interface(messaging_client) ==
+         RADIO_MESSAGING_INTERFACE ? &binder_sms_api_aidl :
++        (hidl >= RADIO_INTERFACE_1_6) ? &binder_sms_api_hidl_1_6 :
+         &binder_sms_api_hidl;
+ 
+     self->log_prefix = binder_dup_prefix(modem->log_prefix);
+@@ -1078,6 +1081,30 @@ static const BinderSmsApi binder_sms_api_hidl = {
+     RADIO_IND_NEW_SMS_ON_SIM
+ };
+ 
++
++/*==========================================================================*
++ * HIDL 1.6 API flavor
++ *==========================================================================*/
++
++static const BinderSmsApi binder_sms_api_hidl_1_6 = {
++    "hidl_1_6",
++    binder_read_string_arg_hidl,
++    binder_write_string_arg_hidl,
++    binder_take_string_arg_hidl,
++    binder_read_byte_array_hidl,
++    RADIO_REQ_GET_SMSC_ADDRESS,
++    RADIO_REQ_SET_SMSC_ADDRESS,
++    RADIO_REQ_SEND_SMS_1_6,
++    RADIO_REQ_SEND_SMS_EXPECT_MORE_1_6,
++    binder_sms_api_write_send_sms_args_hidl,
++    binder_sms_api_read_send_sms_resp_hidl,
++    RADIO_REQ_ACKNOWLEDGE_LAST_INCOMING_GSM_SMS,
++    RADIO_REQ_DELETE_SMS_ON_SIM,
++    RADIO_IND_NEW_SMS,
++    RADIO_IND_NEW_SMS_STATUS_REPORT,
++    RADIO_IND_NEW_SMS_ON_SIM
++};
++
+ /*==========================================================================*
+  * AIDL API flavor
+  *==========================================================================*/
+diff --git a/src/binder_util.c b/src/binder_util.c
+index 8f39da4..4de87dd 100644
+--- a/src/binder_util.c
++++ b/src/binder_util.c
+@@ -595,6 +595,11 @@ binder_radio_error_string(
+     RADIO_ERROR_STR_(DEVICE_IN_USE);
+     RADIO_ERROR_STR_(ABORTED);
+     RADIO_ERROR_STR_(INVALID_RESPONSE);
++    RADIO_ERROR_STR_(SIMULTANEOUS_SMS_AND_CALL_NOT_ALLOWED);
++    RADIO_ERROR_STR_(ACCESS_BARRED);
++    RADIO_ERROR_STR_(BLOCKED_DUE_TO_CALL);
++    RADIO_ERROR_STR_(RF_HARDWARE_ISSUE);
++    RADIO_ERROR_STR_(NO_RF_CALIBRATION_INFO);
+     RADIO_ERROR_STR_(OEM_ERROR_1);
+     RADIO_ERROR_STR_(OEM_ERROR_2);
+     RADIO_ERROR_STR_(OEM_ERROR_3);
+diff --git a/src/binder_voicecall.c b/src/binder_voicecall.c
+index bde8dcb..37c55cc 100644
+--- a/src/binder_voicecall.c
++++ b/src/binder_voicecall.c
+@@ -181,6 +181,7 @@ struct binder_voicecall_api {
+ };
+ 
+ static const BinderVoiceCallApi binder_voicecall_api_hidl;
++static const BinderVoiceCallApi binder_voicecall_api_hidl_1_6;
+ static const BinderVoiceCallApi binder_voicecall_api_aidl;
+ 
+ static
+@@ -745,6 +746,10 @@ binder_voicecall_clcc_poll_cb(
+          * oneway getCurrentCallsResponse_1_2(RadioResponseInfo info,
+          *     vec<Call> calls);
+          *
++         * 1.6/IRadioResponse.hal:
++         * oneway getCurrentCallsResponse_1_6(RadioResponseInfo info,
++         *     vec<Call> calls);
++         *
+          * IRadioVoiceResponse.aidl:
+          * void getCurrentCallsResponse(in RadioResponseInfo info,
+          *     in Call[] calls);
+@@ -2224,8 +2229,10 @@ binder_voicecall_probe(
+     BinderVoiceCall* self = g_new0(BinderVoiceCall, 1);
+     const BinderSlotConfig* cfg = &modem->config;
+     RadioClient* voice_client = modem->clients.voice_client;
++    RADIO_INTERFACE hidl = radio_client_interface(voice_client);
+     const BinderVoiceCallApi* api =
+         radio_client_aidl_interface(voice_client) == RADIO_VOICE_INTERFACE ?
++        (hidl >= RADIO_INTERFACE_1_6) ? &binder_voicecall_api_hidl_1_6 :
+         &binder_voicecall_api_aidl : &binder_voicecall_api_hidl;
+ 
+     self->log_prefix = binder_dup_prefix(modem->log_prefix);
+@@ -2449,6 +2456,16 @@ binder_voicecall_api_read_call_list_hidl(
+                     binder_voicecall_info_new_hidl(&calls[i].base));
+             }
+         }
++    } else if (resp == RADIO_RESP_GET_CURRENT_CALLS_1_6) {
++        const RadioCall_1_6* calls = gbinder_reader_read_hidl_type_vec(reader,
++            RadioCall_1_6, &count);
++
++        if (calls) {
++            for (i = 0; i < count; i++) {
++                list = g_slist_append(list,
++                    binder_voicecall_info_new_hidl(&calls[i].base.base));
++            }
++        }
+     } else {
+         ofono_error("Unexpected getCurrentCalls response %d", resp);
+     }
+@@ -2512,6 +2529,39 @@ static const BinderVoiceCallApi binder_voicecall_api_hidl = {
+     binder_voicecall_api_read_ecclist_hidl
+ };
+ 
++/*==========================================================================*
++ * HIDL 1.6 API flavor
++ *==========================================================================*/
++
++static const BinderVoiceCallApi binder_voicecall_api_hidl_1_6 = {
++    "hidl_1_6",
++    binder_write_string_arg_hidl,
++    RADIO_IND_CALL_STATE_CHANGED,
++    RADIO_IND_INDICATE_RINGBACK_TONE,
++    RADIO_IND_CURRENT_EMERGENCY_NUMBER_LIST,
++    RADIO_IND_SUPP_SVC_NOTIFY,
++    RADIO_IND_NONE,
++    binder_voicecall_api_handle_supp_svc_notify_hidl,
++    RADIO_REQ_SET_SUPP_SERVICE_NOTIFICATIONS,
++    RADIO_REQ_DIAL,
++    binder_voicecall_api_write_dial_args_hidl,
++    RADIO_REQ_ACCEPT_CALL,
++    RADIO_REQ_REJECT_CALL,
++    RADIO_REQ_HANGUP,
++    RADIO_REQ_CONFERENCE,
++    RADIO_REQ_EXPLICIT_CALL_TRANSFER,
++    RADIO_REQ_SEPARATE_CONNECTION,
++    RADIO_REQ_SWITCH_WAITING_OR_HOLDING_AND_ACTIVE,
++    RADIO_REQ_HANGUP_FOREGROUND_RESUME_BACKGROUND,
++    RADIO_REQ_HANGUP_WAITING_OR_BACKGROUND,
++    RADIO_REQ_SEND_DTMF,
++    RADIO_REQ_GET_LAST_CALL_FAIL_CAUSE,
++    binder_voicecall_api_read_last_call_fail_cause_hidl,
++    RADIO_REQ_GET_CURRENT_CALLS_1_6,
++    binder_voicecall_api_read_call_list_hidl,
++    binder_voicecall_api_read_ecclist_hidl
++};
++
+ /*==========================================================================*
+  * AIDL API flavor
+  *==========================================================================*/
+-- 
+2.53.0
+

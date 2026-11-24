@@ -29,10 +29,20 @@ SRC_URI = "git://github.com/mer-hybris/ofono-binder-plugin.git;branch=master;pro
            file://0017-unit-Test-the-SIM-driver-s-card-reset.patch \
            file://0018-ofono-binder-Ask-for-IMS-registration-when-the-IMS-a.patch \
            file://0019-ofono-binder-Give-an-IMS-extension-a-default-IMS-dat.patch \
+           file://0020-ofono-binder-Add-support-for-RadioConfig-1.3-interfa.patch \
+           file://0021-ofono-binder-Add-support-for-Radio-1.6-interface.-JB.patch \
+           file://0022-ofono-binder-Read-the-card-s-applications-from-the-1.patch \
+           file://0023-unit-Test-reading-the-1.5-card-status.patch \
+           file://0024-ofono-binder-Use-the-1.6-voice-call-API-on-IRadio-1..patch \
+           file://0025-unit-Test-which-API-the-voice-call-driver-uses.patch \
+           file://0026-ofono-binder-Take-the-display-as-on-while-MCE-hasn-t.patch \
+           file://0027-unit-Test-what-the-device-monitors-take-the-display-.patch \
+           file://0028-ofono-binder-Send-setupDataCall_1_6-s-safe_unions-as.patch \
+           file://0029-unit-Test-how-setupDataCall-s-arguments-are-written.patch \
 "
 
 PV = "1.1.41"
-PR = "r4"
+PR = "r5"
 SRCREV = "204dea1593be95e60bad9f2c0282c35a9f8ba272"
 
 CFLAGS += "--sysroot=${RECIPE_SYSROOT} "
