@@ -5,9 +5,9 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=30441c91ba0022ea994b5dae832bd063"
 require purple-connectors.inc
 
 # The source is the fork branch behind upstream PR #99 (https://github.com/EionRobb/purple-teams/pull/99):
-# #99's head (3905f49: #85 personal/consumer accounts, the fix PRs #92-#97 and the opt-in calling
-# framework, TEAMS_CALLING, with its PurpleMedia engine) with EionRobb's master (76d8b3a, which
-# has #98's bodyless-response fix as #101) merged in. Go back to EionRobb's master once those are
+# #99's head (5b844d6: #85 personal/consumer accounts, the fix PRs #92-#97 and the opt-in calling
+# framework, TEAMS_CALLING, with its PurpleMedia engine, plus EionRobb's master as of 76d8b3a,
+# which has #98's bodyless-response fix as #101). Go back to EionRobb's master once those are
 # merged. One feature per patch: 0001 is the history dedup meant for upstream; 0002-0005 adapt the
 # plug-in to imlibpurpletransport, the webOS Messaging app and, through #99's
 # teams_calling_set_*_cb hooks, the webOS Phone app; 0006 keeps the picture we send in a video call
@@ -23,8 +23,8 @@ SRC_URI += " \
     file://0005-webOS-Ring-and-drive-Teams-calls-from-the-webOS-Phon.patch \
     file://0006-webOS-Keep-the-picture-we-send-upright-as-the-phone-.patch \
 "
-PE = "3"
-SRCREV_upstream = "6948ed6842457a441a516e0a1d3754ee2b8acea0"
+PE = "4"
+SRCREV_upstream = "5b844d607fb4d5fd486ad1f222c66e6a9afd0c10"
 
 DEPENDS = "pidgin json-glib glib-2.0 zlib luna-service2"
 
