@@ -21,13 +21,14 @@ DEPENDS = "glib-2.0 libgbinder sqlite3 openssl gstreamer1.0 libpam libfart"
 PV = "0.1+git"
 # forky with FuriLabs/biomd PR #1 merged: overridable Makefile paths,
 # WITH_FACE, free-form finger names, the AIDL backend and the Gatekeeper
-# reconnect, which LuneOS used to carry as patches.
-SRCREV = "d48b50bb2c072d4c9bdb79f8dcfdbd80ffd4f066"
+# reconnect, which LuneOS used to carry as patches. The two patches are
+# FuriLabs/biomd PR #2, which is based on this revision.
+SRCREV = "84055a18c8a5c06a7ffe319395c5380ac77d72ae"
 SRC_URI = " \
     git://github.com/FuriLabs/biomd.git;protocol=https;branch=forky \
     file://biomd-hal-wait.sh \
     file://10-hal-wait.conf \
-    file://0001-fingerprint-put-the-non-null-marker-in-front-of-AIDL-parcelables.patch \
+    file://0001-fingerprint-read-and-write-AIDL-parcelables-with-libgbinder-s-helpers.patch \
     file://0002-fingerprint-enrol-with-a-token-for-the-HAL-s-challenge-on-AIDL.patch \
 "
 
