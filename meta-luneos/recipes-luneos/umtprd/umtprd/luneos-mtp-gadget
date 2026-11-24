@@ -111,10 +111,23 @@ hold_marker(){
 # umtprd.service's ExecStopPost, and systemd kills whatever is left in the
 # service's cgroup when that returns - a background timer would die with it and
 # leave the marker in place, hiding every later real unplug from storaged.
+#
+# android-gadget-rebind (meta-android) stays away while the marker exists, so a
+# gadget that went down inside the window would stay down. That is not only our
+# own rebinds: libmtp resets the device when it cannot open a session, about
+# 5 s after the host enumerates it, which is inside the window. The reset makes
+# adbd close and reopen ep0, closing ep0 unbinds the whole gadget, and on the
+# Zinwa Q25 adb and MTP were gone until the cable was pulled. So once the marker
+# is ours to clear, run the rebind; it does nothing when the gadget is bound.
+REBIND=/usr/bin/android-gadget-rebind
 release_marker_later(){
     _tok=$(cat "$MARKER" 2>/dev/null)
-    _clear="[ \"\$(cat $MARKER 2>/dev/null)\" = \"$_tok\" ] && rm -f $MARKER; rmdir $STATE 2>/dev/null; true"
-    if ! systemd-run --quiet --on-active=5 /bin/sh -c "$_clear" 2>/dev/null; then
+    _clear="if [ \"\$(cat $MARKER 2>/dev/null)\" = \"$_tok\" ]; then rm -f $MARKER; [ -x $REBIND ] && $REBIND; fi; rmdir $STATE 2>/dev/null; true"
+    # AccuracySec: a timer may otherwise fire anywhere in the minute after its
+    # time (systemd's default accuracy). Measured on the Q25: 16 s after the
+    # bind instead of 5.
+    if ! systemd-run --quiet --on-active=5 --timer-property=AccuracySec=100ms \
+            /bin/sh -c "$_clear" 2>/dev/null; then
         ( sleep 5; /bin/sh -c "$_clear" ) >/dev/null 2>&1 &
     fi
 }
