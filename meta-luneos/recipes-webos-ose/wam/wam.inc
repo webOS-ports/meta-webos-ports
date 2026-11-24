@@ -181,7 +181,11 @@ FILES:${PN} += " \
 
 # LuneOS added here to work around outdated group.master from OSE
 # Needed for the users & groups
-DEPENDS += "webos-users-groups"
+# USERADD_DEPENDS (not a plain DEPENDS) so webos-users-groups, which creates the
+# "graphics" user referenced in GROUPMEMS_PARAM below, is also staged into the
+# do_package_setscene sysroot; otherwise an sstate restore runs groupmems before
+# "graphics" exists and fails with "groupmems command did not succeed".
+USERADD_DEPENDS = "webos-users-groups"
 
 # Let WAM create it's user & compositor and se group. "se" is used for DRM keys on some webOS distros
 
