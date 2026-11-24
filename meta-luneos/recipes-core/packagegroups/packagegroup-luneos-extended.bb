@@ -199,6 +199,7 @@ LIBHYBRIS_RDEPENDS = " \
     nyx-modules-hybris \
     \
     ofono-binder-plugin \
+    ofono-binder-plugin-ext-mtk \
     wlan-suspend-mode \
     wlan-dynamic-start \
     \

@@ -19,6 +19,7 @@ SRC_URI = "git://github.com/Herrie82/ofono-binder-plugin-ext-mtk.git;branch=fork
 SRCREV = "dda7590f915c250982e7b28b92cab98e5463d317"
 
 PV = "1.2.1+git"
+PR = "r1"
 
 CFLAGS += "--sysroot=${RECIPE_SYSROOT} "
 LDFLAGS += "--sysroot=${RECIPE_SYSROOT} "
@@ -26,10 +27,12 @@ LDFLAGS += "--sysroot=${RECIPE_SYSROOT} "
 EXTRA_OEMAKE = "KEEP_SYMBOLS=1 CROSS_COMPILE=${TARGET_PREFIX} CC='${CC}' PLUGINDIR=${libdir}/ofono/plugins OFONO_EXT_PKG=ofono-ext"
 PARALLEL_MAKE = ""
 
+# Upstream's mtk.conf ("[Settings] extPlugin = mtk") is not installed. The
+# package goes into every Halium image, Qualcomm phones included, so the
+# extension is switched on at boot by luneos-device-config's 40-ofono-binder,
+# and only where the vendor registers vendor.mediatek.hardware.mtkradioex.
 do_install() {
     oe_runmake install DESTDIR=${D}
-    install -d ${D}${sysconfdir}/ofono/binder.d
-    install -m 0644 ${S}/mtk.conf ${D}${sysconfdir}/ofono/binder.d/mtk.conf
 }
 
 FILES:${PN} += "${libdir}/ofono/plugins/mtkbinderpluginext.so"

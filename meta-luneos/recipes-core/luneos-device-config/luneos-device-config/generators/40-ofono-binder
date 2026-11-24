@@ -179,6 +179,39 @@ else
     set_radio_capability=${deviceinfo_binder_set_radio_capability:-}
 fi
 
+# The MediaTek extension (ofono-binder-plugin-ext-mtk) adds VoLTE and SMS over
+# IMS through vendor.mediatek.hardware.mtkradioex. It is in every Halium image,
+# but it is switched on only where the vendor registers that service on the
+# binder device the plugin talks to: the extension asks for
+# vendor.mediatek.hardware.mtkradioex@3.0::IMtkRadioEx/imsSlotN on the
+# plugin's Device and has no option to look anywhere else. Without the service
+# it only logs "Failed to connect" for each slot, and a Qualcomm phone has no
+# reason to load it at all. deviceinfo_binder_ext_plugin overrides the probe:
+# "mtk" forces it on, "none" keeps it off.
+ext_plugin=${deviceinfo_binder_ext_plugin:-}
+if [ -z "$ext_plugin" ]; then
+    mtk_dev=/dev/hwbinder
+    [ "$iface" = "aidl" ] && mtk_dev=/dev/binder
+    mtk_list=
+    if command -v binder-list >/dev/null 2>&1; then
+        mtk_list=$(binder-list -d "$mtk_dev" 2>/dev/null)
+    fi
+    # lshal lists /dev/hwbinder only, so it is no use for the AIDL device.
+    if [ -z "$mtk_list" ] && [ "$iface" = "hidl" ]; then
+        for c in lshal /android/system/bin/lshal /system/bin/lshal; do
+            if command -v "$c" >/dev/null 2>&1; then
+                mtk_list=$($c 2>/dev/null)
+                break
+            fi
+        done
+    fi
+    if echo "$mtk_list" | grep -qE 'vendor\.mediatek\.hardware\.mtkradioex@3\.0::IMtkRadioEx/imsSlot[0-9]+'; then
+        ext_plugin=mtk
+    fi
+fi
+[ "$ext_plugin" = "none" ] && ext_plugin=
+[ -n "$ext_plugin" ] && echo "luneos-device-config: ofono extension plugin: $ext_plugin"
+
 mkdir -p "$GEN/files/etc/ofono"
 
 # ExpectSlots names only the first: boot should not wait on slots that are
@@ -200,6 +233,7 @@ mkdir -p "$GEN/files/etc/ofono"
         echo "ExpectSlots = slot1"
     fi
     [ -n "$set_radio_capability" ] && echo "SetRadioCapability = $set_radio_capability"
+    [ -n "$ext_plugin" ] && echo "extPlugin = $ext_plugin"
     for s in $slots; do
         n=${s#slot}
         echo
