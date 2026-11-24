@@ -18,7 +18,7 @@ RDEPENDS:${PN} += "util-linux"
 VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
-SRCREV = "93f6d9724220ab595d08db614b535d5ca4e6c3dd"
+SRCREV = "61fed39b66fed91bd2338572b6acb4cefc4c6d49"
 
 PV = "1.0.2-100"
 
