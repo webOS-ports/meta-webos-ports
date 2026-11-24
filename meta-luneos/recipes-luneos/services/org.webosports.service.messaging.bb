@@ -34,6 +34,11 @@ do_install() {
     install -d ${D}${webos_sysconfdir}/activities
     cp -rv ${S}/configuration/activities/org.webosports.service.messaging ${D}${webos_sysconfdir}/activities/
 
+    # Registered with the backup service, which calls restoreFinished after a restore only
+    # for the services in /etc/palm/backup
+    install -d ${D}${webos_sysconfdir}/backup
+    install -m 0644 ${S}/configuration/backup/*.json ${D}${webos_sysconfdir}/backup/
+
     # Install the ACG configuration
     install -d ${D}${webos_sysbus_servicedir}
     install -d ${D}${webos_sysbus_permissionsdir}
