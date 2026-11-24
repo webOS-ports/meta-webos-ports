@@ -21,6 +21,7 @@ SRC_URI = " \
     file://0002-gbuild-create-UnpackedTarball-before-writing-a-.vers.patch \
     file://0003-external-link-the-autotools-externals-with-the-confi.patch \
     file://0004-sal-allow-the-source-directory-in-log-locations-to-b.patch \
+    file://0005-i18npool-do-not-crash-when-the-saxparser-output-file.patch \
 "
 SRC_URI[sha256sum] = "296ba78e7ab0d381b94c3d6342f4ebb2320ee5097ca58781b9b744cab90b9785"
 
