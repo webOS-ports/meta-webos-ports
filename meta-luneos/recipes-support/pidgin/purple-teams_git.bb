@@ -4,14 +4,14 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=30441c91ba0022ea994b5dae832bd063"
 
 require purple-connectors.inc
 
-# EionRobb's master as of b51ed11, which merged #99: the opt-in calling framework, TEAMS_CALLING,
-# with its PurpleMedia engine, on #85's personal/consumer accounts and the fix PRs #92-#98. One
-# feature per patch: 0001 is the history dedup meant for upstream; 0002-0005 adapt the plug-in to
-# imlibpurpletransport, the webOS Messaging app and, through #99's teams_calling_set_*_cb hooks, the
-# webOS Phone app; 0006 keeps the picture we send in a video call upright as the phone turns (TURN
-# to the media engine, teams-media from luneos-synergy-connectors); 0007 is upstream PR #104, which
-# lets the Teams Android app see the video of a call we place. Upstream's .c files and Makefile have
-# CRLF line endings and so do the patches against them: keep the .patch files byte-exact.
+# EionRobb's master as of 8673465, which merged #99: the opt-in calling framework, TEAMS_CALLING,
+# with its PurpleMedia engine, on #85's personal/consumer accounts and the fix PRs #92-#98; and #104,
+# which lets the Teams Android app see the video of a call we place. One feature per patch: 0001 is
+# the history dedup meant for upstream; 0002-0005 adapt the plug-in to imlibpurpletransport, the
+# webOS Messaging app and, through #99's teams_calling_set_*_cb hooks, the webOS Phone app; 0006
+# keeps the picture we send in a video call upright as the phone turns (TURN to the media engine,
+# teams-media from luneos-synergy-connectors). Upstream's .c files and Makefile have CRLF line
+# endings and so do the patches against them: keep the .patch files byte-exact.
 SRC_URI += " \
     git://github.com/EionRobb/purple-teams.git;branch=master;protocol=https;name=upstream;destsuffix=purple-teams \
     file://0001-Drop-history-re-delivered-across-logins-behind-TEAMS.patch \
@@ -20,10 +20,9 @@ SRC_URI += " \
     file://0004-webOS-Always-report-the-account-as-active-and-Availa.patch \
     file://0005-webOS-Ring-and-drive-Teams-calls-from-the-webOS-Phon.patch \
     file://0006-webOS-Keep-the-picture-we-send-upright-as-the-phone-.patch \
-    file://0007-calling-Let-the-Teams-Android-app-see-the-video-of-a.patch \
 "
 PE = "4"
-SRCREV_upstream = "b51ed11f2d5da35f460701a56264e535b6904517"
+SRCREV_upstream = "867346535ffb98d82249bb7f0bc287472a09f286"
 
 DEPENDS = "pidgin json-glib glib-2.0 zlib luna-service2"
 
