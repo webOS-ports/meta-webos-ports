@@ -66,7 +66,7 @@ SPOTIFY_CLIENT_ID ?= ""
 JAMENDO_CLIENT_ID ?= ""
 
 # One account-type package per provider. music/youtube/ carries no template yet.
-MUSIC_PROVIDERS = "apple archive deezer jamendo qobuz soundcloud spotify tidal"
+MUSIC_PROVIDERS = "apple archive deezer jamendo qobuz radio soundcloud spotify subsonic tidal"
 
 do_install() {
     # The daemon, and the unit that starts it at boot. On legacy webOS this was an upstart job
