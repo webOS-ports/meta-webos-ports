@@ -61,6 +61,11 @@ SRC_URI += "file://0014-service-retry-a-saved-Wi-Fi-network-after-a-failed-a.pat
 # freed memory as the Country, and libdbus aborted connmand on it.
 SRC_URI += "file://0015-technology-do-not-free-the-regulatory-domain-it-is-s.patch"
 
+# Tethering aborted connmand ("free(): invalid pointer") when it added the
+# NAT rule: iptables 1.8.13's xtables_merge_options() frees the option
+# table it is given, and connman handed it its static one.
+SRC_URI += "file://0016-iptables-do-not-let-libxtables-free-the-static-optio.patch"
+
 # See connman-vpn.service.d/luneos-caps.conf for why: upstream's
 # CapabilityBoundingSet on connman-vpn.service is missing CAP_SYS_ADMIN and
 # CAP_DAC_OVERRIDE, which the l2tp plugin's client-side pppd needs to open
