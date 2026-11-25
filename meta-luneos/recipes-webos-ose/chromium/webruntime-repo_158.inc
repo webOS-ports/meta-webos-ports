@@ -18,7 +18,7 @@ WEBRUNTIME_REPO_VERSION = "158"
 # tarball carries third_party/litert's prebuilt binaries as Git LFS pointers
 # with no objects behind them, and nothing here uses them.
 SRC_URI = "git://github.com/webos-ports/chromium158.git;protocol=https;branch=main;name=chromium;lfs=0"
-SRCREV = "c66da44497827d576223a98b8bb23241ce766672"
+SRCREV = "8358ff267687aef0ce1c7910cded1337f5c79d6b"
 
 # The prebuilt toolchains below are too big for GitHub (100 MiB per file), so
 # they stay out of the repo and come from the release tarball of the same
