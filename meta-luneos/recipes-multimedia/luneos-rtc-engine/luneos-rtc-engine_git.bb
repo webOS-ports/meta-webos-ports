@@ -32,6 +32,7 @@ RRECOMMENDS:${PN}:halium = ""
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PE = "1"
+PR = "r1"
 PV = "1.0.0+git"
 SRCREV = "1a1fb55c7db3dbde1dc28432bf8c9b8e95327c46"
 WEBOS_GIT_PARAM_BRANCH = "main"
@@ -41,3 +42,15 @@ inherit webos_ports_repo
 inherit qt6-cmake pkgconfig
 
 FILES:${PN} += "${datadir}/luna-service2 ${libdir}/qml"
+
+# On Halium, ls-hubd launches the engine with its own environment, from before
+# gst-droid-gate.service exposed libgstdroid.so. The engine then had no
+# droidcamsrc, fell back to the v4l2 backend, counted no cameras, and the Phone
+# app hid the camera button in every video call. gst-droid-env (from gst-droid)
+# loads the environment the gate chose.
+do_install:append:halium() {
+    sed -i -e 's|^Exec=/usr/sbin/luneos-rtc-engine|Exec=${bindir}/gst-droid-env /usr/sbin/luneos-rtc-engine|' \
+        ${D}${datadir}/luna-service2/services.d/org.webosports.rtcengine.service
+    grep -q '^Exec=${bindir}/gst-droid-env ' ${D}${datadir}/luna-service2/services.d/org.webosports.rtcengine.service \
+        || bbfatal "org.webosports.rtcengine.service: the Exec= line was not rewritten"
+}

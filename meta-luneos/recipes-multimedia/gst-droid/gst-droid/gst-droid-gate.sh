@@ -19,8 +19,16 @@
 # The environment is set on the systemd manager, so it reaches units started
 # after this one - hence the ordering in gst-droid-gate.service. Anything
 # already running keeps the environment it was started with.
+#
+# ls-hubd is one of those: it starts before this unit, and the bus services it
+# launches on demand (Type=dynamic) inherit its environment, not the manager's.
+# org.webosports.rtcengine therefore never saw droidcamsrc, counted no cameras,
+# and the Phone app hid the camera button on every video call. The same
+# variables go to ENVFILE as well, for gst-droid-env, which such a service's
+# Exec= line runs it through.
 
 PLUGINDIR="@GST_DROID_PLUGINDIR@"
+ENVFILE="@GST_DROID_ENVFILE@"
 SERVICE="android.hardware.media.omx@1.0::IOmxStore/default"
 
 if [ ! -e "${PLUGINDIR}/libgstdroid.so" ]; then
@@ -141,9 +149,30 @@ if [ -n "${REASON}" ]; then
     else
         systemctl unset-environment GST_DROID_NO_CAMERA
     fi
+    # How droidvenc lays out raw frames for the hardware encoder (0031). Its default, rows of a
+    # multiple of 128 bytes and a luma plane of a multiple of 32 rows, is what Qualcomm's encoder
+    # reads. MediaTek's (the q25's c2.mtk.avc.encoder, alignment 16x8) keeps to the stride it is
+    # told and its input buffers are no larger, so a padded frame is refused: only 640x480, which
+    # needs no padding, encoded there, and a video call sent no picture at any other size.
+    ALIGN_ENV=""
+    case "$(getprop ro.soc.manufacturer 2>/dev/null)" in
+        [Mm][Ee][Dd][Ii][Aa][Tt][Ee][Kk]) ALIGN_ENV="GST_DROID_VENC_RAW_ALIGN=16x16" ;;
+    esac
+    if [ -z "${ALIGN_ENV}" ]; then
+        systemctl unset-environment GST_DROID_VENC_RAW_ALIGN
+    fi
     systemctl set-environment "GST_PLUGIN_PATH=${NEW}" \
         "GST_REGISTRY=${CACHE}/gstreamer-1.0/registry-droid.bin" \
-        "GST_PLUGIN_FEATURE_RANK=${GST_PLUGIN_FEATURE_RANK}" ${CAMERA_ENV}
+        "GST_PLUGIN_FEATURE_RANK=${GST_PLUGIN_FEATURE_RANK}" ${CAMERA_ENV} ${ALIGN_ENV}
+    # Written aside and moved in place, so gst-droid-env never reads half a file.
+    mkdir -p "$(dirname "${ENVFILE}")"
+    {
+        echo "GST_PLUGIN_PATH='${NEW}'"
+        echo "GST_REGISTRY='${CACHE}/gstreamer-1.0/registry-droid.bin'"
+        echo "GST_PLUGIN_FEATURE_RANK='${GST_PLUGIN_FEATURE_RANK}'"
+        if [ -n "${CAMERA_ENV}" ]; then echo "GST_DROID_NO_CAMERA='1'"; fi
+        if [ -n "${ALIGN_ENV}" ]; then echo "GST_DROID_VENC_RAW_ALIGN='${ALIGN_ENV#*=}'"; fi
+    } > "${ENVFILE}.new" && mv -f "${ENVFILE}.new" "${ENVFILE}"
     # GStreamer writes its registry 0600, and XDG_CACHE_HOME is the same root-owned directory for
     # every user, so the media services (umediaserver, mediaindexer, mediacontroller and each
     # g-media-pipeline, all running as "media") could neither read it nor write their own: every
@@ -152,6 +181,7 @@ if [ -n "${REASON}" ]; then
     chmod 0644 "${CACHE}"/gstreamer-1.0/registry*.bin 2>/dev/null
     echo "gst-droid-gate: ${REASON}, added ${PLUGINDIR} to GST_PLUGIN_PATH"
 else
+    rm -f "${ENVFILE}"
     echo "gst-droid-gate: ${SERVICE} is not registered; leaving gst-droid out of the"
     echo "gst-droid-gate: plugin path. Hardware codecs and droidcamsrc are unavailable,"
     echo "gst-droid-gate: but GStreamer clients will not hang scanning for them."

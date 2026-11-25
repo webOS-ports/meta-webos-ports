@@ -29,7 +29,7 @@ COMPATIBLE_MACHINE = "^halium$"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "0.20260508+git"
-PR = "r6"
+PR = "r7"
 SRCREV = "e5152aee90dbb9b81c6bc45073b1fa86fc0c4194"
 SRC_URI = "git://github.com/sailfishos/gst-droid.git;branch=master;protocol=https \
     file://0001-droidcamsrc-allow-recorder-video-in-raw-preview.patch \
@@ -62,7 +62,9 @@ SRC_URI = "git://github.com/sailfishos/gst-droid.git;branch=master;protocol=http
     file://0028-droidcamsrc-stop-a-running-recording-before-the-came.patch \
     file://0029-droidcamsrc-stop-the-preview-outside-the-device-lock.patch \
     file://0030-droidcamsrc-let-the-environment-say-there-are-no-cameras.patch \
+    file://0031-droidvenc-let-the-environment-set-the-raw-frame-alig.patch \
     file://gst-droid-gate.sh \
+    file://gst-droid-env.sh \
     file://gst-droid-gate.service \
     file://camera-droid-heal.sh \
     file://camera-droid-heal.service \
@@ -90,6 +92,10 @@ GST_DROID_PLUGINDIR = "${libdir}/gstreamer-1.0-gated"
 
 CAMERA_DROID_HEAL_CONF = "${sysconfdir}/gst-droid/camera-heal.conf"
 
+# What the gate decided, for gst-droid-env: the bus services ls-hubd launches never see the
+# environment the gate gives the systemd manager (see gst-droid-gate.sh).
+GST_DROID_ENVFILE = "/run/gst-droid/environment"
+
 do_install:append() {
     install -d ${D}${GST_DROID_PLUGINDIR}
     mv ${D}${libdir}/gstreamer-1.0/libgstdroid.so ${D}${GST_DROID_PLUGINDIR}/
@@ -98,7 +104,11 @@ do_install:append() {
     install -d ${D}${bindir}
     install -m 0755 ${UNPACKDIR}/gst-droid-gate.sh ${D}${bindir}/
     sed -i -e "s|@GST_DROID_PLUGINDIR@|${GST_DROID_PLUGINDIR}|" \
+        -e "s|@GST_DROID_ENVFILE@|${GST_DROID_ENVFILE}|" \
         ${D}${bindir}/gst-droid-gate.sh
+
+    install -m 0755 ${UNPACKDIR}/gst-droid-env.sh ${D}${bindir}/gst-droid-env
+    sed -i -e "s|@GST_DROID_ENVFILE@|${GST_DROID_ENVFILE}|" ${D}${bindir}/gst-droid-env
 
     install -m 0755 ${UNPACKDIR}/camera-droid-heal.sh ${D}${bindir}/
     sed -i -e "s|@GST_DROID_PLUGINDIR@|${GST_DROID_PLUGINDIR}|" \
