@@ -1,0 +1,94 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] connect: do not resolve the Web API's spotify:webapi:
+ contexts
+
+A play from the Web API with bare track uris ("uris": [...]) comes to
+Connect with a context uri spotify:webapi:<id>. context-resolve answers
+400 Bad Request for it, so the play fails: "Client specified an invalid
+argument { Response status code: 400 Bad Request }", then "failed to
+handle request: Invalid state { context is not available. type:
+Default }", and nothing plays.
+
+Treat it as a search context is treated: not resolved by its uri, but by
+the first track of the command's page.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/librespot-org/librespot/pull/1875]
+---
+ connect/src/state/context.rs | 49 +++++++++++++++++++++++++++++++++++-
+ 1 file changed, 48 insertions(+), 1 deletion(-)
+
+diff --git a/connect/src/state/context.rs b/connect/src/state/context.rs
+index c90cc4f..9693db7 100644
+--- a/connect/src/state/context.rs
++++ b/connect/src/state/context.rs
+@@ -20,6 +20,10 @@ use uuid::Uuid;
+ 
+ const LOCAL_FILES_IDENTIFIER: &str = "spotify:local-files";
+ const SEARCH_IDENTIFIER: &str = "spotify:search";
++// The context the Web API gives a play of bare track uris ("uris": [...]). The
++// context-resolve endpoint answers 400 Bad Request for it; the tracks come in the
++// play command's page instead.
++const WEBAPI_IDENTIFIER: &str = "spotify:webapi:";
+ 
+ #[derive(Debug)]
+ pub struct StateContext {
+@@ -138,7 +142,10 @@ impl ConnectState {
+     }
+ 
+     pub fn valid_resolve_uri(uri: &str) -> Option<&str> {
+-        if uri.is_empty() || uri.starts_with(SEARCH_IDENTIFIER) {
++        if uri.is_empty()
++            || uri.starts_with(SEARCH_IDENTIFIER)
++            || uri.starts_with(WEBAPI_IDENTIFIER)
++        {
+             None
+         } else {
+             Some(uri)
+@@ -518,3 +525,43 @@ impl ConnectState {
+         Ok(())
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use librespot_protocol::context_page::ContextPage;
++    use librespot_protocol::context_track::ContextTrack;
++
++    fn page_of(uri: &str) -> ContextPage {
++        ContextPage {
++            tracks: vec![ContextTrack {
++                uri: Some(uri.to_string()),
++                ..Default::default()
++            }],
++            ..Default::default()
++        }
++    }
++
++    #[test]
++    fn webapi_context_is_resolved_from_its_first_track() {
++        const WEBAPI: &str = "spotify:webapi:6ZiGbhzFpulbOi1LTrTK54";
++        let track = "spotify:track:63T7DJ1AFDD6Bn8VzG6JE8";
++        let page = page_of(track);
++        assert_eq!(ConnectState::valid_resolve_uri(WEBAPI), None);
++        assert_eq!(
++            ConnectState::find_valid_uri(Some(WEBAPI), Some(&page)),
++            Some(track)
++        );
++    }
++
++    #[test]
++    fn other_contexts_are_resolved_as_they_are() {
++        let album = "spotify:album:0FgZKfoU2Br5sHOfvZKTI9";
++        assert_eq!(ConnectState::valid_resolve_uri(album), Some(album));
++        assert_eq!(
++            ConnectState::valid_resolve_uri("spotify:search:never+gonna"),
++            None
++        );
++        assert_eq!(ConnectState::valid_resolve_uri(""), None);
++    }
++}
+-- 
+2.53.0
+
