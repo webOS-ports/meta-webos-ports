@@ -78,7 +78,7 @@ after the chat was shown sends none again.
 Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
 Upstream-Status: Inappropriate [LuneOS addition, not part of purple-gowhatsapp]
 ---
- glue/init.c            |    6 +
+ glue/init.c            |   10 +-
  glue/login.c           |    4 +
  glue/matrix_init.c     |  230 ++++++
  matrix.go              | 1540 ++++++++++++++++++++++++++++++++++++++++
@@ -90,7 +90,7 @@ Upstream-Status: Inappropriate [LuneOS addition, not part of purple-gowhatsapp]
  matrix_test.go         |  228 ++++++
  matrixbridge.c         |  198 ++++++
  matrixbridge.h         |   55 ++
- 12 files changed, 3472 insertions(+)
+ 12 files changed, 3475 insertions(+), 1 deletion(-)
  create mode 100644 glue/matrix_init.c
  create mode 100644 matrix.go
  create mode 100644 matrix_crypto.go
@@ -103,59 +103,62 @@ Upstream-Status: Inappropriate [LuneOS addition, not part of purple-gowhatsapp]
  create mode 100644 matrixbridge.h
 
 diff --git a/glue/init.c b/glue/init.c
-index 0b3d349..143e2f5 100644
+index 60b5dcf..afec413 100644
 --- a/glue/init.c
 +++ b/glue/init.c
-@@ -24,6 +24,7 @@
+@@ -23,6 +23,7 @@
+ 
  #include "gowhatsapp.h"
  #include "constants.h"       // GOWHATSAPP_CREDENTIALS_KEY (for locating the device to unlink on delete)
- #include "../gometabridge.h" // GOMETA_PLUGIN_ID (branch account-removed by protocol id)
 +#include "../matrixbridge.h" // MATRIX_PLUGIN_ID
- #include "libwhatsmeow.h" // for gowhatsapp_go_init + gowhatsapp_go_account_removed / gometa_go_account_removed
+ #include "libwhatsmeow.h" // for gowhatsapp_go_init + gowhatsapp_go_account_removed
  #include "call.h"         // whatsapp_call_luna_init -- register at plugin load, not per-account login
  #include <gmodule.h>      // g_module_make_resident - pin the Go .so so libpurple can't dlclose/unmap it
-@@ -156,6 +157,8 @@ static PurplePluginProtocolInfo prpl_info = {
+@@ -153,6 +154,9 @@ static PurplePluginProtocolInfo prpl_info = {
+     #endif
+ };
  
- // Registers the Facebook (messagix) protocol as a second prpl in this same .so.
- extern void gometa_register_second_prpl(void);
-+// ...and Matrix (mautrix-go) as a third.
++// Registers Matrix (mautrix-go) as a second prpl in this same .so.
 +extern void matrix_register_prpl(void);
- 
++
  // Per-account store teardown on account deletion. libpurple's purple_accounts_delete() emits
  // "account-removed" (on purple_accounts_get_handle()) for the account being deleted, then destroys
-@@ -183,6 +186,8 @@ webos_account_removed_cb(PurpleAccount *account, gpointer data)
+ // it synchronously. We filter by protocol id and hand off to the Go export. Everything must complete
+@@ -176,6 +180,8 @@ webos_account_removed_cb(PurpleAccount *account, gpointer data)
+             credentials = purple_account_get_password(account);
+         }
          gowhatsapp_go_account_removed(account, user_dir, username, (char *)(credentials ? credentials : ""));
-     } else if (g_strcmp0(proto, GOMETA_PLUGIN_ID) == 0) {
-         gometa_go_account_removed(account, user_dir, username);
 +    } else if (g_strcmp0(proto, MATRIX_PLUGIN_ID) == 0) {
 +        matrix_go_account_removed(account, user_dir, username);
      }
  }
  
-@@ -206,6 +211,7 @@ static void plugin_init(PurplePlugin *plugin) {
+@@ -198,7 +204,9 @@ static void plugin_init(PurplePlugin *plugin) {
+         g_module_make_resident((GModule *) plugin->handle);
      }
      prpl_info.protocol_options = gowhatsapp_add_account_options(prpl_info.protocol_options);
-     gometa_register_second_prpl();
+-    // Clean up the per-JID device row in the shared whatsmeow.db when an account is deleted.
 +    matrix_register_prpl();
-     // Clean up per-account backend stores when an account is deleted (WhatsApp: per-JID device row
-     // from the shared whatsmeow.db; Facebook-E2EE: the per-account gometa-e2ee-<user>.db). Covers both
-     // prpls in this .so via one handler.
++    // Clean up per-account backend stores when an account is deleted (WhatsApp: per-JID device row
++    // from the shared whatsmeow.db). Covers every prpl in this .so via one handler.
+     webos_connect_account_removed(plugin);
+ }
+ 
 diff --git a/glue/login.c b/glue/login.c
-index 6410b97..bb9d944 100644
+index ab04450..b371835 100644
 --- a/glue/login.c
 +++ b/glue/login.c
-@@ -1,6 +1,7 @@
+@@ -1,5 +1,6 @@
  #include "gowhatsapp.h"
- #include "libwhatsmeow.h" // for gowhatsapp_go_login / gowhatsapp_go_send_reaction / gometa_go_send_reaction
- #include "../gometabridge.h" // for GOMETA_PLUGIN_ID
+ #include "libwhatsmeow.h" // for gowhatsapp_go_login / gowhatsapp_go_send_reaction
 +#include "../matrixbridge.h" // for MATRIX_PLUGIN_ID
  
  // webOS reactions (SEND): the transport emits "webos-im-send-reaction" (registered process-wide) when
  // the user reacts from the TouchPad. It fires for EVERY account, so we filter by protocol id and route
-@@ -27,6 +28,9 @@ static void webos_send_reaction_cb(PurpleAccount *account, const char *targetId,
-     } else if (g_strcmp0(proto, GOMETA_PLUGIN_ID) == 0) {
-         gometa_go_send_reaction(account, (char *)targetId, (char *)(emoji ? emoji : ""),
-                                 (char *)(peer ? peer : ""), (char *)(removeFlag ? removeFlag : ""));
+@@ -23,6 +24,9 @@ static void webos_send_reaction_cb(PurpleAccount *account, const char *targetId,
+         gowhatsapp_go_send_reaction(account, (char *)targetId, (char *)(emoji ? emoji : ""),
+                                     (char *)(peer ? peer : ""), (char *)(targetSender ? targetSender : ""),
+                                     (char *)(removeFlag ? removeFlag : ""));
 +    } else if (g_strcmp0(proto, MATRIX_PLUGIN_ID) == 0) {
 +        matrix_go_send_reaction(account, (char *)targetId, (char *)(emoji ? emoji : ""),
 +                                (char *)(peer ? peer : ""), (char *)(removeFlag ? removeFlag : ""));

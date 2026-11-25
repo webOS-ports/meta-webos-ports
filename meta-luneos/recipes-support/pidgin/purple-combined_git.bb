@@ -17,14 +17,15 @@ PE = "5"
 #
 #   purple-gowhatsapp   the WhatsApp prpl, one feature per patch. 0001-0007 and 0011-0017 are the
 #                       webOS Messaging integration, 0008 the calling integration (voice and
-#                       video through the Phone app). 0009 adds prpl-gometa (Facebook Messenger
-#                       on mautrix-meta's messagix) and 0010 prpl-matrix (Matrix on mautrix-go,
+#                       video through the Phone app). 0010 adds prpl-matrix (Matrix on mautrix-go,
 #                       with end-to-end encryption): LuneOS work, not part of purple-gowhatsapp,
 #                       which has to live in this .so because two Go c-archives cannot share one
-#                       process. 0016 is the rest of the Facebook integration and 0018 connects
-#                       the account-removed handler once libpurple has registered the signal.
-#                       0019 creates the profile picture directory with mode 0755 instead of
-#                       0x755 (submitted upstream as #315).
+#                       process. 0018 connects the account-removed handler once libpurple has
+#                       registered the signal. 0019 creates the profile picture directory with
+#                       mode 0755 instead of 0x755 (submitted upstream as #315). 0020 adds
+#                       prpl-gometa (Facebook Messenger on mautrix-meta's messagix) as offered to
+#                       purple-gowhatsapp (issue #211), built with -tags gometa; 0021 is what the
+#                       Messaging app needs of it on top.
 #   meowcaller          WhatsApp calling, which go.mod replaces with ./third_party/meowcaller.
 #                       main imports whatsmeow as github.com/polymorfa/hypermeow, a renamed copy;
 #                       meowcaller/0001 points it back at go.mau.fi/whatsmeow, the module
@@ -49,17 +50,17 @@ SRC_URI += " \
     file://0006-webOS-show-WhatsApp-Channels.patch \
     file://0007-webOS-store-and-cache-defaults-device-removal-messag.patch \
     file://0008-webOS-WhatsApp-voice-and-video-calls-through-the-Pho.patch \
-    file://0009-webOS-add-a-Facebook-Messenger-protocol-prpl-gometa-.patch \
     file://0010-webOS-add-a-Matrix-protocol-prpl-matrix-to-the-plugi.patch \
     file://0011-webOS-send-read-receipts-once-a-chat-is-read.patch \
     file://0012-webOS-count-WhatsApp-poll-votes-on-the-poll-one-vote.patch \
     file://0013-webOS-edit-delete-groups-places-contact-cards-and-me.patch \
     file://0014-webOS-keep-the-id-of-what-we-send-into-a-WhatsApp-gr.patch \
     file://0015-webOS-keep-a-received-WhatsApp-sticker-as-WebP.patch \
-    file://0016-webOS-Facebook-typing-receipts-edits-deletes-rich-se.patch \
     file://0017-webOS-show-the-old-WhatsApp-messages-the-phone-sends.patch \
     file://0018-webOS-connect-the-account-removed-handler-once-libpu.patch \
     file://0019-Create-the-profile-picture-directory-with-octal-mode.patch \
+    file://0020-Add-an-optional-Facebook-Messenger-protocol-prpl-gometa.patch \
+    file://0021-webOS-Facebook-integration.patch \
     file://meowcaller/0001-Build-against-upstream-whatsmeow.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0002-mlow-speed-up-the-encoder-for-32-bit-ARM.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0003-Fix-the-video-call-media-path-against-live-WhatsApp-.patch;patchdir=third_party/meowcaller \
@@ -154,8 +155,9 @@ do_compile() {
     #
     # -tags goolm: Matrix's end-to-end encryption (0010) uses mautrix-go's pure-Go Olm. Without
     # the tag mautrix/crypto binds libolm through cgo instead, which is deprecated upstream and not
-    # in this layer set.
-    ${GO} build -tags goolm -trimpath -modcacherw -buildmode=c-archive -o ${B}/libwhatsmeow.a .
+    # in this layer set. -tags gometa: the Facebook protocol's Go files (0020, 0021) carry
+    # //go:build gometa; upstream's CMake option GOMETA sets the same tag.
+    ${GO} build -tags goolm,gometa -trimpath -modcacherw -buildmode=c-archive -o ${B}/libwhatsmeow.a .
 
     # -DPURPLE_PLUGINS is belt-and-braces rather than required:
     # plugin.h does switch PURPLE_INIT_PLUGIN on it (unset selects the static-prpl entry point
@@ -169,7 +171,7 @@ do_compile() {
              -I${S}/glue -I${S} -I${B} \
              $(pkg-config --cflags purple glib-2.0 opus opusfile ogg alsa luna-service2)"
 
-    # 2. the C glue, including the webOS files 0008 and 0009 add.
+    # 2. the C glue, including the files 0008, 0010 and 0020 add.
     OBJS=""
     for s in init login qrcode bridge process_message display_message groups blist \
              send_message handle_attachment send_file presence options receipt pixbuf commands \
