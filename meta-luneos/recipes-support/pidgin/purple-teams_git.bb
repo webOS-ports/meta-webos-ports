@@ -9,9 +9,9 @@ require purple-connectors.inc
 # feature per patch: 0001 is the history dedup meant for upstream; 0002-0005 adapt the plug-in to
 # imlibpurpletransport, the webOS Messaging app and, through #99's teams_calling_set_*_cb hooks, the
 # webOS Phone app; 0006 keeps the picture we send in a video call upright as the phone turns (TURN
-# to the media engine, teams-media from luneos-synergy-connectors). Upstream's .c files and
-# Makefile have CRLF line endings and so do the patches against them: keep the .patch files
-# byte-exact.
+# to the media engine, teams-media from luneos-synergy-connectors); 0007 is upstream PR #104, which
+# lets the Teams Android app see the video of a call we place. Upstream's .c files and Makefile have
+# CRLF line endings and so do the patches against them: keep the .patch files byte-exact.
 SRC_URI += " \
     git://github.com/EionRobb/purple-teams.git;branch=master;protocol=https;name=upstream;destsuffix=purple-teams \
     file://0001-Drop-history-re-delivered-across-logins-behind-TEAMS.patch \
@@ -20,6 +20,7 @@ SRC_URI += " \
     file://0004-webOS-Always-report-the-account-as-active-and-Availa.patch \
     file://0005-webOS-Ring-and-drive-Teams-calls-from-the-webOS-Phon.patch \
     file://0006-webOS-Keep-the-picture-we-send-upright-as-the-phone-.patch \
+    file://0007-calling-Let-the-Teams-Android-app-see-the-video-of-a.patch \
 "
 PE = "4"
 SRCREV_upstream = "b51ed11f2d5da35f460701a56264e535b6904517"
