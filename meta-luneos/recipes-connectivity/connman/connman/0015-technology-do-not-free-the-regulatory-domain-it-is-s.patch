@@ -1,0 +1,157 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 25 Nov 2026 19:04:09 +0100
+Subject: [PATCH] technology: do not free the regulatory domain it is set to
+
+Every time WiFi is powered on, the device is given the technology's
+regulatory domain, __connman_technology_get_regdom(), which returns
+technology->regdom itself. wifi_set_regdom() passes that pointer to
+g_supplicant_interface_set_country(), which keeps it until wpa_supplicant
+answers, and the answer hands it back to connman_technology_regdom_notify().
+That frees technology->regdom and then duplicates the string it just
+freed, so the technology keeps whatever the allocator wrote into the
+chunk - with glibc, its free list pointer.
+
+The next power on sends those bytes to wpa_supplicant as the Country.
+They are rarely valid UTF-8, and libdbus aborts connmand:
+
+  arguments to dbus_message_iter_append_basic() were incorrect,
+  assertion "_dbus_check_is_valid_utf8 (*string_p)" failed
+
+Seen on a FuriPhone FLX1s (radon): switching WiFi off and on again
+within a second, the last debug line before the abort being
+wifi_set_regdom() -> __connman_technology_get_regdom().
+
+Copy the new value before freeing the old one, in
+connman_technology_regdom_notify() and for global_regdom in
+connman_technology_set_regdom(), and let gsupplicant keep its own copy
+of alpha2 while the Country call is in flight, as the caller's string
+can be replaced before the reply.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ gsupplicant/supplicant.c | 22 ++++++++++++++++------
+ src/technology.c         | 15 +++++++++++++--
+ 2 files changed, 29 insertions(+), 8 deletions(-)
+
+diff --git a/gsupplicant/supplicant.c b/gsupplicant/supplicant.c
+index 2ea231c..7e0b14f 100644
+--- a/gsupplicant/supplicant.c
++++ b/gsupplicant/supplicant.c
+@@ -3909,10 +3909,20 @@ void g_supplicant_interface_cancel(GSupplicantInterface *interface)
+ 
+ struct supplicant_regdom {
+ 	GSupplicantCountryCallback callback;
+-	const char *alpha2;
++	/*
++	 * A copy: the caller's string, often the technology's own regdom,
++	 * can be freed or replaced before the reply comes back.
++	 */
++	char *alpha2;
+ 	const void *user_data;
+ };
+ 
++static void regdom_free(struct supplicant_regdom *regdom)
++{
++	g_free(regdom->alpha2);
++	dbus_free(regdom);
++}
++
+ static void country_result(const char *error,
+ 				DBusMessageIter *iter, void *user_data)
+ {
+@@ -3933,7 +3943,7 @@ static void country_result(const char *error,
+ 		regdom->callback(result, regdom->alpha2,
+ 					(void *) regdom->user_data);
+ 
+-	g_free(regdom);
++	regdom_free(regdom);
+ }
+ 
+ static void country_params(DBusMessageIter *iter, void *user_data)
+@@ -3961,7 +3971,7 @@ int g_supplicant_set_country(const char *alpha2,
+ 		return -ENOMEM;
+ 
+ 	regdom->callback = callback;
+-	regdom->alpha2 = alpha2;
++	regdom->alpha2 = g_strdup(alpha2);
+ 	regdom->user_data = user_data;
+ 
+ 	ret =  supplicant_dbus_property_set(SUPPLICANT_PATH, SUPPLICANT_INTERFACE,
+@@ -3969,7 +3979,7 @@ int g_supplicant_set_country(const char *alpha2,
+ 					country_params, country_result,
+ 					regdom, NULL);
+ 	if (ret < 0) {
+-		dbus_free(regdom);
++		regdom_free(regdom);
+ 		SUPPLICANT_DBG("Unable to set Country configuration");
+ 	}
+ 	return ret;
+@@ -3988,7 +3998,7 @@ int g_supplicant_interface_set_country(GSupplicantInterface *interface,
+ 		return -ENOMEM;
+ 
+ 	regdom->callback = callback;
+-	regdom->alpha2 = alpha2;
++	regdom->alpha2 = g_strdup(alpha2);
+ 	regdom->user_data = user_data;
+ 
+ 	ret =  supplicant_dbus_property_set(interface->path,
+@@ -3997,7 +4007,7 @@ int g_supplicant_interface_set_country(GSupplicantInterface *interface,
+ 				country_params, country_result,
+ 					regdom, NULL);
+ 	if (ret < 0) {
+-		dbus_free(regdom);
++		regdom_free(regdom);
+ 		SUPPLICANT_DBG("Unable to set Country configuration");
+ 	}
+ 
+diff --git a/src/technology.c b/src/technology.c
+index dfcd7f7..ff1f0d5 100644
+--- a/src/technology.c
++++ b/src/technology.c
+@@ -302,6 +302,8 @@ static int set_tethering(struct connman_technology *technology,
+ void connman_technology_regdom_notify(struct connman_technology *technology,
+ 							const char *alpha2)
+ {
++	char *old;
++
+ 	DBG("");
+ 
+ 	if (!alpha2)
+@@ -309,8 +311,14 @@ void connman_technology_regdom_notify(struct connman_technology *technology,
+ 	else
+ 		DBG("Regulatory domain set to %s", alpha2);
+ 
+-	g_free(technology->regdom);
++	/*
++	 * Copy before freeing: alpha2 is often technology->regdom itself,
++	 * handed to the driver by __connman_technology_get_regdom() and
++	 * passed back here in the driver's callback.
++	 */
++	old = technology->regdom;
+ 	technology->regdom = g_strdup(alpha2);
++	g_free(old);
+ }
+ 
+ static int set_regdom_by_device(struct connman_technology *technology,
+@@ -331,6 +339,7 @@ static int set_regdom_by_device(struct connman_technology *technology,
+ int connman_technology_set_regdom(const char *alpha2)
+ {
+ 	GSList *list, *tech_drivers;
++	char *old;
+ 
+ 	for (list = technology_list; list; list = list->next) {
+ 		struct connman_technology *technology = list->data;
+@@ -353,8 +362,10 @@ int connman_technology_set_regdom(const char *alpha2)
+ 		connman_technology_regdom_notify(technology, alpha2);
+ 	}
+ 
+-	g_free(global_regdom);
++	/* alpha2 may be global_regdom itself: copy before freeing. */
++	old = global_regdom;
+ 	global_regdom = g_strdup(alpha2);
++	g_free(old);
+ 
+ 	return 0;
+ }

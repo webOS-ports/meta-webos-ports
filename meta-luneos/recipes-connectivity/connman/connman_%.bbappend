@@ -56,6 +56,11 @@ SRC_URI += "file://0013-ofono-let-cellular-enable-disable-switch-mobile-data.pat
 # at the passphrase or the AP refusing the station.
 SRC_URI += "file://0014-service-retry-a-saved-Wi-Fi-network-after-a-failed-a.patch"
 
+# Powering WiFi on handed wpa_supplicant the technology's regdom string,
+# which the reply then freed before copying it: the next power on sent
+# freed memory as the Country, and libdbus aborted connmand on it.
+SRC_URI += "file://0015-technology-do-not-free-the-regulatory-domain-it-is-s.patch"
+
 # See connman-vpn.service.d/luneos-caps.conf for why: upstream's
 # CapabilityBoundingSet on connman-vpn.service is missing CAP_SYS_ADMIN and
 # CAP_DAC_OVERRIDE, which the l2tp plugin's client-side pppd needs to open
