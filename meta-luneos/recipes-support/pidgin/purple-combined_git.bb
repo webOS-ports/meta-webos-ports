@@ -23,6 +23,8 @@ PE = "5"
 #                       which has to live in this .so because two Go c-archives cannot share one
 #                       process. 0016 is the rest of the Facebook integration and 0018 connects
 #                       the account-removed handler once libpurple has registered the signal.
+#                       0019 creates the profile picture directory with mode 0755 instead of
+#                       0x755 (submitted upstream as #315).
 #   meowcaller          WhatsApp calling, which go.mod replaces with ./third_party/meowcaller.
 #                       main imports whatsmeow as github.com/polymorfa/hypermeow, a renamed copy;
 #                       meowcaller/0001 points it back at go.mau.fi/whatsmeow, the module
@@ -57,6 +59,7 @@ SRC_URI += " \
     file://0016-webOS-Facebook-typing-receipts-edits-deletes-rich-se.patch \
     file://0017-webOS-show-the-old-WhatsApp-messages-the-phone-sends.patch \
     file://0018-webOS-connect-the-account-removed-handler-once-libpu.patch \
+    file://0019-Create-the-profile-picture-directory-with-octal-mode.patch \
     file://meowcaller/0001-Build-against-upstream-whatsmeow.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0002-mlow-speed-up-the-encoder-for-32-bit-ARM.patch;patchdir=third_party/meowcaller \
     file://meowcaller/0003-Fix-the-video-call-media-path-against-live-WhatsApp-.patch;patchdir=third_party/meowcaller \
