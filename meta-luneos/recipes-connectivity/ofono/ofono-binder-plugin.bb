@@ -6,6 +6,8 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=79d356a113871df9a6301458b5de257a"
 SECTION = "webos/support"
 
 DEPENDS = "ofono ofono-ext libgbinder libgbinder-radio glib-2.0 libglibutil libofonobinderpluginext"
+# LUNEOS=1: the display state comes from luna-displaymanager, not MCE
+DEPENDS += "luna-service2 json-c"
 
 inherit pkgconfig
 
@@ -39,22 +41,27 @@ SRC_URI = "git://github.com/mer-hybris/ofono-binder-plugin.git;branch=master;pro
            file://0027-unit-Test-what-the-device-monitors-take-the-display-.patch \
            file://0028-ofono-binder-Send-setupDataCall_1_6-s-safe_unions-as.patch \
            file://0029-unit-Test-how-setupDataCall-s-arguments-are-written.patch \
+           file://0030-ofono-binder-Keep-the-display-state-in-one-object-fo.patch \
+           file://0031-ofono-binder-Take-the-display-state-from-luna-displa.patch \
+           file://0032-unit-Test-the-luna-displaymanager-display-state.patch \
 "
 
 PV = "1.1.41"
-PR = "r5"
+PR = "r6"
 SRCREV = "204dea1593be95e60bad9f2c0282c35a9f8ba272"
 
 CFLAGS += "--sysroot=${RECIPE_SYSROOT} "
 LDFLAGS += "--sysroot=${RECIPE_SYSROOT} "
 
-EXTRA_OEMAKE = "KEEP_SYMBOLS=1 CROSS_COMPILE=${TARGET_PREFIX} CC='${CC}'"
+EXTRA_OEMAKE = "KEEP_SYMBOLS=1 LUNEOS=1 CROSS_COMPILE=${TARGET_PREFIX} CC='${CC}'"
 PARALLEL_MAKE = ""
 
 do_install() {
-    make install DESTDIR=${D}
+    # With LUNEOS=1 this also installs ofonod's luna-service2 role,
+    # permissions and manifest from LuneOS/sysbus.
+    make install DESTDIR=${D} LUNEOS=1
 }
 
-FILES:${PN} += "/usr/lib/ofono/plugins/binderplugin.so"
+FILES:${PN} += "/usr/lib/ofono/plugins/binderplugin.so ${datadir}/luna-service2"
 
 RDEPENDS:${PN} += "ofono-ext ofono-ext-plugin"

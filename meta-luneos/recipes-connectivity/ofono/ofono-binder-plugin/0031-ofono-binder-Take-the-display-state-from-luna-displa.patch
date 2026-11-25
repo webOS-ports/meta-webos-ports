@@ -1,0 +1,465 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [ofono-binder] Take the display state from
+ luna-displaymanager
+
+LuneOS has no MCE, so on LuneOS the display state was never known and
+the modem was always kept in its screen-on mode. With LUNEOS=1 the
+display state comes from luna-displaymanager instead: a subscription to
+luna://com.palm.display/status while com.palm.display is up. Its first
+reply has the state ("on", "dimmed" or "off"), later ones the event
+("displayOn", "displayDimmed" or "displayOff"); other events say
+nothing about on or off and are ignored. An error reply, or the service
+going away, makes the state unknown again, which counts as on.
+
+ofonod joins the luna bus as org.webosports.ofono.binder. The hub only
+lets it in with a role file for /usr/sbin/ofonod and that name, only
+lets it subscribe with the display.query permission, and reads both
+only when a manifest lists them. The three files are in LuneOS/sysbus,
+and make install puts them in place with LUNEOS=1. ofonod can start
+before the hub, so registering is tried again every 2 seconds until it
+works.
+
+Battery and charger states still come from MCE.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ .../org.webosports.ofono.binder.manifest.json |  10 +
+ .../org.webosports.ofono.binder.perm.json     |   3 +
+ .../org.webosports.ofono.binder.role.json     |  12 +
+ Makefile                                      |  35 ++-
+ src/binder_display.h                          |   5 +-
+ src/binder_display_luna.c                     | 280 ++++++++++++++++++
+ src/binder_display_p.h                        |   8 +-
+ 7 files changed, 346 insertions(+), 7 deletions(-)
+ create mode 100644 LuneOS/sysbus/org.webosports.ofono.binder.manifest.json
+ create mode 100644 LuneOS/sysbus/org.webosports.ofono.binder.perm.json
+ create mode 100644 LuneOS/sysbus/org.webosports.ofono.binder.role.json
+ create mode 100644 src/binder_display_luna.c
+
+diff --git a/LuneOS/sysbus/org.webosports.ofono.binder.manifest.json b/LuneOS/sysbus/org.webosports.ofono.binder.manifest.json
+new file mode 100644
+index 0000000..1182f6c
+--- /dev/null
++++ b/LuneOS/sysbus/org.webosports.ofono.binder.manifest.json
+@@ -0,0 +1,10 @@
++{
++    "id": "org.webosports.ofono.binder",
++    "version": "1.0.0",
++    "roleFiles": [
++        "/usr/share/luna-service2/roles.d/org.webosports.ofono.binder.role.json"
++    ],
++    "clientPermissionFiles": [
++        "/usr/share/luna-service2/client-permissions.d/org.webosports.ofono.binder.perm.json"
++    ]
++}
+diff --git a/LuneOS/sysbus/org.webosports.ofono.binder.perm.json b/LuneOS/sysbus/org.webosports.ofono.binder.perm.json
+new file mode 100644
+index 0000000..26bf01b
+--- /dev/null
++++ b/LuneOS/sysbus/org.webosports.ofono.binder.perm.json
+@@ -0,0 +1,3 @@
++{
++    "org.webosports.ofono.binder": ["display.query"]
++}
+diff --git a/LuneOS/sysbus/org.webosports.ofono.binder.role.json b/LuneOS/sysbus/org.webosports.ofono.binder.role.json
+new file mode 100644
+index 0000000..204f81c
+--- /dev/null
++++ b/LuneOS/sysbus/org.webosports.ofono.binder.role.json
+@@ -0,0 +1,12 @@
++{
++    "exeName": "/usr/sbin/ofonod",
++    "type": "regular",
++    "trustLevel": "oem",
++    "allowedNames": ["org.webosports.ofono.binder"],
++    "permissions": [
++        {
++            "service": "org.webosports.ofono.binder",
++            "outbound": ["com.palm.display"]
++        }
++    ]
++}
+diff --git a/Makefile b/Makefile
+index 6d9151f..9008ba2 100644
+--- a/Makefile
++++ b/Makefile
+@@ -17,6 +17,19 @@
+ # library are not in scope unless this object names it itself.
+ LDPKGS = ofono-ext libgbinder-radio libgbinder libmce-glib libglibutil gobject-2.0 glib-2.0
+ 
++#
++# LUNEOS=1 takes the display state from luna-displaymanager instead of
++# MCE, which LuneOS doesn't have. Battery and charger still come from
++# MCE.
++#
++
++ifeq ($(LUNEOS),1)
++LDPKGS += luna-service2 json-c
++DISPLAY_SRC = binder_display_luna.c
++else
++DISPLAY_SRC = binder_display_mce.c
++endif
++
+ PKGS = ofono $(LDPKGS)
+ 
+ #
+@@ -55,7 +68,7 @@ SRC = \
+   binder_devmon_ds.c \
+   binder_devmon_if.c \
+   binder_display.c \
+-  binder_display_mce.c \
++  $(DISPLAY_SRC) \
+   binder_gprs.c \
+   binder_gprs_context.c \
+   binder_ims.c \
+@@ -239,8 +252,28 @@ ABS_PLUGINDIR := $(shell echo /$(PLUGINDIR) | sed -r 's|/+|/|g')
+ INSTALL = install
+ INSTALL_PLUGIN_DIR = $(DESTDIR)$(ABS_PLUGINDIR)
+ 
++#
++# With LUNEOS=1 ofonod joins the luna bus to read the display state. The
++# hub lets it on only under a name its role file allows for ofonod, lets
++# it subscribe only with display.query, and reads those two files only
++# when a manifest lists them.
++#
++
++LS2_NAME = org.webosports.ofono.binder
++LS2_FILES = LuneOS/sysbus
++LS2_DIR = $(DESTDIR)/usr/share/luna-service2
++
+ install: $(INSTALL_PLUGIN_DIR)
+ 	$(INSTALL) -m 755 $(RELEASE_SO) $(INSTALL_PLUGIN_DIR)
++ifeq ($(LUNEOS),1)
++	$(INSTALL) -d $(LS2_DIR)/roles.d $(LS2_DIR)/client-permissions.d \
++	    $(LS2_DIR)/manifests.d
++	$(INSTALL) -m 644 $(LS2_FILES)/$(LS2_NAME).role.json $(LS2_DIR)/roles.d
++	$(INSTALL) -m 644 $(LS2_FILES)/$(LS2_NAME).perm.json \
++	    $(LS2_DIR)/client-permissions.d
++	$(INSTALL) -m 644 $(LS2_FILES)/$(LS2_NAME).manifest.json \
++	    $(LS2_DIR)/manifests.d
++endif
+ 
+ $(INSTALL_PLUGIN_DIR):
+ 	$(INSTALL) -d $@
+diff --git a/src/binder_display.h b/src/binder_display.h
+index d675229..273d03b 100644
+--- a/src/binder_display.h
++++ b/src/binder_display.h
+@@ -20,8 +20,9 @@
+ 
+ /*
+  * Whether the display is on, as far as the modem needs to know. A
+- * dimmed display counts as on. The state comes from MCE. Until MCE
+- * has given one, the display is taken as on.
++ * dimmed display counts as on. Where the state comes from is chosen
++ * at build time: MCE by default, luna-displaymanager with LUNEOS=1.
++ * Until that source has given a state, the display is taken as on.
+  */
+ 
+ typedef enum binder_display_property {
+diff --git a/src/binder_display_luna.c b/src/binder_display_luna.c
+new file mode 100644
+index 0000000..7662ebf
+--- /dev/null
++++ b/src/binder_display_luna.c
+@@ -0,0 +1,280 @@
++/*
++ *  oFono - Open Source Telephony - binder based adaptation
++ *
++ *  Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++ *  GNU General Public License for more details.
++ */
++
++/*
++ * The display state from luna-displaymanager, for LuneOS, which has no
++ * MCE. Subscribes to luna://com.palm.display/status while that service
++ * is up: the first reply has "state" ("on", "dimmed" or "off"), later
++ * ones an "event" ("displayOn", "displayDimmed" or "displayOff").
++ *
++ * The luna-service2 hub only lets a client in under a name that its
++ * role file allows for the executable, and only lets it call a method
++ * that its client permissions grant. LuneOS/sysbus has both for
++ * /usr/sbin/ofonod and BINDER_DISPLAY_LUNA_NAME (display.query), and
++ * the manifest that lists them; make install puts them in place.
++ */
++
++#include "binder_display_p.h"
++#include "binder_log.h"
++
++#include <luna-service2/lunaservice.h>
++#include <json-c/json.h>
++
++#include <string.h>
++
++#define BINDER_DISPLAY_LUNA_NAME "org.webosports.ofono.binder"
++#define BINDER_DISPLAY_LUNA_SERVICE "com.palm.display"
++#define BINDER_DISPLAY_LUNA_STATUS "luna://com.palm.display/status"
++#define BINDER_DISPLAY_LUNA_SUBSCRIBE "{\"subscribe\":true}"
++
++/* How long to wait before trying the hub again; the test changes it */
++static guint binder_display_luna_retry_ms = 2000;
++
++typedef enum binder_display_luna_state {
++    LUNA_DISPLAY_IGNORE,    /* Says nothing about on or off */
++    LUNA_DISPLAY_INVALID,   /* An error, the state is no longer known */
++    LUNA_DISPLAY_ON,
++    LUNA_DISPLAY_OFF
++} BINDER_DISPLAY_LUNA_STATE;
++
++struct binder_display_backend {
++    BinderDisplayBackendFunc callback;
++    void* user_data;
++    LSHandle* handle;
++    void* server_status;
++    LSMessageToken call;
++    guint retry_id;
++    gboolean register_failed;
++};
++
++static
++void
++binder_display_luna_error(
++    const char* what,
++    LSError* error)
++{
++    ofono_error("%s failed: %s", what, error->message ? error->message : "?");
++    LSErrorFree(error);
++}
++
++static
++void
++binder_display_luna_cancel_call(
++    BinderDisplayBackend* self)
++{
++    if (self->call != LSMESSAGE_TOKEN_INVALID) {
++        LSError error;
++
++        LSErrorInit(&error);
++        if (!LSCallCancel(self->handle, self->call, &error)) {
++            LSErrorFree(&error);
++        }
++        self->call = LSMESSAGE_TOKEN_INVALID;
++    }
++}
++
++static
++BINDER_DISPLAY_LUNA_STATE
++binder_display_luna_parse(
++    const char* payload)
++{
++    BINDER_DISPLAY_LUNA_STATE state = LUNA_DISPLAY_IGNORE;
++    json_object* root = payload ? json_tokener_parse(payload) : NULL;
++
++    if (root && json_object_is_type(root, json_type_object)) {
++        json_object* value;
++
++        if (json_object_object_get_ex(root, "returnValue", &value) &&
++            !json_object_get_boolean(value)) {
++            DBG("%s", payload);
++            state = LUNA_DISPLAY_INVALID;
++        } else if (json_object_object_get_ex(root, "state", &value) &&
++            json_object_is_type(value, json_type_string)) {
++            const char* s = json_object_get_string(value);
++
++            if (!strcmp(s, "off")) {
++                state = LUNA_DISPLAY_OFF;
++            } else if (!strcmp(s, "on") || !strcmp(s, "dimmed")) {
++                state = LUNA_DISPLAY_ON;
++            }
++        } else if (json_object_object_get_ex(root, "event", &value) &&
++            json_object_is_type(value, json_type_string)) {
++            const char* e = json_object_get_string(value);
++
++            if (!strcmp(e, "displayOff")) {
++                state = LUNA_DISPLAY_OFF;
++            } else if (!strcmp(e, "displayOn") ||
++                !strcmp(e, "displayDimmed")) {
++                state = LUNA_DISPLAY_ON;
++            }
++        }
++    }
++    if (root) {
++        json_object_put(root);
++    }
++    return state;
++}
++
++static
++bool
++binder_display_luna_status_cb(
++    LSHandle* handle,
++    LSMessage* message,
++    void* user_data)
++{
++    BinderDisplayBackend* self = user_data;
++
++    switch (binder_display_luna_parse(LSMessageGetPayload(message))) {
++    case LUNA_DISPLAY_ON:
++        self->callback(TRUE, TRUE, self->user_data);
++        break;
++    case LUNA_DISPLAY_OFF:
++        self->callback(TRUE, FALSE, self->user_data);
++        break;
++    case LUNA_DISPLAY_INVALID:
++        self->callback(FALSE, FALSE, self->user_data);
++        break;
++    case LUNA_DISPLAY_IGNORE:
++        break;
++    }
++    return true;
++}
++
++static
++bool
++binder_display_luna_server_status_cb(
++    LSHandle* handle,
++    const char* service,
++    bool connected,
++    void* user_data)
++{
++    BinderDisplayBackend* self = user_data;
++
++    DBG("%s %s", service, connected ? "is up" : "is gone");
++    binder_display_luna_cancel_call(self);
++    if (connected) {
++        LSError error;
++
++        LSErrorInit(&error);
++        if (!LSCall(handle, BINDER_DISPLAY_LUNA_STATUS,
++            BINDER_DISPLAY_LUNA_SUBSCRIBE, binder_display_luna_status_cb,
++            self, &self->call, &error)) {
++            self->call = LSMESSAGE_TOKEN_INVALID;
++            binder_display_luna_error("LSCall", &error);
++        }
++    } else {
++        self->callback(FALSE, FALSE, self->user_data);
++    }
++    return true;
++}
++
++static
++gboolean
++binder_display_luna_register(
++    BinderDisplayBackend* self)
++{
++    LSError error;
++    LSHandle* handle = NULL;
++
++    LSErrorInit(&error);
++    if (!LSRegister(BINDER_DISPLAY_LUNA_NAME, &handle, &error)) {
++        /* Most likely the hub isn't up yet, complain only once */
++        if (!self->register_failed) {
++            self->register_failed = TRUE;
++            binder_display_luna_error("LSRegister", &error);
++        } else {
++            LSErrorFree(&error);
++        }
++        return FALSE;
++    }
++    self->handle = handle;
++    if (!LSGmainContextAttach(handle, g_main_context_default(), &error)) {
++        binder_display_luna_error("LSGmainContextAttach", &error);
++    } else if (!LSRegisterServerStatusEx(handle, BINDER_DISPLAY_LUNA_SERVICE,
++        binder_display_luna_server_status_cb, self, &self->server_status,
++        &error)) {
++        self->server_status = NULL;
++        binder_display_luna_error("LSRegisterServerStatusEx", &error);
++    } else {
++        DBG("Watching %s", BINDER_DISPLAY_LUNA_SERVICE);
++    }
++    return TRUE;
++}
++
++static
++gboolean
++binder_display_luna_retry(
++    gpointer user_data)
++{
++    BinderDisplayBackend* self = user_data;
++
++    if (binder_display_luna_register(self)) {
++        self->retry_id = 0;
++        return G_SOURCE_REMOVE;
++    }
++    return G_SOURCE_CONTINUE;
++}
++
++BinderDisplayBackend*
++binder_display_backend_new(
++    BinderDisplayBackendFunc callback,
++    void* user_data)
++{
++    BinderDisplayBackend* self = g_new0(BinderDisplayBackend, 1);
++
++    self->callback = callback;
++    self->user_data = user_data;
++    self->call = LSMESSAGE_TOKEN_INVALID;
++    if (!binder_display_luna_register(self)) {
++        self->retry_id = g_timeout_add(binder_display_luna_retry_ms,
++            binder_display_luna_retry, self);
++    }
++    return self;
++}
++
++void
++binder_display_backend_free(
++    BinderDisplayBackend* self)
++{
++    if (self) {
++        if (self->retry_id) {
++            g_source_remove(self->retry_id);
++        }
++        if (self->handle) {
++            LSError error;
++
++            binder_display_luna_cancel_call(self);
++            LSErrorInit(&error);
++            if (self->server_status &&
++                !LSCancelServerStatus(self->handle, self->server_status,
++                &error)) {
++                LSErrorFree(&error);
++                LSErrorInit(&error);
++            }
++            if (!LSUnregister(self->handle, &error)) {
++                LSErrorFree(&error);
++            }
++        }
++        g_free(self);
++    }
++}
++
++/*
++ * Local Variables:
++ * mode: C
++ * c-basic-offset: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+diff --git a/src/binder_display_p.h b/src/binder_display_p.h
+index 27b817f..9b33ab7 100644
+--- a/src/binder_display_p.h
++++ b/src/binder_display_p.h
+@@ -19,10 +19,10 @@
+ #include "binder_display.h"
+ 
+ /*
+- * Where the display state comes from: binder_display_mce.c. A backend
+- * calls its callback each time it learns something; valid is FALSE
+- * while it has no state, for example before its source has answered or
+- * after the source is gone.
++ * Where the display state comes from: binder_display_mce.c or, with
++ * LUNEOS=1, binder_display_luna.c. A backend calls its callback each
++ * time it learns something; valid is FALSE while it has no state, for
++ * example before its source has answered or after the source is gone.
+  * The callback may be called from binder_display_backend_new().
+  */
+ 

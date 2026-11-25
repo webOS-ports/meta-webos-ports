@@ -1,0 +1,1373 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [ofono-binder] Keep the display state in one object for both
+ monitors
+
+The two device monitors each read MCE's display state through
+libmce-glib and took a state that isn't valid as on. Give them one
+shared BinderDisplay instead, which has that rule and gets its state
+from a backend. The backend here is MCE, as before; with it the
+monitors behave as they did. This is so that the state can come from
+somewhere else on a system without MCE.
+
+unit_display replaces unit_devmon, which tested the two helpers that
+are now the display object's rule.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ Makefile                          |   3 +
+ src/binder_devmon_ds.c            |  45 ++---
+ src/binder_devmon_if.c            |  45 ++---
+ src/binder_display.c              | 175 ++++++++++++++++++
+ src/binder_display.h              |  85 +++++++++
+ src/binder_display_mce.c          |  84 +++++++++
+ src/binder_display_p.h            |  57 ++++++
+ src/binder_types.h                |   1 +
+ unit/Makefile                     |   2 +-
+ unit/unit_devmon/Makefile         |   8 -
+ unit/unit_devmon/unit_devmon.c    | 215 ----------------------
+ unit/unit_devmon/unit_devmon_ds.c |  38 ----
+ unit/unit_display/Makefile        |   8 +
+ unit/unit_display/unit_display.c  | 295 ++++++++++++++++++++++++++++++
+ 14 files changed, 743 insertions(+), 318 deletions(-)
+ create mode 100644 src/binder_display.c
+ create mode 100644 src/binder_display.h
+ create mode 100644 src/binder_display_mce.c
+ create mode 100644 src/binder_display_p.h
+ delete mode 100644 unit/unit_devmon/Makefile
+ delete mode 100644 unit/unit_devmon/unit_devmon.c
+ delete mode 100644 unit/unit_devmon/unit_devmon_ds.c
+ create mode 100644 unit/unit_display/Makefile
+ create mode 100644 unit/unit_display/unit_display.c
+
+diff --git a/Makefile b/Makefile
+index 5fa0bec..6d9151f 100644
+--- a/Makefile
++++ b/Makefile
+@@ -16,6 +16,7 @@
+ # with RTLD_NOW rather than RTLD_GLOBAL, so symbols from the extension
+ # library are not in scope unless this object names it itself.
+ LDPKGS = ofono-ext libgbinder-radio libgbinder libmce-glib libglibutil gobject-2.0 glib-2.0
++
+ PKGS = ofono $(LDPKGS)
+ 
+ #
+@@ -53,6 +54,8 @@ SRC = \
+   binder_devmon_combine.c \
+   binder_devmon_ds.c \
+   binder_devmon_if.c \
++  binder_display.c \
++  binder_display_mce.c \
+   binder_gprs.c \
+   binder_gprs_context.c \
+   binder_ims.c \
+diff --git a/src/binder_devmon_ds.c b/src/binder_devmon_ds.c
+index 348b9d8..9b96096 100644
+--- a/src/binder_devmon_ds.c
++++ b/src/binder_devmon_ds.c
+@@ -15,13 +15,13 @@
+  */
+ 
+ #include "binder_devmon.h"
++#include "binder_display.h"
+ #include "binder_connman.h"
+ #include "binder_log.h"
+ #include "binder_util.h"
+ 
+ #include <mce_battery.h>
+ #include <mce_charger.h>
+-#include <mce_display.h>
+ 
+ #include <radio_client.h>
+ #include <radio_request.h>
+@@ -44,8 +44,7 @@ enum binder_devmon_ds_charger_event {
+ };
+ 
+ enum binder_devmon_ds_display_event {
+-    DISPLAY_EVENT_VALID,
+-    DISPLAY_EVENT_STATE,
++    DISPLAY_EVENT_ON,
+     DISPLAY_EVENT_COUNT
+ };
+ 
+@@ -65,7 +64,7 @@ typedef struct binder_devmon_ds {
+     BinderConnman* connman;
+     MceBattery* battery;
+     MceCharger* charger;
+-    MceDisplay* display;
++    BinderDisplay* display;
+     int cell_info_interval_short_ms;
+     int cell_info_interval_long_ms;
+ } DevMon;
+@@ -77,7 +76,7 @@ typedef struct binder_devmon_ds_io {
+     const DevMonApi* api;
+     MceBattery* battery;
+     MceCharger* charger;
+-    MceDisplay* display;
++    BinderDisplay* display;
+     RadioClient* modem_client;
+     RadioRequest* low_data_req;
+     RadioRequest* charging_req;
+@@ -122,15 +121,6 @@ static inline gboolean binder_devmon_ds_battery_ok(MceBattery* battery)
+ static inline gboolean binder_devmon_ds_charging(MceCharger* charger)
+     { return charger->valid && charger->state == MCE_CHARGER_ON; }
+ 
+-/*
+- * Without MCE (LuneOS has none) the display state never becomes valid.
+- * Taking that as "off" kept the modem in its screen-off mode for good,
+- * and a RIL that honours it stops measuring the signal. Until MCE says
+- * otherwise, the display is on.
+- */
+-static inline gboolean binder_devmon_ds_display_on(MceDisplay* display)
+-    { return !display->valid || display->state != MCE_DISPLAY_STATE_OFF; }
+-
+ static
+ void
+ binder_devmon_ds_io_low_data_state_sent(
+@@ -239,7 +229,7 @@ binder_devmon_ds_io_update_low_data(
+     const gboolean low_data =
+         !binder_devmon_ds_tethering_on(self->connman) &&
+         !binder_devmon_ds_charging(self->charger) &&
+-        !binder_devmon_ds_display_on(self->display);
++        !self->display->on;
+ 
+     if (self->low_data != low_data) {
+         self->low_data = low_data;
+@@ -259,7 +249,7 @@ binder_devmon_ds_io_set_cell_info_update_interval(
+     DevMonIo* self)
+ {
+     ofono_slot_set_cell_info_update_interval(self->slot, self,
+-        (binder_devmon_ds_display_on(self->display) &&
++        (self->display->on &&
+             (binder_devmon_ds_charging(self->charger) ||
+                 binder_devmon_ds_battery_ok(self->battery))) ?
+                     self->cell_info_interval_short_ms :
+@@ -288,7 +278,8 @@ binder_devmon_ds_io_battery_cb(
+ static
+ void
+ binder_devmon_ds_io_display_cb(
+-    MceDisplay* display,
++    BinderDisplay* display,
++    BINDER_DISPLAY_PROPERTY property,
+     void* user_data)
+ {
+     DevMonIo* self = user_data;
+@@ -326,8 +317,8 @@ binder_devmon_ds_io_free(
+     mce_charger_remove_all_handlers(self->charger, self->charger_event_id);
+     mce_charger_unref(self->charger);
+ 
+-    mce_display_remove_all_handlers(self->display, self->display_event_id);
+-    mce_display_unref(self->display);
++    binder_display_remove_all_handlers(self->display, self->display_event_id);
++    binder_display_unref(self->display);
+ 
+     radio_request_drop(self->low_data_req);
+     radio_request_drop(self->charging_req);
+@@ -383,13 +374,11 @@ binder_devmon_ds_start_io(
+         mce_charger_add_state_changed_handler(self->charger,
+             binder_devmon_ds_io_charger_cb, self);
+ 
+-    self->display = mce_display_ref(ds->display);
+-    self->display_event_id[DISPLAY_EVENT_VALID] =
+-        mce_display_add_valid_changed_handler(self->display,
+-            binder_devmon_ds_io_display_cb, self);
+-    self->display_event_id[DISPLAY_EVENT_STATE] =
+-        mce_display_add_state_changed_handler(self->display,
+-            binder_devmon_ds_io_display_cb, self);
++    self->display = binder_display_ref(ds->display);
++    self->display_event_id[DISPLAY_EVENT_ON] =
++        binder_display_add_property_handler(self->display,
++            BINDER_DISPLAY_PROPERTY_ON, binder_devmon_ds_io_display_cb,
++            self);
+ 
+     self->cell_info_interval_short_ms = ds->cell_info_interval_short_ms;
+     self->cell_info_interval_long_ms = ds->cell_info_interval_long_ms;
+@@ -410,7 +399,7 @@ binder_devmon_ds_free(
+     binder_connman_unref(self->connman);
+     mce_battery_unref(self->battery);
+     mce_charger_unref(self->charger);
+-    mce_display_unref(self->display);
++    binder_display_unref(self->display);
+     g_free(self);
+ }
+ 
+@@ -429,7 +418,7 @@ binder_devmon_ds_new(
+     self->connman = binder_connman_new();
+     self->battery = mce_battery_new();
+     self->charger = mce_charger_new();
+-    self->display = mce_display_new();
++    self->display = binder_display_new();
+     self->cell_info_interval_short_ms = config->cell_info_interval_short_ms;
+     self->cell_info_interval_long_ms = config->cell_info_interval_long_ms;
+     return &self->pub;
+diff --git a/src/binder_devmon_if.c b/src/binder_devmon_if.c
+index 97526c0..d98afee 100644
+--- a/src/binder_devmon_if.c
++++ b/src/binder_devmon_if.c
+@@ -15,12 +15,12 @@
+  */
+ 
+ #include "binder_devmon.h"
++#include "binder_display.h"
+ #include "binder_log.h"
+ #include "binder_util.h"
+ 
+ #include <mce_battery.h>
+ #include <mce_charger.h>
+-#include <mce_display.h>
+ 
+ #include <radio_client.h>
+ #include <radio_request.h>
+@@ -43,8 +43,7 @@ enum binder_devmon_if_charger_event {
+ };
+ 
+ enum binder_devmon_if_display_event {
+-    DISPLAY_EVENT_VALID,
+-    DISPLAY_EVENT_STATE,
++    DISPLAY_EVENT_ON,
+     DISPLAY_EVENT_COUNT
+ };
+ 
+@@ -59,7 +58,7 @@ typedef struct binder_devmon_if {
+     BinderDevmon pub;
+     MceBattery* battery;
+     MceCharger* charger;
+-    MceDisplay* display;
++    BinderDisplay* display;
+     int cell_info_interval_short_ms;
+     int cell_info_interval_long_ms;
+ } DevMon;
+@@ -70,7 +69,7 @@ typedef struct binder_devmon_if_io {
+     const DevMonApi* api;
+     MceBattery* battery;
+     MceCharger* charger;
+-    MceDisplay* display;
++    BinderDisplay* display;
+     RadioClient* network_client;
+     RadioRequest* req;
+     gboolean display_on;
+@@ -133,15 +132,6 @@ static inline gboolean binder_devmon_if_battery_ok(MceBattery* battery)
+ static inline gboolean binder_devmon_if_charging(MceCharger* charger)
+     { return charger->valid && charger->state == MCE_CHARGER_ON; }
+ 
+-/*
+- * Without MCE (LuneOS has none) the display state never becomes valid.
+- * Taking that as "off" kept the modem in its screen-off mode for good,
+- * and a RIL that honours it stops measuring the signal. Until MCE says
+- * otherwise, the display is on.
+- */
+-static gboolean binder_devmon_if_display_on(MceDisplay* display)
+-    { return !display->valid || display->state != MCE_DISPLAY_STATE_OFF; }
+-
+ static
+ void
+ binder_devmon_if_io_indication_filter_sent(
+@@ -239,11 +229,12 @@ void binder_devmon_if_io_charger_cb(
+ static
+ void
+ binder_devmon_if_io_display_cb(
+-    MceDisplay* display,
++    BinderDisplay* display,
++    BINDER_DISPLAY_PROPERTY property,
+     void* user_data)
+ {
+     DevMonIo* self = user_data;
+-    const gboolean display_on = binder_devmon_if_display_on(display);
++    const gboolean display_on = display->on;
+ 
+     if (self->display_on != display_on) {
+         self->display_on = display_on;
+@@ -265,8 +256,8 @@ binder_devmon_if_io_free(
+     mce_charger_remove_all_handlers(self->charger, self->charger_event_id);
+     mce_charger_unref(self->charger);
+ 
+-    mce_display_remove_all_handlers(self->display, self->display_event_id);
+-    mce_display_unref(self->display);
++    binder_display_remove_all_handlers(self->display, self->display_event_id);
++    binder_display_unref(self->display);
+ 
+     radio_request_drop(self->req);
+     radio_client_unref(self->network_client);
+@@ -316,14 +307,12 @@ binder_devmon_if_start_io(
+         mce_charger_add_state_changed_handler(self->charger,
+             binder_devmon_if_io_charger_cb, self);
+ 
+-    self->display = mce_display_ref(impl->display);
+-    self->display_on = binder_devmon_if_display_on(self->display);
+-    self->display_event_id[DISPLAY_EVENT_VALID] =
+-        mce_display_add_valid_changed_handler(self->display,
+-            binder_devmon_if_io_display_cb, self);
+-    self->display_event_id[DISPLAY_EVENT_STATE] =
+-        mce_display_add_state_changed_handler(self->display,
+-            binder_devmon_if_io_display_cb, self);
++    self->display = binder_display_ref(impl->display);
++    self->display_on = self->display->on;
++    self->display_event_id[DISPLAY_EVENT_ON] =
++        binder_display_add_property_handler(self->display,
++            BINDER_DISPLAY_PROPERTY_ON, binder_devmon_if_io_display_cb,
++            self);
+ 
+     self->cell_info_interval_short_ms = impl->cell_info_interval_short_ms;
+     self->cell_info_interval_long_ms = impl->cell_info_interval_long_ms;
+@@ -342,7 +331,7 @@ binder_devmon_if_free(
+ 
+     mce_battery_unref(self->battery);
+     mce_charger_unref(self->charger);
+-    mce_display_unref(self->display);
++    binder_display_unref(self->display);
+     g_free(self);
+ }
+ 
+@@ -360,7 +349,7 @@ binder_devmon_if_new(
+     self->pub.start_io = binder_devmon_if_start_io;
+     self->battery = mce_battery_new();
+     self->charger = mce_charger_new();
+-    self->display = mce_display_new();
++    self->display = binder_display_new();
+     self->cell_info_interval_short_ms = config->cell_info_interval_short_ms;
+     self->cell_info_interval_long_ms = config->cell_info_interval_long_ms;
+     return &self->pub;
+diff --git a/src/binder_display.c b/src/binder_display.c
+new file mode 100644
+index 0000000..9f864b0
+--- /dev/null
++++ b/src/binder_display.c
+@@ -0,0 +1,175 @@
++/*
++ *  oFono - Open Source Telephony - binder based adaptation
++ *
++ *  Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++ *  GNU General Public License for more details.
++ */
++
++#include "binder_display_p.h"
++#include "binder_base.h"
++#include "binder_log.h"
++
++#include <gutil_misc.h>
++
++typedef struct binder_display_object {
++    BinderBase base;
++    BinderDisplay pub;
++    BinderDisplayBackend* backend;
++} BinderDisplayObject;
++
++typedef BinderBaseClass BinderDisplayObjectClass;
++GType binder_display_object_get_type(void) BINDER_INTERNAL;
++G_DEFINE_TYPE(BinderDisplayObject, binder_display_object, BINDER_TYPE_BASE)
++#define PARENT_CLASS binder_display_object_parent_class
++#define THIS_TYPE binder_display_object_get_type()
++#define THIS(obj) G_TYPE_CHECK_INSTANCE_CAST(obj,THIS_TYPE,BinderDisplayObject)
++
++BINDER_BASE_ASSERT_COUNT(BINDER_DISPLAY_PROPERTY_COUNT);
++
++/* All slots share one display */
++static BinderDisplayObject* binder_display_instance = NULL;
++
++/* There is only one, no need to cast */
++static inline BinderDisplayObject* binder_display_cast(BinderDisplay* d)
++    { return (d && binder_display_instance &&
++        d == &binder_display_instance->pub) ? binder_display_instance : NULL; }
++
++static
++void
++binder_display_backend_cb(
++    gboolean valid,
++    gboolean on,
++    void* user_data)
++{
++    BinderDisplayObject* self = THIS(user_data);
++
++    /*
++     * A display state that isn't known is taken as on. Taking it as
++     * off would put the modem into its screen-off mode until the state
++     * becomes known, which without a source (no MCE on LuneOS) is for
++     * good, and a RIL that honours that stops measuring the signal.
++     */
++    const gboolean display_on = !valid || on;
++
++    if (self->pub.on != display_on) {
++        self->pub.on = display_on;
++        DBG("Display %s%s", display_on ? "on" : "off",
++            valid ? "" : " (state unknown)");
++        binder_base_emit_property_change(&self->base,
++            BINDER_DISPLAY_PROPERTY_ON);
++    }
++}
++
++/*==========================================================================*
++ * API
++ *==========================================================================*/
++
++BinderDisplay*
++binder_display_new(
++    void)
++{
++    if (binder_display_instance) {
++        g_object_ref(binder_display_instance);
++    } else {
++        BinderDisplayObject* self = g_object_new(THIS_TYPE, NULL);
++
++        binder_display_instance = self;
++        g_object_add_weak_pointer(G_OBJECT(self),
++            (gpointer*)(&binder_display_instance));
++        self->backend = binder_display_backend_new(binder_display_backend_cb,
++            self);
++    }
++    return &binder_display_instance->pub;
++}
++
++BinderDisplay*
++binder_display_ref(
++    BinderDisplay* display)
++{
++    BinderDisplayObject* self = binder_display_cast(display);
++
++    if (G_LIKELY(self)) {
++        g_object_ref(self);
++        return display;
++    } else {
++        return NULL;
++    }
++}
++
++void
++binder_display_unref(
++    BinderDisplay* display)
++{
++    gutil_object_unref(binder_display_cast(display));
++}
++
++gulong
++binder_display_add_property_handler(
++    BinderDisplay* display,
++    BINDER_DISPLAY_PROPERTY property,
++    BinderDisplayPropertyFunc callback,
++    void* user_data)
++{
++    BinderDisplayObject* self = binder_display_cast(display);
++
++    return G_LIKELY(self) ? binder_base_add_property_handler(&self->base,
++        property, G_CALLBACK(callback), user_data) : 0;
++}
++
++void
++binder_display_remove_handlers(
++    BinderDisplay* display,
++    gulong* ids,
++    int count)
++{
++    gutil_disconnect_handlers(binder_display_cast(display), ids, count);
++}
++
++/*==========================================================================*
++ * Internals
++ *==========================================================================*/
++
++static
++void
++binder_display_object_init(
++    BinderDisplayObject* self)
++{
++    self->pub.on = TRUE;
++}
++
++static
++void
++binder_display_object_finalize(
++    GObject* object)
++{
++    BinderDisplayObject* self = THIS(object);
++
++    binder_display_backend_free(self->backend);
++    G_OBJECT_CLASS(PARENT_CLASS)->finalize(object);
++}
++
++static
++void
++binder_display_object_class_init(
++    BinderDisplayObjectClass* klass)
++{
++    G_OBJECT_CLASS(klass)->finalize = binder_display_object_finalize;
++    BINDER_BASE_CLASS(klass)->public_offset =
++        G_STRUCT_OFFSET(BinderDisplayObject, pub);
++}
++
++/*
++ * Local Variables:
++ * mode: C
++ * c-basic-offset: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+diff --git a/src/binder_display.h b/src/binder_display.h
+new file mode 100644
+index 0000000..d675229
+--- /dev/null
++++ b/src/binder_display.h
+@@ -0,0 +1,85 @@
++/*
++ *  oFono - Open Source Telephony - binder based adaptation
++ *
++ *  Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++ *  GNU General Public License for more details.
++ */
++
++#ifndef BINDER_DISPLAY_H
++#define BINDER_DISPLAY_H
++
++#include "binder_types.h"
++
++/*
++ * Whether the display is on, as far as the modem needs to know. A
++ * dimmed display counts as on. The state comes from MCE. Until MCE
++ * has given one, the display is taken as on.
++ */
++
++typedef enum binder_display_property {
++    BINDER_DISPLAY_PROPERTY_ANY,
++    BINDER_DISPLAY_PROPERTY_ON,
++    BINDER_DISPLAY_PROPERTY_COUNT
++} BINDER_DISPLAY_PROPERTY;
++
++struct binder_display {
++    gboolean on;
++};
++
++typedef
++void
++(*BinderDisplayPropertyFunc)(
++    BinderDisplay* display,
++    BINDER_DISPLAY_PROPERTY property,
++    void* user_data);
++
++BinderDisplay*
++binder_display_new(
++    void)
++    BINDER_INTERNAL;
++
++BinderDisplay*
++binder_display_ref(
++    BinderDisplay* display)
++    BINDER_INTERNAL;
++
++void
++binder_display_unref(
++    BinderDisplay* display)
++    BINDER_INTERNAL;
++
++gulong
++binder_display_add_property_handler(
++    BinderDisplay* display,
++    BINDER_DISPLAY_PROPERTY property,
++    BinderDisplayPropertyFunc callback,
++    void* user_data)
++    BINDER_INTERNAL;
++
++void
++binder_display_remove_handlers(
++    BinderDisplay* display,
++    gulong* ids,
++    int count)
++    BINDER_INTERNAL;
++
++#define binder_display_remove_all_handlers(display, ids) \
++    binder_display_remove_handlers(display, ids, G_N_ELEMENTS(ids))
++
++#endif /* BINDER_DISPLAY_H */
++
++/*
++ * Local Variables:
++ * mode: C
++ * c-basic-offset: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+diff --git a/src/binder_display_mce.c b/src/binder_display_mce.c
+new file mode 100644
+index 0000000..2b3f583
+--- /dev/null
++++ b/src/binder_display_mce.c
+@@ -0,0 +1,84 @@
++/*
++ *  oFono - Open Source Telephony - binder based adaptation
++ *
++ *  Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++ *  GNU General Public License for more details.
++ */
++
++/* The display state from MCE (com.nokia.mce), through libmce-glib */
++
++#include "binder_display_p.h"
++
++#include <mce_display.h>
++
++enum binder_display_mce_event {
++    MCE_EVENT_VALID,
++    MCE_EVENT_STATE,
++    MCE_EVENT_COUNT
++};
++
++struct binder_display_backend {
++    MceDisplay* display;
++    gulong event_id[MCE_EVENT_COUNT];
++    BinderDisplayBackendFunc callback;
++    void* user_data;
++};
++
++static
++void
++binder_display_mce_changed(
++    MceDisplay* display,
++    void* user_data)
++{
++    BinderDisplayBackend* self = user_data;
++
++    self->callback(display->valid, display->state != MCE_DISPLAY_STATE_OFF,
++        self->user_data);
++}
++
++BinderDisplayBackend*
++binder_display_backend_new(
++    BinderDisplayBackendFunc callback,
++    void* user_data)
++{
++    BinderDisplayBackend* self = g_new0(BinderDisplayBackend, 1);
++
++    self->callback = callback;
++    self->user_data = user_data;
++    self->display = mce_display_new();
++    self->event_id[MCE_EVENT_VALID] =
++        mce_display_add_valid_changed_handler(self->display,
++            binder_display_mce_changed, self);
++    self->event_id[MCE_EVENT_STATE] =
++        mce_display_add_state_changed_handler(self->display,
++            binder_display_mce_changed, self);
++    binder_display_mce_changed(self->display, self);
++    return self;
++}
++
++void
++binder_display_backend_free(
++    BinderDisplayBackend* self)
++{
++    if (self) {
++        mce_display_remove_all_handlers(self->display, self->event_id);
++        mce_display_unref(self->display);
++        g_free(self);
++    }
++}
++
++/*
++ * Local Variables:
++ * mode: C
++ * c-basic-offset: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+diff --git a/src/binder_display_p.h b/src/binder_display_p.h
+new file mode 100644
+index 0000000..27b817f
+--- /dev/null
++++ b/src/binder_display_p.h
+@@ -0,0 +1,57 @@
++/*
++ *  oFono - Open Source Telephony - binder based adaptation
++ *
++ *  Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++ *  GNU General Public License for more details.
++ */
++
++#ifndef BINDER_DISPLAY_PRIVATE_H
++#define BINDER_DISPLAY_PRIVATE_H
++
++#include "binder_display.h"
++
++/*
++ * Where the display state comes from: binder_display_mce.c. A backend
++ * calls its callback each time it learns something; valid is FALSE
++ * while it has no state, for example before its source has answered or
++ * after the source is gone.
++ * The callback may be called from binder_display_backend_new().
++ */
++
++typedef struct binder_display_backend BinderDisplayBackend;
++
++typedef
++void
++(*BinderDisplayBackendFunc)(
++    gboolean valid,
++    gboolean on,
++    void* user_data);
++
++BinderDisplayBackend*
++binder_display_backend_new(
++    BinderDisplayBackendFunc callback,
++    void* user_data)
++    BINDER_INTERNAL;
++
++void
++binder_display_backend_free(
++    BinderDisplayBackend* backend)
++    BINDER_INTERNAL;
++
++#endif /* BINDER_DISPLAY_PRIVATE_H */
++
++/*
++ * Local Variables:
++ * mode: C
++ * c-basic-offset: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
+diff --git a/src/binder_types.h b/src/binder_types.h
+index 484aae5..772f7d3 100644
+--- a/src/binder_types.h
++++ b/src/binder_types.h
+@@ -24,6 +24,7 @@
+ typedef struct binder_data BinderData;
+ typedef struct binder_data_manager BinderDataManager;
+ typedef struct binder_devmon BinderDevmon;
++typedef struct binder_display BinderDisplay;
+ typedef struct binder_ims_reg BinderImsReg;
+ typedef struct binder_logger BinderLogger;
+ typedef struct binder_modem BinderModem;
+diff --git a/unit/Makefile b/unit/Makefile
+index 9d98b89..32788ec 100644
+--- a/unit/Makefile
++++ b/unit/Makefile
+@@ -7,7 +7,7 @@ all:
+ 	@$(MAKE) -C unit_base $*
+ 	@$(MAKE) -C unit_call_settings $*
+ 	@$(MAKE) -C unit_data $*
+-	@$(MAKE) -C unit_devmon $*
++	@$(MAKE) -C unit_display $*
+ 	@$(MAKE) -C unit_ext_call $*
+ 	@$(MAKE) -C unit_ext_ims $*
+ 	@$(MAKE) -C unit_ext_plugin $*
+diff --git a/unit/unit_devmon/Makefile b/unit/unit_devmon/Makefile
+deleted file mode 100644
+index d309031..0000000
+--- a/unit/unit_devmon/Makefile
++++ /dev/null
+@@ -1,8 +0,0 @@
+-# -*- Mode: makefile-gmake -*-
+-
+-LINK_PKGS += libgbinder libgbinder-radio libmce-glib
+-
+-EXE = unit_devmon
+-SRC = unit_devmon.c unit_devmon_ds.c
+-
+-include ../common/Makefile
+diff --git a/unit/unit_devmon/unit_devmon.c b/unit/unit_devmon/unit_devmon.c
+deleted file mode 100644
+index a56419e..0000000
+--- a/unit/unit_devmon/unit_devmon.c
++++ /dev/null
+@@ -1,215 +0,0 @@
+-/*
+- *  oFono - Open Source Telephony - binder based adaptation
+- *
+- *  Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
+- *
+- *  This program is free software; you can redistribute it and/or modify
+- *  it under the terms of the GNU General Public License version 2 as
+- *  published by the Free Software Foundation.
+- *
+- *  This program is distributed in the hope that it will be useful,
+- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- *  GNU General Public License for more details.
+- */
+-
+-/*
+- * The device monitors put the modem into its screen-off mode (fewer
+- * indications, low data expected) while the display is off. What they
+- * know about the display comes from MCE. Without MCE the display state
+- * never becomes valid, and that must count as on: a modem left in
+- * screen-off mode for good may stop reporting the signal strength.
+- */
+-
+-#include "binder_devmon_if.c"
+-#include "binder_connman.h"
+-
+-#include <gutil_log.h>
+-
+-GLOG_MODULE_DEFINE("unit_devmon");
+-
+-#define TEST_(t) "/devmon/" t
+-
+-/*==========================================================================*
+- * Stubs for what the monitors link against but the tests don't run
+- *==========================================================================*/
+-
+-void
+-ofono_debug(
+-    const char* format,
+-    ...)
+-{
+-}
+-
+-void
+-ofono_warn(
+-    const char* format,
+-    ...)
+-{
+-}
+-
+-void
+-ofono_error(
+-    const char* format,
+-    ...)
+-{
+-}
+-
+-void
+-ofono_encode_hex(
+-    const void* in,
+-    unsigned int n,
+-    char out[])
+-{
+-    out[0] = 0;
+-}
+-
+-enum ofono_radio_access_mode
+-ofono_radio_access_max_mode(
+-    enum ofono_radio_access_mode mask)
+-{
+-    return mask;
+-}
+-
+-struct ofono_slot*
+-ofono_slot_ref(
+-    struct ofono_slot* s)
+-{
+-    return s;
+-}
+-
+-void
+-ofono_slot_unref(
+-    struct ofono_slot* s)
+-{
+-}
+-
+-void
+-ofono_slot_set_cell_info_update_interval(
+-    struct ofono_slot* s,
+-    void* tag,
+-    int interval_ms)
+-{
+-}
+-
+-void
+-ofono_slot_drop_cell_info_requests(
+-    struct ofono_slot* s,
+-    void* tag)
+-{
+-}
+-
+-BinderConnman*
+-binder_connman_new(
+-    void)
+-{
+-    return NULL;
+-}
+-
+-BinderConnman*
+-binder_connman_ref(
+-    BinderConnman* connman)
+-{
+-    return connman;
+-}
+-
+-void
+-binder_connman_unref(
+-    BinderConnman* connman)
+-{
+-}
+-
+-gulong
+-binder_connman_add_property_changed_handler(
+-    BinderConnman* connman,
+-    BINDER_CONNMAN_PROPERTY property,
+-    BinderConnmanPropertyFunc fn,
+-    void* user_data)
+-{
+-    return 0;
+-}
+-
+-void
+-binder_connman_remove_handlers(
+-    BinderConnman* connman,
+-    gulong* ids,
+-    int n)
+-{
+-}
+-
+-gboolean test_devmon_ds_display_on(MceDisplay* display);
+-
+-static
+-void
+-test_display(
+-    MceDisplay* display,
+-    gboolean valid,
+-    MCE_DISPLAY_STATE state)
+-{
+-    memset(display, 0, sizeof(*display));
+-    display->valid = valid;
+-    display->state = state;
+-}
+-
+-static
+-void
+-test_display_on(
+-    gboolean (*display_on)(MceDisplay*))
+-{
+-    MceDisplay display;
+-
+-    /* No MCE */
+-    test_display(&display, FALSE, MCE_DISPLAY_STATE_OFF);
+-    g_assert(display_on(&display));
+-    /* MCE says the display is off */
+-    test_display(&display, TRUE, MCE_DISPLAY_STATE_OFF);
+-    g_assert(!display_on(&display));
+-    /* On, or dimmed */
+-    test_display(&display, TRUE, MCE_DISPLAY_STATE_ON);
+-    g_assert(display_on(&display));
+-    test_display(&display, TRUE, MCE_DISPLAY_STATE_DIM);
+-    g_assert(display_on(&display));
+-}
+-
+-static
+-gboolean
+-test_devmon_if_display_on(
+-    MceDisplay* display)
+-{
+-    return binder_devmon_if_display_on(display);
+-}
+-
+-static
+-void
+-test_if(
+-    void)
+-{
+-    test_display_on(test_devmon_if_display_on);
+-}
+-
+-static
+-void
+-test_ds(
+-    void)
+-{
+-    test_display_on(test_devmon_ds_display_on);
+-}
+-
+-int main(int argc, char* argv[])
+-{
+-    g_test_init(&argc, &argv, NULL);
+-    gutil_log_default.level = g_test_verbose() ?
+-        GLOG_LEVEL_VERBOSE : GLOG_LEVEL_NONE;
+-    gutil_log_timestamp = FALSE;
+-    g_test_add_func(TEST_("if"), test_if);
+-    g_test_add_func(TEST_("ds"), test_ds);
+-    return g_test_run();
+-}
+-
+-/*
+- * Local Variables:
+- * mode: C
+- * c-basic-offset: 4
+- * indent-tabs-mode: nil
+- * End:
+- */
+diff --git a/unit/unit_devmon/unit_devmon_ds.c b/unit/unit_devmon/unit_devmon_ds.c
+deleted file mode 100644
+index d6701c8..0000000
+--- a/unit/unit_devmon/unit_devmon_ds.c
++++ /dev/null
+@@ -1,38 +0,0 @@
+-/*
+- *  oFono - Open Source Telephony - binder based adaptation
+- *
+- *  Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
+- *
+- *  This program is free software; you can redistribute it and/or modify
+- *  it under the terms of the GNU General Public License version 2 as
+- *  published by the Free Software Foundation.
+- *
+- *  This program is distributed in the hope that it will be useful,
+- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- *  GNU General Public License for more details.
+- */
+-
+-/*
+- * binder_devmon_ds.c has its own DevMonIo, so it is built on its own and
+- * its display check handed to unit_devmon.c.
+- */
+-
+-#include "binder_devmon_ds.c"
+-
+-gboolean test_devmon_ds_display_on(MceDisplay* display);
+-
+-gboolean
+-test_devmon_ds_display_on(
+-    MceDisplay* display)
+-{
+-    return binder_devmon_ds_display_on(display);
+-}
+-
+-/*
+- * Local Variables:
+- * mode: C
+- * c-basic-offset: 4
+- * indent-tabs-mode: nil
+- * End:
+- */
+diff --git a/unit/unit_display/Makefile b/unit/unit_display/Makefile
+new file mode 100644
+index 0000000..cd00d21
+--- /dev/null
++++ b/unit/unit_display/Makefile
+@@ -0,0 +1,8 @@
++# -*- Mode: makefile-gmake -*-
++
++# libmce-glib is faked, only its headers are needed
++PKGS += libmce-glib
++
++EXE = unit_display
++
++include ../common/Makefile
+diff --git a/unit/unit_display/unit_display.c b/unit/unit_display/unit_display.c
+new file mode 100644
+index 0000000..62eefdd
+--- /dev/null
++++ b/unit/unit_display/unit_display.c
+@@ -0,0 +1,295 @@
++/*
++ *  oFono - Open Source Telephony - binder based adaptation
++ *
++ *  Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++ *  GNU General Public License for more details.
++ */
++
++/*
++ * The display state the device monitors go by, from MCE. libmce-glib
++ * is faked: the test sets the MceDisplay's valid and state fields and
++ * calls the handlers the backend has added, as libmce-glib does.
++ */
++
++#include "binder_display.c"
++#include "binder_display_mce.c"
++
++#include <gutil_log.h>
++
++GLOG_MODULE_DEFINE("unit_display");
++
++#define TEST_(t) "/display/" t
++
++static struct test_mce {
++    MceDisplay display;
++    int refs;
++    MceDisplayFunc valid_fn;
++    void* valid_arg;
++    MceDisplayFunc state_fn;
++    void* state_arg;
++} test_mce;
++
++void ofono_debug(const char* format, ...) {}
++
++/*==========================================================================*
++ * Fake libmce-glib
++ *==========================================================================*/
++
++MceDisplay*
++mce_display_new(
++    void)
++{
++    test_mce.refs++;
++    return &test_mce.display;
++}
++
++void
++mce_display_unref(
++    MceDisplay* display)
++{
++    g_assert(display == &test_mce.display);
++    g_assert_cmpint(test_mce.refs, > ,0);
++    test_mce.refs--;
++}
++
++gulong
++mce_display_add_valid_changed_handler(
++    MceDisplay* display,
++    MceDisplayFunc fn,
++    void* arg)
++{
++    g_assert(!test_mce.valid_fn);
++    test_mce.valid_fn = fn;
++    test_mce.valid_arg = arg;
++    return 1;
++}
++
++gulong
++mce_display_add_state_changed_handler(
++    MceDisplay* display,
++    MceDisplayFunc fn,
++    void* arg)
++{
++    g_assert(!test_mce.state_fn);
++    test_mce.state_fn = fn;
++    test_mce.state_arg = arg;
++    return 2;
++}
++
++void
++mce_display_remove_handlers(
++    MceDisplay* display,
++    gulong* ids,
++    guint count)
++{
++    guint i;
++
++    for (i = 0; i < count; i++) {
++        if (ids[i] == 1) {
++            test_mce.valid_fn = NULL;
++        } else if (ids[i] == 2) {
++            test_mce.state_fn = NULL;
++        }
++        ids[i] = 0;
++    }
++}
++
++/*==========================================================================*
++ * Common
++ *==========================================================================*/
++
++static
++void
++test_mce_reset(
++    gboolean valid,
++    MCE_DISPLAY_STATE state)
++{
++    memset(&test_mce, 0, sizeof(test_mce));
++    test_mce.display.valid = valid;
++    test_mce.display.state = state;
++}
++
++static
++void
++test_mce_valid(
++    gboolean valid)
++{
++    test_mce.display.valid = valid;
++    g_assert(test_mce.valid_fn);
++    test_mce.valid_fn(&test_mce.display, test_mce.valid_arg);
++}
++
++static
++void
++test_mce_state(
++    MCE_DISPLAY_STATE state)
++{
++    test_mce.display.state = state;
++    g_assert(test_mce.state_fn);
++    test_mce.state_fn(&test_mce.display, test_mce.state_arg);
++}
++
++static
++void
++test_count_cb(
++    BinderDisplay* display,
++    BINDER_DISPLAY_PROPERTY property,
++    void* user_data)
++{
++    g_assert_cmpint(property, == ,BINDER_DISPLAY_PROPERTY_ON);
++    (*(int*)user_data)++;
++}
++
++static
++void
++test_done(
++    BinderDisplay* display)
++{
++    binder_display_unref(display);
++    g_assert(!binder_display_instance);
++    g_assert_cmpint(test_mce.refs, == ,0);
++    g_assert(!test_mce.valid_fn);
++    g_assert(!test_mce.state_fn);
++}
++
++/*==========================================================================*
++ * Tests
++ *==========================================================================*/
++
++/* Without MCE the state never becomes valid: that is on, not off */
++static
++void
++test_unknown(
++    void)
++{
++    BinderDisplay* display;
++
++    test_mce_reset(FALSE, MCE_DISPLAY_STATE_OFF);
++    display = binder_display_new();
++    g_assert(display->on);
++    test_done(display);
++}
++
++/* The state MCE has when the display is made counts right away */
++static
++void
++test_initial(
++    void)
++{
++    BinderDisplay* display;
++
++    test_mce_reset(TRUE, MCE_DISPLAY_STATE_OFF);
++    display = binder_display_new();
++    g_assert(!display->on);
++    test_done(display);
++}
++
++static
++void
++test_states(
++    void)
++{
++    BinderDisplay* display;
++    gulong id[1];
++    int n = 0;
++
++    test_mce_reset(FALSE, MCE_DISPLAY_STATE_OFF);
++    display = binder_display_new();
++    id[0] = binder_display_add_property_handler(display,
++        BINDER_DISPLAY_PROPERTY_ON, test_count_cb, &n);
++    g_assert(id[0]);
++
++    /* MCE answers: off */
++    test_mce_valid(TRUE);
++    g_assert(!display->on);
++    g_assert_cmpint(n, == ,1);
++
++    /* Dimmed is on */
++    test_mce_state(MCE_DISPLAY_STATE_DIM);
++    g_assert(display->on);
++    g_assert_cmpint(n, == ,2);
++
++    /* No signal when nothing changes */
++    test_mce_state(MCE_DISPLAY_STATE_ON);
++    g_assert(display->on);
++    g_assert_cmpint(n, == ,2);
++
++    test_mce_state(MCE_DISPLAY_STATE_OFF);
++    g_assert(!display->on);
++    g_assert_cmpint(n, == ,3);
++
++    /* MCE is gone: the state isn't known, so on again */
++    test_mce_valid(FALSE);
++    g_assert(display->on);
++    g_assert_cmpint(n, == ,4);
++
++    binder_display_remove_all_handlers(display, id);
++    g_assert(!id[0]);
++    test_mce_valid(TRUE);
++    g_assert_cmpint(n, == ,4);
++    test_done(display);
++}
++
++/* All slots share one display, and so one MCE display */
++static
++void
++test_shared(
++    void)
++{
++    BinderDisplay* d1;
++    BinderDisplay* d2;
++
++    test_mce_reset(TRUE, MCE_DISPLAY_STATE_ON);
++    d1 = binder_display_new();
++    d2 = binder_display_new();
++    g_assert(d1 == d2);
++    g_assert_cmpint(test_mce.refs, == ,1);
++    g_assert(binder_display_ref(d1) == d1);
++    binder_display_unref(d1);
++    binder_display_unref(d1);
++    g_assert(binder_display_instance);
++    test_done(d2);
++}
++
++static
++void
++test_null(
++    void)
++{
++    g_assert(!binder_display_ref(NULL));
++    binder_display_unref(NULL);
++    g_assert(!binder_display_add_property_handler(NULL,
++        BINDER_DISPLAY_PROPERTY_ON, test_count_cb, NULL));
++    binder_display_remove_handlers(NULL, NULL, 0);
++    binder_display_backend_free(NULL);
++}
++
++int main(int argc, char* argv[])
++{
++    g_test_init(&argc, &argv, NULL);
++    gutil_log_default.level = g_test_verbose() ?
++        GLOG_LEVEL_VERBOSE : GLOG_LEVEL_NONE;
++    gutil_log_timestamp = FALSE;
++    g_test_add_func(TEST_("unknown"), test_unknown);
++    g_test_add_func(TEST_("initial"), test_initial);
++    g_test_add_func(TEST_("states"), test_states);
++    g_test_add_func(TEST_("shared"), test_shared);
++    g_test_add_func(TEST_("null"), test_null);
++    return g_test_run();
++}
++
++/*
++ * Local Variables:
++ * mode: C
++ * c-basic-offset: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
