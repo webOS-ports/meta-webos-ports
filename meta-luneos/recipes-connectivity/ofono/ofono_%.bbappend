@@ -3,7 +3,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 # oe-core's ofono_2.19.bb sets no PR. Without one here, a rebuilt package
 # carries the same version as the installed one and opkg won't upgrade it.
 # Bump it whenever the patches below change what is built.
-PR = "r4"
+PR = "r5"
 
 DEPENDS += "dbus-glib libmce-glib"
 # The modem stack differs per machine class. The default is the mainline
@@ -89,7 +89,45 @@ SRC_URI:append = " \
   file://0146-unit-test-the-SMS-status-report-signal.patch \
   file://0147-provision-keep-the-best-access-point-of-each-type.patch \
   file://0148-provisiontool-merge-providers-that-share-an-MCC-MNC.patch \
+  file://0149-gprs-add-an-XCAP-context-type.patch \
+  file://0150-gprs-provision-the-XCAP-access-point-of-a-SIM-that-h.patch \
+  file://0151-unit-test-provisioning-an-XCAP-access-point.patch \
 "
+
+# The XCAP access point of each network, which oFono's own provider data
+# lacks: the modem needs it for supplementary services on LTE (call
+# forwarding, waiting, barring, caller ID), or it makes every such request
+# on the circuit-switched network and takes the phone off LTE each time.
+# Built from Android's APN lists by xcap-apns.py, which says where from.
+SRC_URI:append = " file://xcap-apns.json"
+
+# Add them to data/provision.json before provision.db is built from it.
+# Only for networks the database already has, so a network never ends up
+# with an XCAP context and no internet one.
+python ofono_add_xcap_apns() {
+    import json
+    import os
+
+    path = os.path.join(d.getVar('S'), 'data', 'provision.json')
+    with open(path) as f:
+        providers = json.load(f)
+
+    if any('xcap' in apn.get('type', [])
+           for p in providers for apn in p['apns']):
+        return
+
+    known = {i for p in providers if 'spn' not in p for i in p['ids']}
+
+    with open(os.path.join(d.getVar('UNPACKDIR'), 'xcap-apns.json')) as f:
+        xcap = [p for p in json.load(f) if p['ids'][0] in known]
+
+    with open(path, 'w') as f:
+        json.dump(providers + xcap, f, indent=2, ensure_ascii=False)
+        f.write('\n')
+
+    bb.note('Added the XCAP access points of %d networks' % len(xcap))
+}
+do_patch[postfuncs] += "ofono_add_xcap_apns"
 
 # On Halium the modem is driven by ofono-binder-plugin. The in-tree ril
 # driver also claims /ril_0 and gets there first, so binder registration

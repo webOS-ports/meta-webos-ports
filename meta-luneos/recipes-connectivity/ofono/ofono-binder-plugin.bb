@@ -44,10 +44,12 @@ SRC_URI = "git://github.com/mer-hybris/ofono-binder-plugin.git;branch=master;pro
            file://0030-ofono-binder-Keep-the-display-state-in-one-object-fo.patch \
            file://0031-ofono-binder-Take-the-display-state-from-luna-displa.patch \
            file://0032-unit-Test-the-luna-displaymanager-display-state.patch \
+           file://0033-ofono-binder-Tell-the-modem-the-XCAP-access-point.patch \
+           file://0034-unit-Test-the-APN-types-of-the-XCAP-data-profile.patch \
 "
 
 PV = "1.1.41"
-PR = "r6"
+PR = "r7"
 SRCREV = "204dea1593be95e60bad9f2c0282c35a9f8ba272"
 
 CFLAGS += "--sysroot=${RECIPE_SYSROOT} "
