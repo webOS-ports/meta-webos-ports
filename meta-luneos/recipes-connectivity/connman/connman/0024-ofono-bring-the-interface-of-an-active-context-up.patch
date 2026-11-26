@@ -1,0 +1,375 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 26 Nov 2026 07:00:08 +0100
+Subject: [PATCH] ofono: bring the interface of an active context up
+
+Restarting connmand while oFono kept a data context up left the phone
+without mobile data: the cellular service showed "ready", then failed
+its online check with "could not resolve", and there were no routes at
+all. The context's interface (ccmni0 on a MediaTek modem) was down.
+
+connmand takes every running interface down when it starts, in
+cleanup_devices(), on the understanding that it brings them up again
+itself. For cellular it never does: the modem's driver brings the
+interface up when it sets up a data call, and the oFono device has no
+interface of its own. A context that is already active when connmand
+starts is adopted by set_connected(), which applied the address,
+routes and nameservers to a link that stayed down.
+
+Bring the interface up in set_connected(), as the dundee plugin does
+for its own. An interface the modem already brought up is left as it
+is.
+
+unit/test-ofono compiles plugins/ofono.c with the core stubbed and
+checks that set_connected() brings the interface up before it connects
+the network, also when the interface is already up, and does neither
+without an interface.
+
+Seen on a Q25 when connmand was restarted with Vodafone NL data up.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ Makefile.am       |  11 ++
+ plugins/ofono.c   |  11 ++
+ unit/test-ofono.c | 287 ++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 309 insertions(+)
+ create mode 100644 unit/test-ofono.c
+
+diff --git a/Makefile.am b/Makefile.am
+index db66854..5b96ed0 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -618,3 +618,14 @@ maintainer-clean-local:
+ 
+ clean-local:
+ 	@$(RM) -rf include/connman $(MANUAL_PAGES)
++
++# The oFono plugin compiled into its test, with the core stubbed there.
++# At the end of the file so that it stays clear of the other unit tests.
++noinst_PROGRAMS += unit/test-ofono
++
++unit_test_ofono_SOURCES = $(backtrace_sources) src/log.c \
++				plugins/mcc.h unit/test-ofono.c
++unit_test_ofono_LDADD = gdbus/libgdbus-internal.la \
++				@GLIB_LIBS@ @DBUS_LIBS@ -ldl
++
++TESTS += unit/test-ofono
+diff --git a/plugins/ofono.c b/plugins/ofono.c
+index 567c0d3..7320241 100644
+--- a/plugins/ofono.c
++++ b/plugins/ofono.c
+@@ -309,6 +309,17 @@ static void set_connected(struct modem_data *modem,
+ 
+ 	DBG("context->network %p", context->network);
+ 
++	/*
++	 * The modem's driver normally brings the interface up when the
++	 * data call is set up, but connmand takes every running interface
++	 * down when it starts (cleanup_devices() in src/device.c). A
++	 * context that oFono still reports active from before a restart
++	 * would then get its address on a link that stays down, with no
++	 * routes and no traffic. An active context needs its interface up,
++	 * as dundee does for its own.
++	 */
++	connman_inet_ifup(index);
++
+ 	service = connman_service_lookup_from_network(context->network);
+ 	if (!service)
+ 		return;
+diff --git a/unit/test-ofono.c b/unit/test-ofono.c
+new file mode 100644
+index 0000000..f2ea163
+--- /dev/null
++++ b/unit/test-ofono.c
+@@ -0,0 +1,287 @@
++/*
++ *
++ *  Connection Manager
++ *
++ *  Copyright (C) 2026  Herman van Hazendonk <github.com@herrie.org>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU General Public License for more details.
++ *
++ *  You should have received a copy of the GNU General Public License
++ *  along with this program; if not, write to the Free Software
++ *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
++ *
++ */
++
++/*
++ * The oFono plugin adopting a context that is already active.
++ *
++ * connmand takes every running interface down when it starts, so when it
++ * is restarted while oFono keeps a data context up, the plugin finds an
++ * active context whose interface is down. set_connected() has to bring
++ * that interface up before it hands the network to the core, or the
++ * service ends up "ready" with no routes and no traffic.
++ *
++ * plugins/ofono.c is compiled into this test as it is, so its static
++ * functions can be called. What it drives in the core is stubbed below
++ * and records the calls the test checks.
++ */
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#include "../plugins/ofono.c"
++
++/* What the stubs saw, in call order */
++
++static int calls;
++static int ifup_index;
++static int ifup_order;
++static int ifup_result;
++static int connected_order;
++static bool connected_value;
++static bool have_service;
++
++static void reset(void)
++{
++	calls = 0;
++	ifup_index = -1;
++	ifup_order = 0;
++	ifup_result = 0;
++	connected_order = 0;
++	connected_value = false;
++	have_service = true;
++}
++
++/* Stand-ins for the core */
++
++static int fake_service;
++static int fake_network;
++static int fake_address;
++
++int connman_inet_ifup(int index)
++{
++	ifup_index = index;
++	ifup_order = ++calls;
++	return ifup_result;
++}
++
++int connman_inet_ifdown(int index) { return 0; }
++int connman_inet_ifindex(const char *name) { return -1; }
++
++struct connman_service *connman_service_lookup_from_network(
++				struct connman_network *network)
++{
++	return have_service ? (struct connman_service *) &fake_service : NULL;
++}
++
++void connman_service_create_ip4config(struct connman_service *service,
++				int index) {}
++void connman_service_create_ip6config(struct connman_service *service,
++				int index) {}
++
++int connman_network_set_connected(struct connman_network *network,
++				bool connected)
++{
++	connected_value = connected;
++	connected_order = ++calls;
++	return 0;
++}
++
++void connman_network_set_ipv4_method(struct connman_network *network,
++				enum connman_ipconfig_method method) {}
++void connman_network_set_ipv6_method(struct connman_network *network,
++				enum connman_ipconfig_method method) {}
++int connman_network_set_ipaddress(struct connman_network *network,
++				struct connman_ipaddress *ipaddress) { return 0; }
++int connman_network_set_nameservers(struct connman_network *network,
++				const char *nameservers) { return 0; }
++void connman_network_set_index(struct connman_network *network,
++				int index) {}
++
++/* Referenced elsewhere in the plugin, never reached by these tests */
++
++struct connman_device *connman_device_create(const char *node,
++				enum connman_device_type type) { return NULL; }
++int connman_device_register(struct connman_device *device) { return 0; }
++void connman_device_unregister(struct connman_device *device) {}
++void connman_device_unref_debug(struct connman_device *device,
++				const char *file, int line, const char *caller) {}
++void *connman_device_get_data(struct connman_device *device) { return NULL; }
++void connman_device_set_data(struct connman_device *device, void *data) {}
++void connman_device_set_ident(struct connman_device *device,
++				const char *ident) {}
++int connman_device_set_powered(struct connman_device *device,
++				bool powered) { return 0; }
++int connman_device_set_string(struct connman_device *device,
++				const char *key, const char *value) { return 0; }
++int connman_device_add_network(struct connman_device *device,
++				struct connman_network *network) { return 0; }
++int connman_device_remove_network(struct connman_device *device,
++				struct connman_network *network) { return 0; }
++int connman_device_driver_register(struct connman_device_driver *driver)
++{
++	return 0;
++}
++void connman_device_driver_unregister(struct connman_device_driver *driver) {}
++
++struct connman_network *connman_network_create(const char *identifier,
++				enum connman_network_type type) { return NULL; }
++void connman_network_unref_debug(struct connman_network *network,
++				const char *file, int line, const char *caller) {}
++void *connman_network_get_data(struct connman_network *network)
++{
++	return NULL;
++}
++void connman_network_set_data(struct connman_network *network,
++				void *data) {}
++int connman_network_set_bool(struct connman_network *network,
++				const char *key, bool value) { return 0; }
++void connman_network_set_error(struct connman_network *network,
++				enum connman_network_error error) {}
++void connman_network_set_group(struct connman_network *network,
++				const char *group) {}
++int connman_network_set_name(struct connman_network *network,
++				const char *name) { return 0; }
++int connman_network_set_strength(struct connman_network *network,
++				uint8_t strength) { return 0; }
++int connman_network_set_string(struct connman_network *network,
++				const char *key, const char *value)
++{
++	return 0;
++}
++void connman_network_update(struct connman_network *network) {}
++int connman_network_driver_register(struct connman_network_driver *driver)
++{
++	return 0;
++}
++void connman_network_driver_unregister(struct connman_network_driver *driver)
++{
++}
++
++struct connman_ipaddress *connman_ipaddress_alloc(int family)
++{
++	return NULL;
++}
++void connman_ipaddress_free(struct connman_ipaddress *ipaddress) {}
++int connman_ipaddress_set_ipv4(struct connman_ipaddress *ipaddress,
++				const char *address, const char *netmask,
++				const char *gateway) { return 0; }
++int connman_ipaddress_set_ipv6(struct connman_ipaddress *ipaddress,
++				const char *address, unsigned char prefix_length,
++				const char *gateway) { return 0; }
++
++int connman_technology_driver_register(
++				struct connman_technology_driver *driver)
++{
++	return 0;
++}
++void connman_technology_driver_unregister(
++				struct connman_technology_driver *driver) {}
++int connman_technology_set_regdom(const char *alpha2) { return 0; }
++
++bool connman_setting_get_bool(const char *key) { return false; }
++
++DBusConnection *connman_dbus_get_connection(void) { return NULL; }
++void connman_dbus_property_append_basic(DBusMessageIter *iter,
++				const char *key, int type, void *val) {}
++char *connman_dbus_encode_string(const char *value) { return NULL; }
++dbus_bool_t connman_dbus_validate_ident(const char *ident) { return TRUE; }
++
++/* A context oFono reports active, as the plugin builds it */
++
++static struct network_context *active_context(int index)
++{
++	struct network_context *context;
++
++	context = network_context_alloc("/ril_0/context1");
++	if (!context)
++		g_error("out of memory");
++
++	context->index = index;
++	context->network = (struct connman_network *) &fake_network;
++	context->ipv4_method = CONNMAN_IPCONFIG_METHOD_FIXED;
++	context->ipv4_address = (struct connman_ipaddress *) &fake_address;
++	context->ipv4_nameservers = g_strdup("192.0.2.53");
++	context->ipv6_method = CONNMAN_IPCONFIG_METHOD_OFF;
++	context->active = true;
++
++	return context;
++}
++
++static void free_context(struct network_context *context)
++{
++	/* The address is the test's own, not one the plugin allocated */
++	context->ipv4_address = NULL;
++	g_free(context->ipv4_nameservers);
++	g_free(context->path);
++	g_free(context);
++}
++
++static struct modem_data modem = { .path = "/ril_0" };
++
++/* An active context gets its interface up before it is connected */
++static void test_link_up_before_connected(void)
++{
++	struct network_context *context = active_context(15);
++
++	reset();
++	set_connected(&modem, context);
++
++	g_assert_cmpint(ifup_index, ==, 15);
++	g_assert_true(connected_value);
++	g_assert_cmpint(ifup_order, >, 0);
++	g_assert_cmpint(ifup_order, <, connected_order);
++
++	free_context(context);
++}
++
++/* An interface the modem already brought up is no reason to stop */
++static void test_link_already_up(void)
++{
++	struct network_context *context = active_context(14);
++
++	reset();
++	ifup_result = -EALREADY;
++	set_connected(&modem, context);
++
++	g_assert_cmpint(ifup_index, ==, 14);
++	g_assert_true(connected_value);
++
++	free_context(context);
++}
++
++/* Without an interface there is nothing to bring up or connect */
++static void test_no_interface(void)
++{
++	struct network_context *context = active_context(-1);
++
++	reset();
++	set_connected(&modem, context);
++
++	g_assert_cmpint(ifup_order, ==, 0);
++	g_assert_cmpint(connected_order, ==, 0);
++
++	free_context(context);
++}
++
++int main(int argc, char *argv[])
++{
++	g_test_init(&argc, &argv, NULL);
++
++	g_test_add_func("/ofono/set-connected/link-up-before-connected",
++				test_link_up_before_connected);
++	g_test_add_func("/ofono/set-connected/link-already-up",
++				test_link_already_up);
++	g_test_add_func("/ofono/set-connected/no-interface",
++				test_no_interface);
++
++	return g_test_run();
++}
+-- 
+2.53.0
+

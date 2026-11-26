@@ -7,20 +7,20 @@ DEPENDS += "qtbase qtdeclarative"
 VERSION = "1.4.25"
 PV = "${VERSION}+git"
 
-SRCREV = "8aa2e17cd936afa2754992e68836a3c93aafbcf9"
+SRCREV = "105761b334c9ce5461d24a32b69dea39635b6cdf"
 # 0001-connman_vpn_manager.xml-Fix-build-with-Qt-6.5.patch was dropped at 1.4.25:
 # upstream added the QtTypeName.Out1 annotation on ConnectionAdded themselves, so
 # qdbusxml2cpp no longer chokes on the a{sv} out-argument.
 SRC_URI = "git://github.com/sailfishos/libconnman-qt.git;protocol=https;branch=master"
-# 0001 fixes queued signals overflowing a quint64 (67 signals); 0002 needs it
-# and adds NetworkService.useDeviceMACAddress for connman's per-network MAC
-# address opt-out (connman 0008). 0003 answers connman's RequestBrowser, which
-# otherwise holds up the agent's other requests. 0001 is sailfishos PR #56. 0002
-# stays here: their connman has no per-network MAC address for it to control.
+# The fix for queued signals overflowing a quint64 (67 signals) was the old
+# 0001; upstream merged it as sailfishos PR #56. 0001 needs it and adds
+# NetworkService.useDeviceMACAddress for connman's per-network MAC address
+# opt-out (connman 0008). It stays here: their connman has no per-network MAC
+# address for it to control. 0002 answers connman's RequestBrowser, which
+# otherwise holds up the agent's other requests.
 SRC_URI += " \
-    file://0001-libconnman-qt-Queue-service-signals-in-a-bitset.patch \
-    file://0002-libconnman-qt-Add-NetworkService.useDeviceMACAddress.patch \
-    file://0003-libconnman-qt-Answer-RequestBrowser.patch \
+    file://0001-libconnman-qt-Add-NetworkService.useDeviceMACAddress.patch \
+    file://0002-libconnman-qt-Answer-RequestBrowser.patch \
 "
 
 inherit pkgconfig

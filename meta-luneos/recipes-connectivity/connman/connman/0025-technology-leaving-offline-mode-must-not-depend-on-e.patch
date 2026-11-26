@@ -1,0 +1,480 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 26 Nov 2026 10:44:25 +0100
+Subject: [PATCH] technology: leaving offline mode must not depend on every
+ technology
+
+__connman_technology_set_offlinemode() switches every technology and
+then decides by the result of the last one alone whether the new mode
+stands. If that one failed, it read the previous mode back from the
+settings file, although every technology before it had been switched
+already.
+
+On a MediaTek phone with GRE support in the kernel, the fallback
+gretap0 and erspan0 devices are Ethernet devices with an all-zero
+address, and enabling them fails with EADDRNOTAVAIL. With WiFi off when
+offline mode was entered, Wired was the last technology to bring back,
+so leaving offline mode turned cellular back on but left OfflineMode
+true, saved as such, and never told the notifier. The shell reads
+OfflineMode and kept showing airplane mode, and every further attempt
+to leave it went the same way. The D-Bus caller got no error either,
+since manager.c does not look at the result.
+
+Leaving offline mode now always stands: a technology that cannot be
+powered shows that in its own Powered property. Entering it is undone
+only when no technology at all could be powered down, rather than when
+the last one could not. A change that did take effect returns 0, where
+leaving offline mode with no technology to bring back used to return
+-EINVAL.
+
+unit/test-offlinemode builds technology.c with the core stubbed and
+covers leaving with the last, the first or the only technology failing
+and with none to bring back, and entering with one or all of them
+failing to go down.
+
+Seen on a Q25 after turning airplane mode off from the system menu.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ Makefile.am             |  10 ++
+ src/technology.c        |  23 ++-
+ unit/test-offlinemode.c | 356 ++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 384 insertions(+), 5 deletions(-)
+ create mode 100644 unit/test-offlinemode.c
+
+diff --git a/Makefile.am b/Makefile.am
+index 5b96ed0..4e7ac37 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -629,3 +629,13 @@ unit_test_ofono_LDADD = gdbus/libgdbus-internal.la \
+ 				@GLIB_LIBS@ @DBUS_LIBS@ -ldl
+ 
+ TESTS += unit/test-ofono
++
++# Offline mode in the technology core, compiled into its test the same way.
++noinst_PROGRAMS += unit/test-offlinemode
++
++unit_test_offlinemode_SOURCES = $(backtrace_sources) src/log.c \
++				unit/test-offlinemode.c
++unit_test_offlinemode_LDADD = gdbus/libgdbus-internal.la \
++				@GLIB_LIBS@ @DBUS_LIBS@ -ldl
++
++TESTS += unit/test-offlinemode
+diff --git a/src/technology.c b/src/technology.c
+index ff1f0d5..2d17505 100644
+--- a/src/technology.c
++++ b/src/technology.c
+@@ -1896,6 +1896,7 @@ int __connman_technology_set_offlinemode(bool offlinemode)
+ {
+ 	GSList *list;
+ 	int err = -EINVAL, enabled_tech_count = 0;
++	bool switched = false;
+ 
+ 	if (global_offlinemode == offlinemode)
+ 		return 0;
+@@ -1917,9 +1918,11 @@ int __connman_technology_set_offlinemode(bool offlinemode)
+ 	for (list = technology_list; list; list = list->next) {
+ 		struct connman_technology *technology = list->data;
+ 
+-		if (offlinemode)
++		if (offlinemode) {
+ 			err = technology_disable(technology);
+-		else {
++			if (err == 0 || err == -EINPROGRESS || err == -EALREADY)
++				switched = true;
++		} else {
+ 			if (technology->hardblocked)
+ 				continue;
+ 
+@@ -1930,12 +1933,22 @@ int __connman_technology_set_offlinemode(bool offlinemode)
+ 		}
+ 	}
+ 
+-	if (err == 0 || err == -EINPROGRESS || err == -EALREADY ||
++	/*
++	 * Leaving offline mode always stands. A technology that cannot be
++	 * powered shows that in its own Powered property; putting offline
++	 * mode back for it left the others powered, as they had been enabled
++	 * already, under an OfflineMode that said they were not, and the
++	 * next attempt to leave it failed the same way. Entering offline
++	 * mode is undone only when no technology could be powered down.
++	 */
++	if (!offlinemode || switched ||
+ 			(err == -EINVAL && enabled_tech_count == 0)) {
+ 		connman_technology_save_offlinemode();
+ 		__connman_notifier_offlinemode(offlinemode);
+-	} else
+-		global_offlinemode = connman_technology_load_offlinemode();
++		return 0;
++	}
++
++	global_offlinemode = connman_technology_load_offlinemode();
+ 
+ 	return err;
+ }
+diff --git a/unit/test-offlinemode.c b/unit/test-offlinemode.c
+new file mode 100644
+index 0000000..70507a0
+--- /dev/null
++++ b/unit/test-offlinemode.c
+@@ -0,0 +1,356 @@
++/*
++ *
++ *  Connection Manager
++ *
++ *  Copyright (C) 2026  Herman van Hazendonk <github.com@herrie.org>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU General Public License for more details.
++ *
++ *  You should have received a copy of the GNU General Public License
++ *  along with this program; if not, write to the Free Software
++ *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
++ *
++ */
++
++/*
++ * Leaving and entering offline mode when one technology cannot follow.
++ *
++ * __connman_technology_set_offlinemode() switches every technology and
++ * used to judge the outcome by the last one alone: if that one failed, it
++ * read the old mode back from the settings file, although the others had
++ * been switched already. On a phone with an Ethernet technology whose
++ * only devices are the kernel's gretap0/erspan0 stubs, enabling Ethernet
++ * fails, so OfflineMode stayed true for good while WiFi and cellular came
++ * back on, and the shell kept showing airplane mode.
++ *
++ * src/technology.c is compiled into this test as it is, so its statics
++ * can be reached. What it drives in the core is stubbed below.
++ */
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#include "../src/technology.c"
++
++/* Stand-ins for the core */
++
++/* What enabling or disabling the device returns; the pointer is the device */
++struct fake_device {
++	int enable_result;
++	int disable_result;
++	int enables;
++	int disables;
++};
++
++int __connman_device_enable(struct connman_device *device)
++{
++	struct fake_device *d = (struct fake_device *)device;
++
++	d->enables++;
++	return d->enable_result;
++}
++
++int __connman_device_disable(struct connman_device *device)
++{
++	struct fake_device *d = (struct fake_device *)device;
++
++	d->disables++;
++	return d->disable_result;
++}
++
++/* The settings file: what was saved last, and how often */
++static bool stored_offlinemode;
++static int saves;
++
++GKeyFile *__connman_storage_load_global(void)
++{
++	GKeyFile *keyfile = g_key_file_new();
++
++	g_key_file_set_boolean(keyfile, "global", "OfflineMode",
++						stored_offlinemode);
++	return keyfile;
++}
++
++int __connman_storage_save_global(GKeyFile *keyfile)
++{
++	stored_offlinemode = g_key_file_get_boolean(keyfile, "global",
++						"OfflineMode", NULL);
++	saves++;
++	return 0;
++}
++
++static int notified;
++static bool notified_value;
++
++void __connman_notifier_offlinemode(bool enabled)
++{
++	notified++;
++	notified_value = enabled;
++}
++
++/* Not reached by these tests */
++
++DBusConnection *connman_dbus_get_connection(void) { return NULL; }
++void connman_dbus_property_append_array(DBusMessageIter *iter,
++		const char *key, int type,
++		connman_dbus_append_cb_t function, void *user_data) { }
++void connman_dbus_property_append_basic(DBusMessageIter *iter,
++		const char *key, int type, void *val) { }
++dbus_bool_t connman_dbus_property_changed_array(const char *path,
++		const char *interface, const char *key, int type,
++		connman_dbus_append_cb_t function, void *user_data)
++{ return TRUE; }
++dbus_bool_t connman_dbus_property_changed_basic(const char *path,
++		const char *interface, const char *key, int type, void *val)
++{ return TRUE; }
++bool connman_device_get_powered(struct connman_device *device)
++{ return false; }
++bool connman_device_get_scanning(struct connman_device *device,
++		enum connman_service_type type) { return false; }
++enum connman_service_type __connman_device_get_service_type(
++		struct connman_device *device)
++{ return CONNMAN_SERVICE_TYPE_UNKNOWN; }
++const char *connman_device_get_string(struct connman_device *device,
++		const char *key) { return NULL; }
++int __connman_device_request_cancel_wps(enum connman_service_type type)
++{ return -ENOTSUP; }
++int __connman_device_request_scan_full(enum connman_service_type type)
++{ return -ENOTSUP; }
++int __connman_device_request_start_wps(enum connman_service_type type,
++		const char *pin) { return -ENOTSUP; }
++int connman_device_set_regdom(struct connman_device *device,
++		const char *alpha2) { return -ENOTSUP; }
++void __connman_device_stop_scan(enum connman_service_type type) { }
++DBusMessage *__connman_error_already_disabled(DBusMessage *msg)
++{ return NULL; }
++DBusMessage *__connman_error_already_enabled(DBusMessage *msg)
++{ return NULL; }
++DBusMessage *__connman_error_failed(DBusMessage *msg, int errnum)
++{ return NULL; }
++DBusMessage *__connman_error_invalid_arguments(DBusMessage *msg)
++{ return NULL; }
++DBusMessage *__connman_error_invalid_property(DBusMessage *msg)
++{ return NULL; }
++DBusMessage *__connman_error_not_supported(DBusMessage *msg)
++{ return NULL; }
++DBusMessage *__connman_error_passphrase_required(DBusMessage *msg)
++{ return NULL; }
++DBusMessage *__connman_error_permission_denied(DBusMessage *msg)
++{ return NULL; }
++char *connman_inet_ifname(int index) { return g_strdup("test0"); }
++void __connman_peer_disconnect_all(void) { }
++int __connman_rfkill_block(enum connman_service_type type, bool block)
++{ return 0; }
++int __connman_service_check_passphrase(enum connman_service_security security,
++		const char *passphrase) { return 0; }
++const char *__connman_service_type2string(enum connman_service_type type)
++{ return "test"; }
++bool connman_setting_get_bool(const char *key) { return false; }
++char **connman_setting_get_string_list(const char *key) { return NULL; }
++unsigned int *connman_setting_get_uint_list(const char *key) { return NULL; }
++const char *__connman_tethering_get_bridge(void) { return NULL; }
++void __connman_tethering_set_disabled(void) { }
++int __connman_tethering_set_enabled(const char *ip) { return 0; }
++
++/* Technologies, in the order technology_list walks them */
++
++static struct connman_technology *add_technology(enum connman_service_type type,
++					bool enabled, struct fake_device *device)
++{
++	struct connman_technology *technology;
++
++	technology = g_new0(struct connman_technology, 1);
++	technology->refcount = 1;
++	technology->type = type;
++	technology->enabled = enabled;
++	technology->enable_persistent = true;
++	technology->device_list = g_slist_append(NULL, device);
++
++	technology_list = g_slist_append(technology_list, technology);
++	return technology;
++}
++
++static void reset(bool offlinemode)
++{
++	GSList *list;
++
++	for (list = technology_list; list; list = list->next) {
++		struct connman_technology *technology = list->data;
++
++		g_slist_free(technology->device_list);
++		g_free(technology);
++	}
++	g_slist_free(technology_list);
++	technology_list = NULL;
++
++	global_offlinemode = offlinemode;
++	stored_offlinemode = offlinemode;
++	saves = 0;
++	notified = 0;
++	notified_value = offlinemode;
++}
++
++/*
++ * Cellular comes back, Ethernet cannot (its only device has no address),
++ * and Ethernet is walked last. Offline mode has to be off afterwards.
++ */
++static void test_leave_with_one_failing(void)
++{
++	int err;
++	struct fake_device cellular = { .enable_result = -EINPROGRESS };
++	struct fake_device ethernet = { .enable_result = -EADDRNOTAVAIL };
++
++	reset(true);
++	add_technology(CONNMAN_SERVICE_TYPE_CELLULAR, false, &cellular);
++	add_technology(CONNMAN_SERVICE_TYPE_ETHERNET, false, &ethernet);
++
++	err = __connman_technology_set_offlinemode(false);
++
++	g_assert_false(__connman_technology_get_offlinemode());
++	g_assert_cmpint(err, ==, 0);
++	g_assert_cmpint(cellular.enables, ==, 1);
++	g_assert_cmpint(ethernet.enables, ==, 1);
++	g_assert_false(stored_offlinemode);
++	g_assert_cmpint(saves, ==, 1);
++	g_assert_cmpint(notified, ==, 1);
++	g_assert_false(notified_value);
++
++	reset(false);
++}
++
++/* The failing one walked first must not matter either */
++static void test_leave_with_first_failing(void)
++{
++	struct fake_device ethernet = { .enable_result = -EADDRNOTAVAIL };
++	struct fake_device wifi = { .enable_result = 0 };
++
++	reset(true);
++	add_technology(CONNMAN_SERVICE_TYPE_ETHERNET, false, &ethernet);
++	add_technology(CONNMAN_SERVICE_TYPE_WIFI, false, &wifi);
++
++	g_assert_cmpint(__connman_technology_set_offlinemode(false), ==, 0);
++
++	g_assert_false(__connman_technology_get_offlinemode());
++	g_assert_false(stored_offlinemode);
++	g_assert_cmpint(notified, ==, 1);
++
++	reset(false);
++}
++
++/*
++ * The only technology to bring back cannot be powered: a WiFi-only device
++ * with WiFi switched off and the gretap0 stub. Offline mode has to be off
++ * all the same, or it could never be left.
++ */
++static void test_leave_with_all_failing(void)
++{
++	int err;
++	struct fake_device ethernet = { .enable_result = -EADDRNOTAVAIL };
++
++	reset(true);
++	add_technology(CONNMAN_SERVICE_TYPE_ETHERNET, false, &ethernet);
++
++	err = __connman_technology_set_offlinemode(false);
++
++	g_assert_false(__connman_technology_get_offlinemode());
++	g_assert_cmpint(err, ==, 0);
++	g_assert_cmpint(ethernet.enables, ==, 1);
++	g_assert_false(stored_offlinemode);
++	g_assert_cmpint(notified, ==, 1);
++	g_assert_false(notified_value);
++
++	reset(false);
++}
++
++/* No technology to bring back at all: leaving offline mode still works */
++static void test_leave_with_nothing_persistent(void)
++{
++	struct fake_device wifi = { .enable_result = 0 };
++	struct connman_technology *technology;
++
++	reset(true);
++	technology = add_technology(CONNMAN_SERVICE_TYPE_WIFI, false, &wifi);
++	technology->enable_persistent = false;
++
++	g_assert_cmpint(__connman_technology_set_offlinemode(false), ==, 0);
++
++	g_assert_cmpint(wifi.enables, ==, 0);
++	g_assert_false(__connman_technology_get_offlinemode());
++	g_assert_cmpint(notified, ==, 1);
++
++	reset(false);
++}
++
++/* Entering offline mode with the last one failing to go down */
++static void test_enter_with_one_failing(void)
++{
++	int err;
++	struct fake_device wifi = { .disable_result = -EINPROGRESS };
++	struct fake_device ethernet = { .disable_result = -EIO };
++
++	reset(false);
++	add_technology(CONNMAN_SERVICE_TYPE_WIFI, true, &wifi);
++	add_technology(CONNMAN_SERVICE_TYPE_ETHERNET, true, &ethernet);
++
++	err = __connman_technology_set_offlinemode(true);
++
++	g_assert_true(__connman_technology_get_offlinemode());
++	g_assert_cmpint(err, ==, 0);
++	g_assert_cmpint(wifi.disables, ==, 1);
++	g_assert_cmpint(ethernet.disables, ==, 1);
++	g_assert_true(stored_offlinemode);
++	g_assert_cmpint(notified, ==, 1);
++	g_assert_true(notified_value);
++
++	reset(false);
++}
++
++/* Nothing could be powered down: offline mode is not entered */
++static void test_enter_with_all_failing(void)
++{
++	int err;
++	struct fake_device wifi = { .disable_result = -EIO };
++	struct fake_device ethernet = { .disable_result = -EIO };
++
++	reset(false);
++	add_technology(CONNMAN_SERVICE_TYPE_WIFI, true, &wifi);
++	add_technology(CONNMAN_SERVICE_TYPE_ETHERNET, true, &ethernet);
++
++	err = __connman_technology_set_offlinemode(true);
++
++	g_assert_false(__connman_technology_get_offlinemode());
++	g_assert_cmpint(err, ==, -EIO);
++	g_assert_false(stored_offlinemode);
++	g_assert_cmpint(saves, ==, 0);
++	g_assert_cmpint(notified, ==, 0);
++
++	reset(false);
++}
++
++int main(int argc, char *argv[])
++{
++	g_test_init(&argc, &argv, NULL);
++
++	g_test_add_func("/offlinemode/leave/one-failing",
++				test_leave_with_one_failing);
++	g_test_add_func("/offlinemode/leave/first-failing",
++				test_leave_with_first_failing);
++	g_test_add_func("/offlinemode/leave/all-failing",
++				test_leave_with_all_failing);
++	g_test_add_func("/offlinemode/leave/nothing-persistent",
++				test_leave_with_nothing_persistent);
++	g_test_add_func("/offlinemode/enter/one-failing",
++				test_enter_with_one_failing);
++	g_test_add_func("/offlinemode/enter/all-failing",
++				test_enter_with_all_failing);
++
++	return g_test_run();
++}
+-- 
+2.53.0
+

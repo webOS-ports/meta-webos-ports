@@ -1,0 +1,307 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 26 Nov 2026 06:34:53 +0100
+Subject: [PATCH] unit: test where the DHCP server sends its OFFER and ACK
+
+test-dhcp-server runs the real gdhcp server and option code on the
+loopback interface. The linker's --wrap swaps its three socket helpers:
+dhcp_l3_socket() hands out one end of a socketpair, the test queues
+client packets for dhcp_recv_l3_packet(), and dhcp_send_raw_packet()
+records the destination.
+
+It checks RFC 2131 4.1: with no broadcast bit and no address yet, the
+OFFER and ACK go to yiaddr and the client's hardware address; with the
+broadcast bit, to the broadcast addresses; a renewing client gets the
+ACK at ciaddr. Before "gdhcp: unicast OFFER and ACK as RFC 2131 asks"
+the first case fails, the OFFER going to 255.255.255.255.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ Makefile.am             |  15 +++
+ unit/test-dhcp-server.c | 250 ++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 265 insertions(+)
+ create mode 100644 unit/test-dhcp-server.c
+
+diff --git a/Makefile.am b/Makefile.am
+index 203b251..f145c7d 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -326,6 +326,21 @@ LOG_DRIVER = env AM_TAP_AWK='$(AWK)' $(SHELL) \
+ 
+ TESTS = unit/test-ippool
+ 
++noinst_PROGRAMS += unit/test-dhcp-server
++
++# The server runs for real on the loopback interface; only its socket
++# helpers are swapped for the test's own (see unit/test-dhcp-server.c).
++unit_test_dhcp_server_SOURCES = $(backtrace_sources) src/log.c \
++				src/util.c gdhcp/gdhcp.h gdhcp/common.h \
++				gdhcp/common.c gdhcp/server.c \
++				gdhcp/unaligned.h unit/test-dhcp-server.c
++unit_test_dhcp_server_LDADD = @GLIB_LIBS@ -ldl
++unit_test_dhcp_server_LDFLAGS = -Wl,--wrap=dhcp_l3_socket \
++				-Wl,--wrap=dhcp_recv_l3_packet \
++				-Wl,--wrap=dhcp_send_raw_packet
++
++TESTS += unit/test-dhcp-server
++
+ if WISPR
+ noinst_PROGRAMS += tools/wispr
+ 
+diff --git a/unit/test-dhcp-server.c b/unit/test-dhcp-server.c
+new file mode 100644
+index 0000000..1cf9a63
+--- /dev/null
++++ b/unit/test-dhcp-server.c
+@@ -0,0 +1,250 @@
++/*
++ *
++ *  Connection Manager
++ *
++ *  Copyright (C) 2026  Herman van Hazendonk <github.com@herrie.org>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU General Public License for more details.
++ *
++ *  You should have received a copy of the GNU General Public License
++ *  along with this program; if not, write to the Free Software
++ *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
++ *
++ */
++
++/*
++ * Where the DHCP server sends its OFFER and ACK.
++ *
++ * The server runs on the loopback interface, which every build host has
++ * and which has an address. Its three socket helpers are replaced with
++ * the linker's --wrap (see Makefile.am): dhcp_l3_socket() hands out one
++ * end of a socketpair, a byte written to the other end makes the server
++ * read the packet the test queued through dhcp_recv_l3_packet(), and
++ * dhcp_send_raw_packet() records where the reply would have gone.
++ * Everything else, the option parsing included, is the real gdhcp code.
++ */
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#include <string.h>
++#include <unistd.h>
++#include <sys/socket.h>
++#include <net/if.h>
++#include <net/ethernet.h>
++#include <arpa/inet.h>
++
++#include <glib.h>
++
++#include "gdhcp/gdhcp.h"
++#include "gdhcp/common.h"
++
++static const uint8_t client_mac[ETH_ALEN] = {
++	0x02, 0x11, 0x22, 0x33, 0x44, 0x55
++};
++
++static int test_fds[2] = { -1, -1 };
++static struct dhcp_packet queued;
++static int queued_len;
++
++static struct {
++	int count;
++	uint8_t type;
++	uint32_t dest_ip;
++	uint8_t dest_arp[ETH_ALEN];
++	uint32_t yiaddr;
++	bool bcast;
++} sent;
++
++int __wrap_dhcp_l3_socket(int port, const char *interface, int family);
++int __wrap_dhcp_recv_l3_packet(struct dhcp_packet *packet, int fd);
++int __wrap_dhcp_send_raw_packet(struct dhcp_packet *dhcp_pkt,
++			uint32_t source_ip, int source_port,
++			uint32_t dest_ip, int dest_port,
++			const uint8_t *dest_arp, int ifindex, bool bcast);
++
++int __wrap_dhcp_l3_socket(int port, const char *interface, int family)
++{
++	g_assert_cmpint(socketpair(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0,
++							test_fds), ==, 0);
++
++	return test_fds[0];
++}
++
++int __wrap_dhcp_recv_l3_packet(struct dhcp_packet *packet, int fd)
++{
++	char byte;
++
++	g_assert_cmpint(read(fd, &byte, 1), ==, 1);
++
++	memcpy(packet, &queued, sizeof(*packet));
++
++	return queued_len;
++}
++
++int __wrap_dhcp_send_raw_packet(struct dhcp_packet *dhcp_pkt,
++			uint32_t source_ip, int source_port,
++			uint32_t dest_ip, int dest_port,
++			const uint8_t *dest_arp, int ifindex, bool bcast)
++{
++	const uint8_t *type;
++
++	type = dhcp_get_option(dhcp_pkt, sizeof(*dhcp_pkt),
++						DHCP_MESSAGE_TYPE);
++	/* not g_assert(), which G_DISABLE_ASSERT would drop */
++	g_assert_nonnull(type);
++
++	sent.count++;
++	sent.type = *type;
++	sent.dest_ip = dest_ip;
++	memcpy(sent.dest_arp, dest_arp, ETH_ALEN);
++	sent.yiaddr = dhcp_pkt->yiaddr;
++	sent.bcast = bcast;
++
++	g_assert_cmpint(source_port, ==, SERVER_PORT);
++	g_assert_cmpint(dest_port, ==, CLIENT_PORT);
++
++	return 0;
++}
++
++static GDHCPServer *server_new(void)
++{
++	GDHCPServerError error = G_DHCP_SERVER_ERROR_NONE;
++	GDHCPServer *server;
++	int index;
++
++	index = if_nametoindex("lo");
++	g_assert_cmpint(index, >, 0);
++
++	server = g_dhcp_server_new(G_DHCP_IPV4, index, &error);
++	g_assert_cmpint(error, ==, G_DHCP_SERVER_ERROR_NONE);
++	g_assert_true(server);
++
++	g_assert_cmpint(g_dhcp_server_set_ip_range(server,
++				"192.168.0.2", "192.168.0.100"), ==, 0);
++	g_assert_cmpint(g_dhcp_server_start(server), ==, 0);
++
++	return server;
++}
++
++static void server_free(GDHCPServer *server)
++{
++	g_dhcp_server_unref(server);
++	close(test_fds[1]);
++	test_fds[0] = test_fds[1] = -1;
++}
++
++/* Hand the server one client packet and let it answer. */
++static void client_send(uint8_t type, uint16_t flags, uint32_t ciaddr,
++						uint32_t requested_nip)
++{
++	int count = sent.count;
++
++	dhcp_init_header(&queued, type);
++	queued.xid = 0x12345678;
++	queued.flags = htons(flags);
++	queued.ciaddr = ciaddr;
++	memcpy(queued.chaddr, client_mac, ETH_ALEN);
++	if (requested_nip)
++		dhcp_add_option_uint32(&queued, DHCP_REQUESTED_IP,
++							requested_nip);
++	queued_len = sizeof(queued);
++
++	g_assert_cmpint(write(test_fds[1], "", 1), ==, 1);
++
++	while (sent.count == count)
++		g_main_context_iteration(NULL, TRUE);
++}
++
++static void assert_broadcast(void)
++{
++	static const uint8_t bcast[ETH_ALEN] = {
++		0xff, 0xff, 0xff, 0xff, 0xff, 0xff
++	};
++
++	g_assert_cmphex(sent.dest_ip, ==, INADDR_BROADCAST);
++	g_assert_true(memcmp(sent.dest_arp, bcast, ETH_ALEN) == 0);
++}
++
++static void assert_unicast(uint32_t nip)
++{
++	g_assert_cmphex(sent.dest_ip, ==, nip);
++	g_assert_true(memcmp(sent.dest_arp, client_mac, ETH_ALEN) == 0);
++}
++
++/* No broadcast bit, no address yet: OFFER and ACK go to yiaddr. */
++static void test_unicast_to_yiaddr(void)
++{
++	GDHCPServer *server = server_new();
++	uint32_t offered;
++
++	client_send(DHCPDISCOVER, 0, 0, 0);
++	g_assert_cmpint(sent.type, ==, DHCPOFFER);
++	g_assert_cmphex(sent.yiaddr, !=, 0);
++	assert_unicast(sent.yiaddr);
++
++	offered = ntohl(sent.yiaddr);
++	client_send(DHCPREQUEST, 0, 0, offered);
++	g_assert_cmpint(sent.type, ==, DHCPACK);
++	g_assert_cmphex(sent.yiaddr, ==, htonl(offered));
++	assert_unicast(sent.yiaddr);
++
++	server_free(server);
++}
++
++/* The broadcast bit is honoured. */
++static void test_broadcast_bit(void)
++{
++	GDHCPServer *server = server_new();
++	uint32_t offered;
++
++	client_send(DHCPDISCOVER, BROADCAST_FLAG, 0, 0);
++	g_assert_cmpint(sent.type, ==, DHCPOFFER);
++	assert_broadcast();
++
++	offered = ntohl(sent.yiaddr);
++	client_send(DHCPREQUEST, BROADCAST_FLAG, 0, offered);
++	g_assert_cmpint(sent.type, ==, DHCPACK);
++	assert_broadcast();
++
++	server_free(server);
++}
++
++/* A renewing client, which has an address, gets the ACK there. */
++static void test_unicast_to_ciaddr(void)
++{
++	GDHCPServer *server = server_new();
++	uint32_t offered;
++
++	client_send(DHCPDISCOVER, 0, 0, 0);
++	offered = ntohl(sent.yiaddr);
++	client_send(DHCPREQUEST, 0, 0, offered);
++	g_assert_cmpint(sent.type, ==, DHCPACK);
++
++	client_send(DHCPREQUEST, 0, htonl(offered), 0);
++	g_assert_cmpint(sent.type, ==, DHCPACK);
++	assert_unicast(htonl(offered));
++
++	server_free(server);
++}
++
++int main(int argc, char *argv[])
++{
++	g_test_init(&argc, &argv, NULL);
++
++	g_test_add_func("/dhcp-server/unicast-to-yiaddr",
++					test_unicast_to_yiaddr);
++	g_test_add_func("/dhcp-server/broadcast-bit", test_broadcast_bit);
++	g_test_add_func("/dhcp-server/unicast-to-ciaddr",
++					test_unicast_to_ciaddr);
++
++	return g_test_run();
++}

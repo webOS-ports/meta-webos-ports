@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 26 Nov 2026 05:42:59 +0100
+Subject: [PATCH] tethering: do not remove clients while walking the client
+ table
+
+Turning tethering off with a client still connected logged
+
+  g_hash_table_foreach: assertion 'version == hash_table->version' failed
+
+unregister_all_clients() walked clients_table with g_hash_table_foreach()
+and the callback, through __connman_tethering_client_unregister(),
+removed the entry it was called for. GLib does not allow changing a hash
+table while g_hash_table_foreach() walks it; besides the warning, it may
+skip clients, which then stay listed in TetheringClients.
+
+Use g_hash_table_foreach_remove(), which is made for this: the callback
+announces the removal and returns TRUE, and GLib removes the entry.
+
+Seen on a Q25 switching its hotspot off with a FuriPhone FLX1s connected.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/tethering.c | 16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/src/tethering.c b/src/tethering.c
+index 62258f5..2a225d4 100644
+--- a/src/tethering.c
++++ b/src/tethering.c
+@@ -259,16 +259,26 @@ static void tethering_restart(struct connman_ippool *pool, void *user_data)
+ 	g_free(ip);
+ }
+ 
+-static void unregister_client(gpointer key,
++/*
++ * Removing entries from clients_table while g_hash_table_foreach() walks
++ * it is not allowed: GLib warns ("version == hash_table->version") and
++ * may skip clients. Let g_hash_table_foreach_remove() do the removal.
++ */
++static void client_removed(const char *addr);
++
++static gboolean unregister_client(gpointer key,
+ 					gpointer value, gpointer user_data)
+ {
+ 	const char *addr = key;
+-	__connman_tethering_client_unregister(addr);
++
++	client_removed(addr);
++
++	return TRUE;
+ }
+ 
+ static void unregister_all_clients(void)
+ {
+-	g_hash_table_foreach(clients_table, unregister_client, NULL);
++	g_hash_table_foreach_remove(clients_table, unregister_client, NULL);
+ }
+ 
+ int __connman_tethering_set_enabled(const char *ip)

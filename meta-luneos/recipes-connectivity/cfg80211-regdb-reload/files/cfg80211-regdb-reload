@@ -14,10 +14,27 @@ IW=$(command -v iw) || exit 0
 # "command failed: Operation not supported" and there is nothing to be done
 # from userspace - put regulatory.db in the initramfs for those, the way
 # meta-hp does for tenderloin.
-if ! "$IW" reg reload 2>/dev/null; then
-    echo "cfg80211-regdb-reload: kernel has no RELOAD_REGDB; regulatory.db must be in the initramfs"
-    exit 0
-fi
+#
+# Any other failure can be early-boot timing: radon (4.19, which has the
+# command) failed it once at boot and accepted it by hand later. Retry for a
+# while (10 s at most, as connman waits for this unit), and log what iw
+# said rather than guess at why.
+tries=0
+until err=$("$IW" reg reload 2>&1); do
+    case "$err" in
+    *"not supported"*)
+        echo "cfg80211-regdb-reload: kernel has no RELOAD_REGDB; regulatory.db must be in the initramfs"
+        exit 0
+        ;;
+    esac
+    tries=$((tries + 1))
+    if [ "$tries" -ge 10 ]; then
+        echo "cfg80211-regdb-reload: reload failed $tries times, last: $err"
+        exit 0
+    fi
+    sleep 1
+done
+[ "$tries" -gt 0 ] && echo "cfg80211-regdb-reload: reload succeeded after $tries retries"
 
 # Optional static country, in the file Debian's crda package has always used.
 # Nothing ships one: without it cfg80211 stays in the world domain and adopts
