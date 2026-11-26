@@ -26,6 +26,7 @@ SRC_URI += " \
     file://0009-webOS-Edit-and-delete-received-messages-in-place.patch \
     file://0010-webOS-rename-group-DMs-and-take-people-out-of-them-a.patch \
     file://0011-webOS-Say-who-pinned-a-message-not-the-message-again.patch \
+    file://0012-webOS-Ask-the-gateway-for-fewer-events-nobody-shows.patch \
 "
 SRCREV_upstream = "2b85bbfad5e915f60f2c4ca30c1e7d720762c148"
 
