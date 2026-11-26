@@ -4,9 +4,10 @@ connman is upstream code with our patches on top, so the tests live in two
 places:
 
 - **Unit tests** are in connman itself, in `unit/`, added by patches
-  0021-0023 next to upstream's `test-ippool` and `test-iptables`. Each one
-  covers one of our fixes and fails without it. They are `noinst_PROGRAMS`,
-  so every bitbake build compiles and links them for the target.
+  0021-0023 and 0025 next to upstream's `test-ippool` and `test-iptables`.
+  Each one covers one of our fixes and fails without it. They are
+  `noinst_PROGRAMS`, so every bitbake build compiles and links them for
+  the target.
 - **The scripts here** run them and the other checks. They are not part of
   the recipe; bitbake ignores this folder.
 
@@ -65,7 +66,7 @@ where a component lacks them.
 
 ## device-check.sh: on a phone
 
-    tests/device-check.sh -d SERIAL [-P ADBPORT] [-c CLIENT_SERIAL] [-n CYCLES] [tether client restart]
+    tests/device-check.sh -d SERIAL [-P ADBPORT] [-c CLIENT_SERIAL] [-n CYCLES] [tether client restart offline]
 
 Over adb, through connmanctl only (nothing is tapped on screen):
 
@@ -78,6 +79,9 @@ Over adb, through connmanctl only (nothing is tapped on screen):
   network it was on.
 - `restart`: connmand is restarted while on Wi-Fi, which must be back
   within 30 s.
+- `offline`: offline mode (airplane mode) on and off, once with Wi-Fi on
+  and once with Wi-Fi switched off first. `OfflineMode` must read false
+  again afterwards and Wi-Fi must come back.
 
 ## What the tests cover
 
@@ -89,6 +93,7 @@ Over adb, through connmanctl only (nothing is tapped on screen):
 | 0019 wifi: dedicated AP interface | none (needs the driver) | `tether` |
 | 0020 tethering: client table walk | `test-tethering /tethering/disable-drops-clients` | `tether` (journal check) |
 | PreferredTechnologies (connman-conf) | none | `restart` |
+| 0025 technology: leaving offline mode | `test-offlinemode` | `offline` (Wi-Fi off case) |
 
 Every unit test above was checked against the code before its fix and
 fails there.

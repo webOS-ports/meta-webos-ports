@@ -16,8 +16,12 @@
 #                the network it was on
 #     restart    restart connmand while on Wi-Fi: Wi-Fi must be back
 #                within 30 s (PreferredTechnologies in main.conf)
+#     offline    offline mode (airplane mode) on and off, once with Wi-Fi
+#                on and once with it switched off first: every radio goes
+#                down, OfflineMode reads false again afterwards (0025), and
+#                Wi-Fi is back within 30 s
 #
-# The device must be on a Wi-Fi network for tether and restart. Nothing is
+# The device must be on a Wi-Fi network for tether, restart and offline. Nothing is
 # tapped on screen; everything goes through connmanctl. The client's
 # provisioning file is removed again, also when a test fails.
 #
@@ -41,7 +45,7 @@ while getopts "d:c:P:n:h" opt; do
 done
 shift $((OPTIND - 1))
 [ -n "$SERIAL" ] || { sed -n '2,/^$/s/^# \{0,1\}//p' "$0"; exit 2; }
-TESTS=${*:-tether ${CLIENT:+client} restart}
+TESTS=${*:-tether ${CLIENT:+client} restart offline}
 
 ADB=(adb ${PORT:+-P "$PORT"})
 dev() { "${ADB[@]}" -s "$SERIAL" shell "$@"; }
@@ -155,12 +159,57 @@ test_restart() {
 	dev 'connmanctl connect '"$svc" >/dev/null 2>&1
 }
 
+offline_mode() { dev 'connmanctl state' | tr -d '\r' | sed -n 's/^  OfflineMode = //p'; }
+
+# offline_cycle LABEL: offline mode on, then off again
+offline_cycle() {
+	dev 'connmanctl enable offline' >/dev/null
+	sleep 4
+	[ "$(offline_mode)" = True ] && pass "$1: OfflineMode on" \
+		|| fail "$1: OfflineMode did not turn on"
+	[ "$(tech_prop Powered)" = False ] && pass "$1: Wi-Fi powered down" \
+		|| fail "$1: Wi-Fi still powered in offline mode"
+	dev 'connmanctl disable offline' >/dev/null
+	sleep 4
+	[ "$(offline_mode)" = False ] && pass "$1: OfflineMode off again" \
+		|| fail "$1: OfflineMode still $(offline_mode) after turning it off"
+}
+
+# wifi_back SVC WHAT: wait up to 30 s for the device to be on SVC again
+wifi_back() {
+	local t
+	for t in $(seq 3 3 30); do
+		dev "connmanctl services 2>/dev/null" | grep -q "^\*A[OR] .*$1" \
+			&& { pass "Wi-Fi back ${t} s after $2"; return 0; }
+		sleep 3
+	done
+	fail "Wi-Fi not back 30 s after $2"
+}
+
+test_offline() {
+	local svc
+	echo "== offline"
+	svc=$(wifi_service)
+	[ -n "$svc" ] || { fail "device is not on Wi-Fi"; return; }
+	offline_cycle "Wi-Fi on"
+	wifi_back "$svc" "leaving offline mode" || dev 'connmanctl enable wifi' >/dev/null 2>&1
+	# With Wi-Fi switched off first, another technology is the last one
+	# brought back. connman 2.0 took that one's result for the whole
+	# switch, so Wired failing on gretap0 kept OfflineMode true (0025).
+	dev 'connmanctl disable wifi' >/dev/null
+	sleep 2
+	offline_cycle "Wi-Fi off"
+	dev 'connmanctl enable wifi' >/dev/null
+	wifi_back "$svc" "switching Wi-Fi back on"
+}
+
 status=0
 for t in $TESTS; do
 	case $t in
 	tether) test_tether ;;
 	client) [ -n "$CLIENT" ] && test_client || echo "== client: no -c, skipped" ;;
 	restart) test_restart ;;
+	offline) test_offline ;;
 	*) echo "unknown test $t"; status=1 ;;
 	esac
 done

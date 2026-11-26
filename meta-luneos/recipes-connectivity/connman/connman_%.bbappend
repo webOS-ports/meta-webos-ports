@@ -102,6 +102,14 @@ SRC_URI += " \
     file://0023-unit-test-tethering-clients-also-when-tethering-is-t.patch \
 "
 
+# Leaving offline mode (airplane mode) judged the outcome by the last
+# technology it powered alone. Wired with only the kernel's gretap0/erspan0
+# stubs cannot be powered, so OfflineMode was read back as true although
+# WiFi and cellular had come back, and the shell kept showing airplane
+# mode. With its unit test, unit/test-offlinemode. connman-conf also keeps
+# connman off those two interfaces.
+SRC_URI += "file://0025-technology-leaving-offline-mode-must-not-depend-on-e.patch"
+
 # See connman-vpn.service.d/luneos-caps.conf for why: upstream's
 # CapabilityBoundingSet on connman-vpn.service is missing CAP_SYS_ADMIN and
 # CAP_DAC_OVERRIDE, which the l2tp plugin's client-side pppd needs to open
