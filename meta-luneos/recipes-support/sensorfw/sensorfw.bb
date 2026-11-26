@@ -7,18 +7,17 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=2d5025d4aa3495befef8f17206a5b0a1"
 PACKAGE_ARCH = "${MACHINE_ARCH}"
 
 PV = "0.15.2+git"
-SRCREV = "b37c5b467e8be554066dfd1c4138dbff8eec77b3"
+PE = "1"
+SRCREV = "a1af4b071b7f7de2c95233ad886c6652afbb1c6e"
 DEPENDS = "qtbase luna-sysmgr-common luna-service2 json-c glib-2.0"
 
 SRC_URI = " \
     git://github.com/sailfishos/sensorfw.git;protocol=https;branch=master \
-    file://0001-sensorfwd-Add-TimeoutStopSec-to-improve-shutdown.patch \
-    file://0002-sensorfwd-Preload-sensors-listed-in-preload_sensors-.patch \
     file://0003-iioadaptor-Accept-input-attributes-for-IIO_CHAN_INFO.patch \
     file://0004-qt-api-do-not-marshal-invalid-QVariant-arguments.patch \
     file://0005-compasschain-link-the-sibling-libraries-it-calls.patch \
-    file://0006-lunaservice-drop-the-LunaSysMgrIpcMessages-pkgconfig.patch \
     file://0007-sensormanager-never-block-the-main-thread-on-a-full-.patch \
+    file://0008-sensord-Handle-local-socket-errors-with-Qt-5.15-and.patch \
 "
 
 do_configure:prepend() {
