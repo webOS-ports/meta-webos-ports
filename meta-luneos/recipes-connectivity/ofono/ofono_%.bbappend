@@ -87,6 +87,8 @@ SRC_URI:append = " \
   file://0144-common-name-the-5G-access-technologies.patch \
   file://0145-plugins-report-SMS-status-reports-on-D-Bus-org.ofono.patch \
   file://0146-unit-test-the-SMS-status-report-signal.patch \
+  file://0147-provision-keep-the-best-access-point-of-each-type.patch \
+  file://0148-provisiontool-merge-providers-that-share-an-MCC-MNC.patch \
 "
 
 # On Halium the modem is driven by ofono-binder-plugin. The in-tree ril

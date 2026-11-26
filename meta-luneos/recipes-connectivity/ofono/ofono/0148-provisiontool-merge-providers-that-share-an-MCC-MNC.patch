@@ -1,0 +1,239 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] provisiontool: merge providers that share an MCC/MNC
+
+Several providers often list the same MCC/MNC with the same SPN, or
+with none: an operator and its MVNOs, which the data cannot tell apart.
+The generator inserted them one after the other, so the last provider
+in the file replaced the others. 144 providers were lost from the
+database this way. In the Netherlands every KPN (20408) SIM got
+Galaxy's access point and every Odido (20416) SIM got Simpel's.
+
+Group the providers by MCC/MNC and SPN first and merge their access
+points in file order. oFono picks one per context type at runtime. A
+merged access point without a name gets its provider's name, so it can
+still be told apart and matched against the SPN. Providers that are not
+merged keep sharing one context block across their MCC/MNCs.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ tools/provisiontool      | 73 ++++++++++++++++++++++++++++------------
+ unit/test-provision.c    | 59 ++++++++++++++++++++++++++++++++
+ unit/test-provision.json | 36 ++++++++++++++++++++
+ 3 files changed, 147 insertions(+), 21 deletions(-)
+
+diff --git a/tools/provisiontool b/tools/provisiontool
+index c08b9c4..0b15abd 100755
+--- a/tools/provisiontool
++++ b/tools/provisiontool
+@@ -486,32 +486,63 @@ class ProvisionDatabase(ctypes.LittleEndianStructure):
+         self.contexts = bytearray()
+         self.tree = MccMncTree()
+ 
++        # Several providers often share an MCC/MNC with the same SPN, or
++        # with none: an operator and its MVNOs, which the data cannot tell
++        # apart. Inserting them one by one would let the last provider
++        # silently replace the others, so group them first and merge their
++        # access points in file order. oFono picks one per context type at
++        # runtime. A merged access point without a name gets its provider's
++        # name, so it can still be told apart and matched against the SPN.
++        groups = {}
++
+         for info in provider_infos:
+-            pd = ProvisionData(info.spn, len(self.contexts), self.strings)
++            for mccmnc in info.mccmnc_list:
++                groups.setdefault((mccmnc, info.spn), []).append(info)
++
++        # Providers that are not merged keep sharing one context block
++        # across all of their MCC/MNCs, as before
++        blocks = {}
++
++        for (mccmnc, info_spn), infos in groups.items():
++            ident = tuple(id(info) for info in infos)
++            offset = blocks.get(ident)
++
++            if offset is None:
++                offset = len(self.contexts)
++                blocks[ident] = offset
++
++                context_list = []
++                for info in infos:
++                    for context in info.context_list:
++                        if len(infos) > 1 and 'name' not in context:
++                            context = dict(context, name=info.name)
+ 
+-            self.contexts.extend(struct.pack('<Q', len(info.context_list)))
++                        context_list.append(context)
+ 
+-            for context in info.context_list:
+-                self.contexts.extend(bytes(ProvisionContext(context,
++                self.contexts.extend(struct.pack('<Q', len(context_list)))
++
++                for context in context_list:
++                    self.contexts.extend(bytes(ProvisionContext(context,
+                                                             self.strings)))
+ 
+-            for mccmnc in info.mccmnc_list:
+-                # Sort None spns as '' so they're first in the list when
+-                # the SerializeVisitor sorts the entries dict
+-                spn = info.spn if info.spn is not None else ''
+-
+-                # 2 and 3 byte MNCs are treated differently, even if evaluate
+-                # to the same integer.  For example, 02 and 002 are different
+-                # MNCs.  In practice this doesn't actually happen except on
+-                # test networks, but account for this possibility by using the
+-                # upper 10 bits for the MCC, followed by a single bit which
+-                # signifies whether a 3 byte MNC is used, followed by 10 bits
+-                # of the MNC
+-                key = int(mccmnc[:3]) << 11 | int(mccmnc[3:])
+-                if len(mccmnc[3:]) == 3:
+-                    key |= 1 << 10
+-
+-                self.tree.insert(key, spn, pd)
++            pd = ProvisionData(info_spn, offset, self.strings)
++
++            # Sort None spns as '' so they're first in the list when
++            # the SerializeVisitor sorts the entries dict
++            spn = info_spn if info_spn is not None else ''
++
++            # 2 and 3 byte MNCs are treated differently, even if evaluate
++            # to the same integer.  For example, 02 and 002 are different
++            # MNCs.  In practice this doesn't actually happen except on
++            # test networks, but account for this possibility by using the
++            # upper 10 bits for the MCC, followed by a single bit which
++            # signifies whether a 3 byte MNC is used, followed by 10 bits
++            # of the MNC
++            key = int(mccmnc[:3]) << 11 | int(mccmnc[3:])
++            if len(mccmnc[3:]) == 3:
++                key |= 1 << 10
++
++            self.tree.insert(key, spn, pd)
+ 
+         visitor = self.CalculateNodeOffsetVisitor()
+         visitor.visit(self.tree.root)
+diff --git a/unit/test-provision.c b/unit/test-provision.c
+index 54577f3..6ce44a1 100644
+--- a/unit/test-provision.c
++++ b/unit/test-provision.c
+@@ -135,6 +135,61 @@ static const struct provision_db_entry xyz_5g_contexts[] = {
+ 	}
+ };
+ 
++/*
++ * Operator Gamma and Gamma MVNO share 99977 with no SPN: both providers'
++ * access points are kept, in file order, and the unnamed one is named
++ * after its provider.
++ */
++static const struct provision_db_entry gamma_merged_contexts[] = {
++	{
++		.type = OFONO_GPRS_CONTEXT_TYPE_INTERNET,
++		.proto = OFONO_GPRS_PROTO_IPV4V6,
++		.name = "Gamma Internet",
++		.apn = "gamma.internet",
++		.auth_method = OFONO_GPRS_AUTH_METHOD_CHAP,
++	},
++	{
++		.type = OFONO_GPRS_CONTEXT_TYPE_MMS,
++		.proto = OFONO_GPRS_PROTO_IPV4V6,
++		.name = "Gamma MMS",
++		.apn = "gamma.mms",
++		.auth_method = OFONO_GPRS_AUTH_METHOD_CHAP,
++	},
++	{
++		.type = OFONO_GPRS_CONTEXT_TYPE_INTERNET,
++		.proto = OFONO_GPRS_PROTO_IPV4V6,
++		.name = "Gamma MVNO",
++		.apn = "mvno.internet",
++		.auth_method = OFONO_GPRS_AUTH_METHOD_CHAP,
++	},
++};
++
++/* Alone on 99978, Gamma MVNO's access point keeps having no name */
++static const struct provision_db_entry gamma_mvno_contexts[] = {
++	{
++		.type = OFONO_GPRS_CONTEXT_TYPE_INTERNET,
++		.proto = OFONO_GPRS_PROTO_IPV4V6,
++		.apn = "mvno.internet",
++		.auth_method = OFONO_GPRS_AUTH_METHOD_CHAP,
++	},
++};
++
++static const struct provision_test lookup_gamma_merged = {
++	.mcc = "999",
++	.mnc = "77",
++	.result = 0,
++	.n_items = L_ARRAY_SIZE(gamma_merged_contexts),
++	.items = gamma_merged_contexts,
++};
++
++static const struct provision_test lookup_gamma_mvno = {
++	.mcc = "999",
++	.mnc = "78",
++	.result = 0,
++	.n_items = L_ARRAY_SIZE(gamma_mvno_contexts),
++	.items = gamma_mvno_contexts,
++};
++
+ /* Make sure mccmnc not in the database isn't found */
+ static const struct provision_test unknown_mcc_mnc = {
+ 	.mcc = "994",
+@@ -449,6 +504,10 @@ int main(int argc, char **argv)
+ 	l_test_add("Exact match (XYZ)", provision_lookup, &lookup_lte_xyz);
+ 	l_test_add("Exact match (XYZ 5G)", provision_lookup, &lookup_5g_xyz);
+ 	l_test_add("Exact math (no match)", provision_lookup, &lookup_no_match);
++	l_test_add("Providers sharing an MCC/MNC are merged",
++				provision_lookup, &lookup_gamma_merged);
++	l_test_add("Unmerged provider keeps its own contexts",
++				provision_lookup, &lookup_gamma_mvno);
+ 	l_test_add("Pick: Vodafone NL, no SPN", provision_pick,
+ 						&pick_vodafone_no_spn);
+ 	l_test_add("Pick: Vodafone NL, SPN vodafone", provision_pick,
+diff --git a/unit/test-provision.json b/unit/test-provision.json
+index fcf82a6..0d66a59 100644
+--- a/unit/test-provision.json
++++ b/unit/test-provision.json
+@@ -96,5 +96,41 @@
+ 	"tags": "5g"
+       }
+     ]
++  },
++  {
++    "name": "Operator Gamma",
++    "ids": [
++      "99977"
++    ],
++    "apns": [
++      {
++        "name": "Gamma Internet",
++        "apn": "gamma.internet",
++        "type": [
++          "internet"
++        ]
++      },
++      {
++        "name": "Gamma MMS",
++        "apn": "gamma.mms",
++        "type": [
++          "mms"
++        ]
++      }
++    ]
++  },
++  {
++    "name": "Gamma MVNO",
++    "ids": [
++      "99977", "99978"
++    ],
++    "apns": [
++      {
++        "apn": "mvno.internet",
++        "type": [
++          "internet"
++        ]
++      }
++    ]
+   }
+ ]
+-- 
+2.53.0
+

@@ -1,0 +1,378 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] provision: keep the best access point of each type
+
+The provision database lists several internet access points for many
+networks. Vodafone NL (20404) has three: a consumer, a business and an
+M2M one. __ofono_provision_get_settings() refused any lookup holding
+two contexts of one type, so a Vodafone NL SIM got a blank internet
+context with no APN and no data until the user typed one in. The
+binder plugin's initial attach APN, which goes through the same
+lookup, was lost as well.
+
+Pick instead, the way Sailfish OS's provisioning plugin does: rank the
+access points by how well their name matches the SPN (exact, then
+ignoring case, then one containing the other), then by their order in
+the database, and keep each one whose types are not yet taken. Return
+them internet first, then MMS and the rest, as Sailfish does. The
+database does not carry the operator's name or a primary flag, so the
+SPN is matched on the access point's name only. For Vodafone NL this
+keeps live.vodafone.com, the consumer APN.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/provision.c       |  21 +++---
+ src/provisiondb.c     | 100 +++++++++++++++++++++++++
+ src/provisiondb.h     |   3 +
+ unit/test-provision.c | 168 ++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 281 insertions(+), 11 deletions(-)
+
+diff --git a/src/provision.c b/src/provision.c
+index 0530386..2f2e80b 100644
+--- a/src/provision.c
++++ b/src/provision.c
+@@ -27,7 +27,7 @@ bool __ofono_provision_get_settings(const char *mcc,
+ 	struct provision_db_entry *contexts;
+ 	int r;
+ 	size_t i;
+-	uint32_t type;
++	size_t n_picked;
+ 	_auto_(l_strv_free) char **tags_filter = NULL;
+ 
+ 	if (mcc == NULL || strlen(mcc) == 0 || mnc == NULL || strlen(mnc) == 0)
+@@ -56,18 +56,17 @@ bool __ofono_provision_get_settings(const char *mcc,
+ 					ap->message_center);
+ 	}
+ 
+-	/* Make sure there are no duplicates */
+-	for (i = 0, type = 0; i < n_contexts; i++) {
+-		struct provision_db_entry *ap = contexts + i;
++	/* Several access points of one type: keep the best of each */
++	n_picked = provision_db_pick_best(contexts, n_contexts, spn);
++	if (n_picked != n_contexts) {
++		ofono_info("%zu access points for %s%s, spn: %s, using %zu",
++				n_contexts, mcc, mnc, spn, n_picked);
+ 
+-		if (type & ap->type) {
+-			ofono_warn("Duplicate detected for %s%s, spn: %s",
+-					mcc, mnc, spn);
+-			l_free(contexts);
+-			return false;
+-		}
++		for (i = 0; i < n_picked; i++)
++			ofono_info("Using APN: %s, Type: %x",
++					contexts[i].apn, contexts[i].type);
+ 
+-		type |= ap->type;
++		n_contexts = n_picked;
+ 	}
+ 
+ 	*count = n_contexts;
+diff --git a/src/provisiondb.c b/src/provisiondb.c
+index 6a913d8..3e478c4 100644
+--- a/src/provisiondb.c
++++ b/src/provisiondb.c
+@@ -470,3 +470,103 @@ int provision_db_lookup(struct provision_db *pdb,
+ 	return __get_contexts(pdb, L_LE64_TO_CPU(found->context_offset),
+ 				tags_filter, items, n_items);
+ }
++
++/*
++ * How well an access point's name matches the SIM's service provider
++ * name: 3 for an exact match, 2 when only the case differs, 1 when one
++ * contains the other ignoring case, 0 otherwise.
++ */
++static int spn_score(const char *name, const char *spn)
++{
++	_auto_(l_free) char *lname = NULL;
++	_auto_(l_free) char *lspn = NULL;
++
++	if (!name || !spn || !name[0] || !spn[0])
++		return 0;
++
++	if (!strcmp(name, spn))
++		return 3;
++
++	lname = l_ascii_strdown(name, -1);
++	lspn = l_ascii_strdown(spn, -1);
++
++	if (!strcmp(lname, lspn))
++		return 2;
++
++	if (strstr(lname, lspn) || strstr(lspn, lname))
++		return 1;
++
++	return 0;
++}
++
++/*
++ * Keep at most one access point of each context type.
++ *
++ * The database often lists several internet access points for a network,
++ * e.g. a consumer, a business and an M2M one. Rather than refusing to
++ * provision at all, rank them the way Sailfish OS does: the closest match
++ * between the access point's name and the SPN first, then the order of the
++ * database. Walk them in that order and keep each one whose types are not
++ * yet taken. The kept entries are compacted to the front of the array,
++ * ordered by type so the internet context comes first, and their number is
++ * returned.
++ */
++size_t provision_db_pick_best(struct provision_db_entry *entries, size_t n,
++				const char *spn)
++{
++	_auto_(l_free) size_t *order = NULL;
++	_auto_(l_free) int *score = NULL;
++	_auto_(l_free) bool *keep = NULL;
++	uint32_t taken = 0;
++	size_t kept = 0;
++	size_t i;
++	size_t j;
++
++	if (!entries || n < 2)
++		return n;
++
++	order = l_new(size_t, n);
++	score = l_new(int, n);
++	keep = l_new(bool, n);
++
++	for (i = 0; i < n; i++) {
++		order[i] = i;
++		score[i] = spn_score(entries[i].name, spn);
++	}
++
++	/* Stable insertion sort, best score first */
++	for (i = 1; i < n; i++) {
++		size_t cur = order[i];
++
++		for (j = i; j > 0 && score[order[j - 1]] < score[cur]; j--)
++			order[j] = order[j - 1];
++
++		order[j] = cur;
++	}
++
++	for (i = 0; i < n; i++) {
++		const struct provision_db_entry *ap = entries + order[i];
++
++		if (ap->type & taken)
++			continue;
++
++		taken |= ap->type;
++		keep[order[i]] = true;
++	}
++
++	for (i = 0; i < n; i++)
++		if (keep[i])
++			entries[kept++] = entries[i];
++
++	/* Internet first, then MMS and the rest, as Sailfish OS orders them */
++	for (i = 1; i < kept; i++) {
++		struct provision_db_entry cur = entries[i];
++
++		for (j = i; j > 0 && entries[j - 1].type > cur.type; j--)
++			entries[j] = entries[j - 1];
++
++		entries[j] = cur;
++	}
++
++	return kept;
++}
+diff --git a/src/provisiondb.h b/src/provisiondb.h
+index 2c70bc1..4157f8e 100644
+--- a/src/provisiondb.h
++++ b/src/provisiondb.h
+@@ -31,3 +31,6 @@ int provision_db_lookup(struct provision_db *pdb,
+ 			char **tags_filter,
+ 			struct provision_db_entry **items,
+ 			size_t *n_items);
++
++size_t provision_db_pick_best(struct provision_db_entry *entries, size_t n,
++				const char *spn);
+diff --git a/unit/test-provision.c b/unit/test-provision.c
+index d251f31..54577f3 100644
+--- a/unit/test-provision.c
++++ b/unit/test-provision.c
+@@ -278,6 +278,158 @@ static void provision_lookup(const void *data)
+ 	l_free(items);
+ }
+ 
++#define T_INTERNET OFONO_GPRS_CONTEXT_TYPE_INTERNET
++#define T_MMS OFONO_GPRS_CONTEXT_TYPE_MMS
++#define T_IMS OFONO_GPRS_CONTEXT_TYPE_IMS
++
++struct pick_test {
++	const char *spn;
++	size_t n_in;
++	const struct provision_db_entry *in;
++	size_t n_out;
++	const char *const *apns;
++};
++
++/* Vodafone NL (20404) as listed in data/provision.json */
++static const struct provision_db_entry vodafone_nl[] = {
++	{ .type = T_INTERNET, .name = "Non-business",
++				.apn = "live.vodafone.com" },
++	{ .type = T_INTERNET, .name = "Business",
++				.apn = "office.vodafone.nl" },
++	{ .type = T_INTERNET, .name = "M2M",
++				.apn = "m2m.global.vodafone.nl" },
++};
++
++static const char *const vodafone_first[] = { "live.vodafone.com" };
++static const char *const vodafone_business[] = { "office.vodafone.nl" };
++
++static const struct pick_test pick_vodafone_no_spn = {
++	.n_in = L_ARRAY_SIZE(vodafone_nl), .in = vodafone_nl,
++	.n_out = 1, .apns = vodafone_first,
++};
++
++static const struct pick_test pick_vodafone_spn = {
++	.spn = "vodafone",
++	.n_in = L_ARRAY_SIZE(vodafone_nl), .in = vodafone_nl,
++	.n_out = 1, .apns = vodafone_first,
++};
++
++static const struct pick_test pick_spn_exact = {
++	.spn = "Business",
++	.n_in = L_ARRAY_SIZE(vodafone_nl), .in = vodafone_nl,
++	.n_out = 1, .apns = vodafone_business,
++};
++
++static const struct provision_db_entry ben_like[] = {
++	{ .type = T_INTERNET, .name = "Ben internet (prepaid)",
++				.apn = "partial" },
++	{ .type = T_INTERNET, .name = "BEN", .apn = "nocase" },
++	{ .type = T_INTERNET, .name = "Other", .apn = "other" },
++};
++
++static const char *const ben_nocase[] = { "nocase" };
++static const char *const ben_partial[] = { "partial" };
++
++static const struct pick_test pick_nocase_beats_partial = {
++	.spn = "ben",
++	.n_in = L_ARRAY_SIZE(ben_like), .in = ben_like,
++	.n_out = 1, .apns = ben_nocase,
++};
++
++static const struct pick_test pick_partial = {
++	.spn = "Internet",
++	.n_in = L_ARRAY_SIZE(ben_like), .in = ben_like,
++	.n_out = 1, .apns = ben_partial,
++};
++
++static const struct provision_db_entry mixed[] = {
++	{ .type = T_INTERNET, .name = "A", .apn = "a" },
++	{ .type = T_MMS, .name = "M", .apn = "m" },
++	{ .type = T_INTERNET | T_MMS, .name = "Both", .apn = "both" },
++	{ .type = T_IMS, .name = "I", .apn = "i" },
++	{ .type = T_INTERNET, .name = "C", .apn = "c" },
++};
++
++static const char *const mixed_first[] = { "a", "m", "i" };
++static const char *const mixed_both[] = { "both", "i" };
++
++static const struct pick_test pick_mixed = {
++	.n_in = L_ARRAY_SIZE(mixed), .in = mixed,
++	.n_out = 3, .apns = mixed_first,
++};
++
++static const struct pick_test pick_mixed_spn_both = {
++	.spn = "both",
++	.n_in = L_ARRAY_SIZE(mixed), .in = mixed,
++	.n_out = 2, .apns = mixed_both,
++};
++
++static const struct provision_db_entry distinct[] = {
++	{ .type = T_INTERNET, .name = "Simpel", .apn = "internet.access.nl" },
++	{ .type = T_MMS, .name = "Simpel MMS", .apn = "mms" },
++};
++
++static const char *const distinct_apns[] = { "internet.access.nl", "mms" };
++
++static const struct pick_test pick_distinct = {
++	.spn = "MMS",
++	.n_in = L_ARRAY_SIZE(distinct), .in = distinct,
++	.n_out = 2, .apns = distinct_apns,
++};
++
++static const struct pick_test pick_single = {
++	.spn = "x",
++	.n_in = 1, .in = vodafone_nl + 2,
++	.n_out = 1, .apns = (const char *const[]) { "m2m.global.vodafone.nl" },
++};
++
++/* Shaped like KPN NL (20408) once its providers are merged */
++static const struct provision_db_entry mms_first[] = {
++	{ .type = T_INTERNET, .name = "Hi", .apn = "portalmmm.nl" },
++	{ .type = T_MMS, .name = "KPN MMS", .apn = "portalmmm.nl" },
++	{ .type = T_INTERNET, .name = "KPN NL", .apn = "internet" },
++};
++
++static const char *const mms_first_apns[] = { "internet", "portalmmm.nl" };
++
++static const struct pick_test pick_internet_first = {
++	.spn = "KPN",
++	.n_in = L_ARRAY_SIZE(mms_first), .in = mms_first,
++	.n_out = 2, .apns = mms_first_apns,
++};
++
++static void provision_pick(const void *data)
++{
++	const struct pick_test *test = data;
++	_auto_(l_free) struct provision_db_entry *entries =
++		l_memdup(test->in, test->n_in * sizeof(*test->in));
++	size_t n;
++	size_t i;
++	size_t j;
++
++	n = provision_db_pick_best(entries, test->n_in, test->spn);
++	assert(n == test->n_out);
++
++	for (i = 0; i < n; i++) {
++		assert(l_streq0(entries[i].apn, test->apns[i]));
++
++		/* Internet first, then MMS and the rest */
++		if (i > 0)
++			assert(entries[i - 1].type <= entries[i].type);
++	}
++
++	/* Never two of one type */
++	for (i = 0; i < n; i++)
++		for (j = i + 1; j < n; j++)
++			assert(!(entries[i].type & entries[j].type));
++}
++
++static void provision_pick_empty(const void *data)
++{
++	assert(provision_db_pick_best(NULL, 0, NULL) == 0);
++	assert(provision_db_pick_best(NULL, 3, "spn") == 3);
++}
++
+ int main(int argc, char **argv)
+ {
+ 	int r;
+@@ -297,6 +449,22 @@ int main(int argc, char **argv)
+ 	l_test_add("Exact match (XYZ)", provision_lookup, &lookup_lte_xyz);
+ 	l_test_add("Exact match (XYZ 5G)", provision_lookup, &lookup_5g_xyz);
+ 	l_test_add("Exact math (no match)", provision_lookup, &lookup_no_match);
++	l_test_add("Pick: Vodafone NL, no SPN", provision_pick,
++						&pick_vodafone_no_spn);
++	l_test_add("Pick: Vodafone NL, SPN vodafone", provision_pick,
++						&pick_vodafone_spn);
++	l_test_add("Pick: exact SPN match", provision_pick, &pick_spn_exact);
++	l_test_add("Pick: case match beats partial", provision_pick,
++						&pick_nocase_beats_partial);
++	l_test_add("Pick: partial SPN match", provision_pick, &pick_partial);
++	l_test_add("Pick: mixed types", provision_pick, &pick_mixed);
++	l_test_add("Pick: SPN picks a combined type", provision_pick,
++						&pick_mixed_spn_both);
++	l_test_add("Pick: distinct types kept", provision_pick, &pick_distinct);
++	l_test_add("Pick: single entry", provision_pick, &pick_single);
++	l_test_add("Pick: internet context first", provision_pick,
++						&pick_internet_first);
++	l_test_add("Pick: empty input", provision_pick_empty, NULL);
+ 
+ 	pdb = provision_db_new(UNITDIR "test-provision.db");
+ 	assert(pdb);
+-- 
+2.53.0
+
