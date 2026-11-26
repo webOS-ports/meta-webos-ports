@@ -23,10 +23,11 @@ SRC_URI += " \
     file://0009-webOS-show-a-poll-s-votes-in-the-Messaging-app-and-a.patch \
     file://0010-webOS-hand-the-Messaging-app-received-files-file-URI.patch \
     file://0011-webOS-name-who-a-forward-is-from-whatever-it-came-fr.patch \
+    file://0012-webOS-remove-a-deleted-account-s-store-again.patch \
 "
-SRCREV_upstream = "e460589266fa4132c85f270efb4f2c8d332dbcb5"
+SRCREV_upstream = "80f3efbee4867828e14e23a5a1b27b8cbc8cbe0c"
 
-PV = "0.9.5+git"
+PV = "0.9.6+git"
 # The recipe used to be versioned 1.0+git while it built the monorepo copy; upstream's real version
 # is lower, so bump the epoch to keep package feeds moving forward.
 PE = "5"

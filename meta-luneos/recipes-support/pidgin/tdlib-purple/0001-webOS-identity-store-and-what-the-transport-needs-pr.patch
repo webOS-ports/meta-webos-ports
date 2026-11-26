@@ -1,6 +1,4 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Herman van Hazendonk <github.com@herrie.org>
-Date: Tue, 20 Oct 2026 16:25:31 +0200
 Subject: [PATCH] webOS: identity, store and what the transport needs:
  prpl-telegram, log level, cryptofs store, contacts, presence, mute and
  archive
@@ -83,18 +81,14 @@ tdlib-purple does not give it:
   sender is a user; the transport splits on \x1f, using the id as the
   routable address (so the app can open a 1:1 with the sender) and the
   rest as the name.
-- Handle-style addressing. webOS reduces a contact's display name to a
-  handle - ASCII alphanumerics only, lowercased ("Herman van Hazendonk" ->
-  "hermanvanhazendonk") - and may address a conversation by it. Resolve
-  such names as a last resort, after display name and @username.
 
 The presence mapping and the sender's id are for the Messaging app
 only, whose front-end, imlibpurpleservice, gives libpurple the UI name
 "Palm Messaging" (isWebosUi()). Other front-ends keep upstream's
 mapping and get the sender as before.
 
-Not for upstream: the blist keys, the \x1f convention and the handle
-normalization are contracts with the webOS transport.
+Not for upstream: the blist keys and the \x1f convention are contracts
+with the webOS transport.
 
 * Expose mute and archive state, and leave archived chats out
 
@@ -148,32 +142,32 @@ half, and the login-through-chat tests expect the cryptofs store.
 Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
 Upstream-Status: Inappropriate [webOS specific]
 ---
- account-data.cpp            |  48 ++++++++++++++
- account-data.h              |  10 +++
- client-utils.cpp            |  45 ++++++++++++-
+ account-data.cpp            |  22 ++++++
+ account-data.h              |   5 ++
+ client-utils.cpp            |  41 ++++++++++-
  config.cpp.in               |   2 +-
  identifiers.cpp             |   5 ++
  identifiers.h               |   2 +
  purple-info.cpp             |   6 ++
- purple-info.h               |  11 +++-
+ purple-info.h               |  11 ++-
  receiving.cpp               |  23 +++++--
- td-client.cpp               | 127 +++++++++++++++++++++++++++++++++++-
+ td-client.cpp               | 133 ++++++++++++++++++++++++++++++++++--
  td-client.h                 |  10 +++
- tdlib-purple.cpp            | 110 +++++++++++++++++++++++++++++++
+ tdlib-purple.cpp            | 110 +++++++++++++++++++++++++++++
  test/file-transfer-test.cpp |   2 +
  test/fixture.cpp            |   4 +-
  test/group-chat-test.cpp    |   4 +-
- test/libpurple-mock.cpp     |  29 ++++++++
- test/login-test.cpp         |  31 ++++-----
+ test/libpurple-mock.cpp     |  24 +++++++
+ test/login-test.cpp         |  34 ++++-----
  test/secret-chat-test.cpp   |   4 +-
  transceiver.cpp             |   8 ++-
- 19 files changed, 443 insertions(+), 38 deletions(-)
+ 19 files changed, 407 insertions(+), 43 deletions(-)
 
 diff --git a/account-data.cpp b/account-data.cpp
-index 052d4c7..14893c6 100644
+index 84213e4..dd428c7 100644
 --- a/account-data.cpp
 +++ b/account-data.cpp
-@@ -81,6 +81,21 @@ static bool isUnansweredStranger(const td::td_api::chat &chat)
+@@ -89,6 +89,21 @@ static bool isUnansweredStranger(const td::td_api::chat &chat)
  
  bool isChatInContactList(const td::td_api::chat &chat, const td::td_api::user *privateChatUser)
  {
@@ -195,7 +189,7 @@ index 052d4c7..14893c6 100644
      if (privateChatUser && privateChatUser->is_contact_)
          return true;
      if (privateChatUser && isUnansweredStranger(chat))
-@@ -513,6 +528,13 @@ void TdAccountData::updateChatActionBar(ChatId chatId, td::td_api::object_ptr<td
+@@ -508,6 +523,13 @@ void TdAccountData::updateChatActionBar(ChatId chatId, td::td_api::object_ptr<td
          it->second.chat->action_bar_ = std::move(actionBar);
  }
  
@@ -209,44 +203,11 @@ index 052d4c7..14893c6 100644
  void TdAccountData::updateSmallChatPhoto(ChatId chatId, td::td_api::object_ptr<td::td_api::file> photo)
  {
      auto it = m_chatInfo.find(chatId);
-@@ -680,6 +702,32 @@ void TdAccountData::getUsersByUsername(const char *username,
-     }
- }
- 
-+// webOS: reduce a name to a handle the way webOS does: keep only ASCII alphanumerics, lowercased.
-+static std::string normalizeHandle(const std::string &s)
-+{
-+    std::string out;
-+    out.reserve(s.size());
-+    for (unsigned char c: s)
-+        if (std::isalnum(c))
-+            out += (char) std::tolower(c);
-+    return out;
-+}
-+
-+void TdAccountData::getUsersByNormalizedDisplayName(const char *name,
-+                                                    std::vector<const td::td_api::user*> &users)
-+{
-+    users.clear();
-+    if (!name || (*name == '\0'))
-+        return;
-+    std::string want = normalizeHandle(name);
-+    if (want.empty())
-+        return;
-+
-+    for (const UserMap::value_type &entry: m_userInfo)
-+        if (normalizeHandle(entry.second.displayName) == want)
-+            users.push_back(entry.second.user.get());
-+}
-+
- const td::td_api::basicGroup *TdAccountData::getBasicGroup(BasicGroupId groupId) const
- {
-     auto it = m_groups.find(groupId);
 diff --git a/account-data.h b/account-data.h
-index 6e4eb6e..21fb127 100644
+index 8114181..104cce4 100644
 --- a/account-data.h
 +++ b/account-data.h
-@@ -143,6 +143,9 @@ struct TgMessageInfo {
+@@ -146,6 +146,9 @@ struct TgMessageInfo {
      // The name the sender goes by in the chat, idNNN, telling users of one display name apart, which
      // libpurple shows by the display name; empty where the sender is no user
      std::string incomingGroupchatSenderName;
@@ -256,7 +217,7 @@ index 6e4eb6e..21fb127 100644
      time_t      timestamp = 0;
      bool        outgoing = false;
      bool        sentLocally = false; // For outgoing messages, whether sent by this very client
-@@ -162,6 +165,7 @@ struct TgMessageInfo {
+@@ -165,6 +168,7 @@ struct TgMessageInfo {
          type = other.type;
          incomingGroupchatSender = other.incomingGroupchatSender;
          incomingGroupchatSenderName = other.incomingGroupchatSenderName;
@@ -264,7 +225,7 @@ index 6e4eb6e..21fb127 100644
          timestamp = other.timestamp;
          outgoing = other.outgoing;
          sentLocally = other.sentLocally;
-@@ -417,6 +421,7 @@ public:
+@@ -434,6 +438,7 @@ public:
      void updateChatTitle(ChatId chatId, const std::string &title);
      void updateChatReadInbox(ChatId chatId, MessageId lastRead, int32_t unreadCount);
      void updateChatActionBar(ChatId chatId, td::td_api::object_ptr<td::td_api::ChatActionBar> actionBar);
@@ -272,23 +233,11 @@ index 6e4eb6e..21fb127 100644
      void updateSmallChatPhoto(ChatId chatId, td::td_api::object_ptr<td::td_api::file> photo);
      void setContacts(const td::td_api::users &users);
      void getContactsWithNoChat(std::vector<UserId> &userIds);
-@@ -441,6 +446,11 @@ public:
-     // that a message addressed to a handle rather than an "id<n>" buddy can find its user.
-     void                          getUsersByUsername(const char *username,
-                                                      std::vector<const td::td_api::user*> &users);
-+    // webOS: match a NORMALIZED display name (lowercase, only [a-z0-9] kept). webOS turns a
-+    // contact's display name into a handle this way ("Herman van Hazendonk" -> "hermanvanhazendonk",
-+    // "Pine64 Protocol Bot" -> "pine64protocolbot"), and addresses conversations by that handle.
-+    void                          getUsersByNormalizedDisplayName(const char *name,
-+                                                     std::vector<const td::td_api::user*> &users);
- 
-     const td::td_api::basicGroup *getBasicGroup(BasicGroupId groupId) const;
-     const td::td_api::basicGroupFullInfo *getBasicGroupInfo(BasicGroupId groupId) const;
 diff --git a/client-utils.cpp b/client-utils.cpp
-index e15ba1d..a2c1d72 100644
+index 2ec4feb..3f8c9d5 100644
 --- a/client-utils.cpp
 +++ b/client-utils.cpp
-@@ -180,10 +180,25 @@ std::string proxyTypeToString(PurpleProxyType proxyType)
+@@ -181,10 +181,25 @@ std::string proxyTypeToString(PurpleProxyType proxyType)
  
  const char *getPurpleStatusId(const td::td_api::UserStatus &tdStatus)
  {
@@ -316,18 +265,7 @@ index e15ba1d..a2c1d72 100644
  }
  
  PurpleBlistNode *findChatBlistNode(TdAccountData &account, const td::td_api::chat &chat)
-@@ -267,6 +282,10 @@ std::vector<const td::td_api::user *> getUsersByPurpleName(const char *buddyName
-         // failing with "User not found".
-         if (result.empty())
-             account.getUsersByUsername(buddyName, result);
-+        // webOS turns a display name into a handle ("Herman van Hazendonk" -> "hermanvanhazendonk")
-+        // and may address the conversation by that; fall back to a normalized-display-name match.
-+        if (result.empty())
-+            account.getUsersByNormalizedDisplayName(buddyName, result);
-         if (action) {
-             if (result.empty())
-                 purple_debug_warning(config::pluginId, "Cannot %s: no user with display name or username '%s'\n",
-@@ -586,6 +605,28 @@ void updatePrivateChat(TdAccountData &account, const td::td_api::chat *chat, con
+@@ -616,6 +631,28 @@ void updatePrivateChat(TdAccountData &account, const td::td_api::chat *chat, con
              purple_buddy_icons_set_for_user(account.purpleAccount, purpleUserName.c_str(), NULL, 0, NULL);
          }
      }
@@ -370,7 +308,7 @@ index 5223fe6..f776e43 100644
  char versionString[] = PACKAGE_VERSION ", tdlib ${TDLIB_VERSION}";
  char pluginSummary[] = "Telegram using tdlib";
 diff --git a/identifiers.cpp b/identifiers.cpp
-index c81a8a8..aafe423 100644
+index 2ae14b4..5e2e185 100644
 --- a/identifiers.cpp
 +++ b/identifiers.cpp
 @@ -145,6 +145,11 @@ ChatId getChatId(const td::td_api::updateChatLastMessage &update)
@@ -386,7 +324,7 @@ index c81a8a8..aafe423 100644
  {
      return ChatId(update.chat_id_);
 diff --git a/identifiers.h b/identifiers.h
-index c07dcbd..8f05c00 100644
+index 4ba2e9b..79cc138 100644
 --- a/identifiers.h
 +++ b/identifiers.h
 @@ -86,6 +86,7 @@ DEFINE_ID_CLASS(ChatId, int64_t)
@@ -397,7 +335,7 @@ index c07dcbd..8f05c00 100644
  };
  
  DEFINE_ID_CLASS(BasicGroupId, int64_t)
-@@ -153,6 +154,7 @@ ChatId       getChatId(const td::td_api::updateDeleteMessages &update);
+@@ -154,6 +155,7 @@ ChatId       getChatId(const td::td_api::updateDeleteMessages &update);
  ChatId       getChatId(const td::td_api::updateMessageInteractionInfo &update);
  ChatId       getChatId(const td::td_api::updateMessageUnreadReactions &update);
  ChatId       getChatId(const td::td_api::messageSenderChat &sender);
@@ -423,7 +361,7 @@ index 73184a3..a5d12ea 100644
  {
      if (!strcasecmp(getUiName(), "pidgin"))
 diff --git a/purple-info.h b/purple-info.h
-index 9c52334..4815685 100644
+index acd943f..157a5d4 100644
 --- a/purple-info.h
 +++ b/purple-info.h
 @@ -64,7 +64,8 @@ namespace AccountOptions {
@@ -435,8 +373,8 @@ index 9c52334..4815685 100644
 +    constexpr gboolean    SendFilesByContentDefault  = TRUE;
      constexpr const char *ReadReceipts               = "read-receipts";
      constexpr gboolean    ReadReceiptsDefault        = TRUE;
- };
-@@ -76,6 +77,12 @@ namespace BuddyOptions {
+     // With the account's password, which Pidgin keeps only if told to remember it
+@@ -79,6 +80,12 @@ namespace BuddyOptions {
      // Of a deleted account: the group it was in, and its name
      constexpr const char *GroupBeforeDeletion = "tdlib-group-before-deletion";
      constexpr const char *AliasBeforeDeletion = "tdlib-alias-before-deletion";
@@ -449,7 +387,7 @@ index 9c52334..4815685 100644
  };
  
  namespace GroupOptions {
-@@ -88,6 +95,8 @@ bool     isSizeWithinLimit(unsigned size, unsigned limit);
+@@ -91,6 +98,8 @@ bool     isSizeWithinLimit(unsigned size, unsigned limit);
  bool     ignoreBigDownloads(PurpleAccount *account);
  PurpleTdClient *getTdClient(PurpleAccount *account);
  const char *getUiName();
@@ -459,10 +397,10 @@ index 9c52334..4815685 100644
  bool        isReadReceiptsEnabled(PurpleAccount *account);
  
 diff --git a/receiving.cpp b/receiving.cpp
-index 6a1d881..2a6ece4 100644
+index ad98a23..046cbb9 100644
 --- a/receiving.cpp
 +++ b/receiving.cpp
-@@ -626,11 +626,19 @@ static void showMessageTextChat(TdAccountData &account, const td::td_api::chat &
+@@ -633,11 +633,19 @@ static void showMessageTextChat(TdAccountData &account, const td::td_api::chat &
                  purple_conv_chat_write(conv, purple_account_get_name_for_display(account.purpleAccount),
                                         text, flags, message.timestamp);
          } else {
@@ -486,7 +424,7 @@ index 6a1d881..2a6ece4 100644
          }
      }
  
-@@ -1928,6 +1936,13 @@ void makeFullMessage(const td::td_api::chat &chat, td::td_api::object_ptr<td::td
+@@ -1990,6 +1998,13 @@ void makeFullMessage(const td::td_api::chat &chat, td::td_api::object_ptr<td::td
      if (!message->is_outgoing_ && senderId.valid() && account.getUser(senderId) &&
          (getBasicGroupId(chat).valid() || getSupergroupId(chat).valid()))
          messageInfo.incomingGroupchatSenderName = getPurpleBuddyName(*account.getUser(senderId));
@@ -501,10 +439,10 @@ index 6a1d881..2a6ece4 100644
      // In Pidgin, links to each size a photo or video comes in, below it; here already, as a download
      // may start, and finish, before the message is shown
 diff --git a/td-client.cpp b/td-client.cpp
-index 2446272..033bac4 100644
+index 2000ec8..3225db1 100644
 --- a/td-client.cpp
 +++ b/td-client.cpp
-@@ -271,6 +271,20 @@ void PurpleTdClient::processUpdate(td::td_api::Object &update)
+@@ -281,6 +281,20 @@ void PurpleTdClient::processUpdate(td::td_api::Object &update)
          break;
      }
  
@@ -525,7 +463,7 @@ index 2446272..033bac4 100644
      case td::td_api::updateOption::ID: {
          const td::td_api::updateOption &option = static_cast<const td::td_api::updateOption &>(update);
          updateOption(option, m_data);
-@@ -457,6 +471,21 @@ std::string PurpleTdClient::getBaseDatabasePath()
+@@ -468,6 +482,21 @@ std::string PurpleTdClient::getBaseDatabasePath()
      return std::string(purple_user_dir()) + G_DIR_SEPARATOR_S + config::configSubdir;
  }
  
@@ -547,13 +485,13 @@ index 2446272..033bac4 100644
  static void stuff(td::td_api::setTdlibParameters &parameters)
  {
      std::string s(config::stuff);
-@@ -474,9 +503,21 @@ void PurpleTdClient::sendTdlibParameters()
- {
+@@ -643,10 +672,23 @@ void PurpleTdClient::openDatabase(const std::string &key, DatabaseOpening openin
+     m_databaseOpening = opening;
      auto parameters = td::td_api::make_object<td::td_api::setTdlibParameters>();
      const char *username = purple_account_get_username(m_account);
 -    parameters->database_directory_ = getBaseDatabasePath() + G_DIR_SEPARATOR_S + username;
--    purple_debug_misc(config::pluginId, "Account %s using database directory %s\n",
--                      username, parameters->database_directory_.c_str());
+-    purple_debug_misc(config::pluginId, "Account %s using database directory %s%s\n",
+-                      username, parameters->database_directory_.c_str(), key.empty() ? "" : ", encrypted");
 +    // webOS: the default database_directory == files_directory lives under purple_user_dir()
 +    // = /var/preferences (a tiny ~62MB partition, "store-var"). BOTH the sqlite database
 +    // (db.sqlite grows to tens of MB with an active account) AND the unbounded media cache
@@ -566,13 +504,34 @@ index 2446272..033bac4 100644
 +    parameters->files_directory_ = getFilesDir(username);
 +    g_mkdir_with_parents(parameters->database_directory_.c_str(), 0700);
 +    g_mkdir_with_parents(parameters->files_directory_.c_str(), 0700);
-+    purple_debug_misc(config::pluginId, "Account %s using database directory %s, files directory %s\n",
-+                      username, parameters->database_directory_.c_str(), parameters->files_directory_.c_str());
++    purple_debug_misc(config::pluginId, "Account %s using database directory %s, files directory %s%s\n",
++                      username, parameters->database_directory_.c_str(), parameters->files_directory_.c_str(),
++                      key.empty() ? "" : ", encrypted");
+     parameters->database_encryption_key_ = key;
 +    parameters->use_file_database_ = true;
      parameters->use_chat_info_database_ = true;
      parameters->use_message_database_ = true;
      parameters->use_secret_chats_ = (purple_account_get_bool(m_account, AccountOptions::EnableSecretChats,
-@@ -2603,6 +2644,86 @@ void PurpleTdClient::updateChat(const td::td_api::chat *chat)
+@@ -762,8 +804,7 @@ void PurpleTdClient::askDatabasePassword(DatabaseKeyUse use)
+ // TDLib encrypts the binlog itself, but leaves the messages' database to SQLCipher
+ bool PurpleTdClient::checkMessagesEncrypted()
+ {
+-    std::string path = getBaseDatabasePath() + G_DIR_SEPARATOR_S + purple_account_get_username(m_account) +
+-                       G_DIR_SEPARATOR_S + "db.sqlite";
++    std::string path = getDatabaseDir(purple_account_get_username(m_account)) + G_DIR_SEPARATOR_S + "db.sqlite";
+     if (!isPlainSqliteFile(path))
+         return true;
+     purple_debug_warning(config::pluginId, "%s is not encrypted: TDLib uses SQLite, not SQLCipher\n", path.c_str());
+@@ -779,7 +820,7 @@ bool PurpleTdClient::checkMessagesEncrypted()
+ // Its own files, not the downloaded ones under it, which are not encrypted
+ std::string PurpleTdClient::getDatabaseRewriteWarning()
+ {
+-    std::string directory = getBaseDatabasePath() + G_DIR_SEPARATOR_S + purple_account_get_username(m_account);
++    std::string directory = getDatabaseDir(purple_account_get_username(m_account));
+     guint64     size      = 0;
+     GDir       *dir       = g_dir_open(directory.c_str(), 0, NULL);
+     for (const char *name; dir && (name = g_dir_read_name(dir)); ) {
+@@ -3408,6 +3449,86 @@ void PurpleTdClient::updateChat(const td::td_api::chat *chat)
  
      if (secretChatId.valid())
          updateKnownSecretChat(secretChatId, m_transceiver, m_data);
@@ -660,7 +619,7 @@ index 2446272..033bac4 100644
  
  void PurpleTdClient::updateUserInfo(const td::td_api::user &user, const td::td_api::chat *privateChat)
 diff --git a/td-client.h b/td-client.h
-index 559d033..977ef0b 100644
+index 0c63ceb..d21303e 100644
 --- a/td-client.h
 +++ b/td-client.h
 @@ -33,6 +33,11 @@ public:
@@ -675,7 +634,7 @@ index 559d033..977ef0b 100644
      int  sendMessage(const char *buddyName, const char *message);
      void sendTyping(const char *buddyName, bool isTyping);
      void sendReadReceipts(PurpleConversation *conversation);
-@@ -71,6 +76,8 @@ public:
+@@ -77,6 +82,8 @@ public:
      int  sendGroupMessage(int purpleChatId, const char *message);
      void setGroupDescription(int purpleChatId, const char *description);
      void kickUserFromChat(PurpleConversation *conv, const char *name);
@@ -684,7 +643,7 @@ index 559d033..977ef0b 100644
      void addUserToChat(int purpleChatId, const char *name);
      void showInviteLink(const std::string &purpleChatName);
      void getGroupChatList(PurpleRoomlist *roomlist);
-@@ -192,6 +199,9 @@ private:
+@@ -241,6 +248,9 @@ private:
      void       updateGroup(td::td_api::object_ptr<td::td_api::basicGroup> group);
      void       updateSupergroup(td::td_api::object_ptr<td::td_api::supergroup> group);
      void       updateChat(const td::td_api::chat *chat);
@@ -695,7 +654,7 @@ index 559d033..977ef0b 100644
      void       downloadChatPhoto(const td::td_api::chat &chat);
      void       requestBasicGroupFullInfo(BasicGroupId groupId);
 diff --git a/tdlib-purple.cpp b/tdlib-purple.cpp
-index 9c2b13c..6cb79ff 100644
+index 2c99b9d..f2f8a4f 100644
 --- a/tdlib-purple.cpp
 +++ b/tdlib-purple.cpp
 @@ -9,6 +9,7 @@
@@ -706,7 +665,7 @@ index 9c2b13c..6cb79ff 100644
  
  #include <cstdint>
  #include <functional>
-@@ -970,6 +971,27 @@ static PurpleCmdRet tgprpl_cmd_kick(PurpleConversation *conv, const gchar *cmd,
+@@ -974,6 +975,27 @@ static PurpleCmdRet tgprpl_cmd_kick(PurpleConversation *conv, const gchar *cmd,
      return PURPLE_CMD_RET_OK;
  }
  
@@ -734,7 +693,7 @@ index 9c2b13c..6cb79ff 100644
  static PurpleMediaCaps getMediaCaps(PurpleAccount *account, const char *who)
  {
  #ifndef NoVoip
-@@ -1460,6 +1482,80 @@ static gboolean tgprpl_unload (PurplePlugin *plugin)
+@@ -1492,6 +1514,80 @@ static gboolean tgprpl_unload (PurplePlugin *plugin)
      return TRUE;
  }
  
@@ -815,9 +774,9 @@ index 9c2b13c..6cb79ff 100644
  static gboolean tgprpl_load (PurplePlugin *plugin)
  {
      if (!checkTdlibVersion())
-@@ -1467,6 +1563,11 @@ static gboolean tgprpl_load (PurplePlugin *plugin)
-     pidginUiLoad(plugin);
-     registerMessageLinks();
+@@ -1501,6 +1597,11 @@ static gboolean tgprpl_load (PurplePlugin *plugin)
+     // Disconnected as the plugin is unloaded
+     purple_signal_connect(purple_get_core(), "quitting", plugin, PURPLE_CALLBACK(quitting), NULL);
  
 +    // Per-account store teardown: hook "account-removed" (emitted by purple_accounts_delete) so a
 +    // deleted Telegram account's tdlib DB + media cache are not orphaned. Handle is the plugin.
@@ -827,7 +786,7 @@ index 9c2b13c..6cb79ff 100644
      purple_cmd_register("kick", "s", PURPLE_CMD_P_PLUGIN,
                          (PurpleCmdFlag)(PURPLE_CMD_FLAG_CHAT | PURPLE_CMD_FLAG_PRPL_ONLY),
                          config::pluginId, tgprpl_cmd_kick,
-@@ -1490,6 +1591,15 @@ static gboolean tgprpl_load (PurplePlugin *plugin)
+@@ -1524,6 +1625,15 @@ static gboolean tgprpl_load (PurplePlugin *plugin)
                          config::pluginId, pasteCommand,
                          // TRANSLATOR: Command description, the initial "paste" must remain verbatim!
                          _("paste: Attach the files copied to the clipboard, or its picture, to the message being written"), NULL);
@@ -844,7 +803,7 @@ index 9c2b13c..6cb79ff 100644
      return TRUE;
  }
 diff --git a/test/file-transfer-test.cpp b/test/file-transfer-test.cpp
-index 9625345..0ecac20 100644
+index 2b1a299..116fced 100644
 --- a/test/file-transfer-test.cpp
 +++ b/test/file-transfer-test.cpp
 @@ -1914,6 +1914,8 @@ TEST_F(FileTransferTest, SendFile_ByContent)
@@ -857,7 +816,7 @@ index 9625345..0ecac20 100644
          sendFile(file, make_object<fileTypeDocument>(),
                   makeInputMessageDocument(make_object<inputFileId>(1234), nullptr, false,
 diff --git a/test/fixture.cpp b/test/fixture.cpp
-index 308db20..7c3af58 100644
+index f2a6f8a..cf10681 100644
 --- a/test/fixture.cpp
 +++ b/test/fixture.cpp
 @@ -1,4 +1,5 @@
@@ -865,8 +824,8 @@ index 308db20..7c3af58 100644
 +#include "td-client.h"
  #include "sticker.h"
  #include "client-utils.h"
- #include "tdlib-purple.h"
-@@ -90,8 +91,7 @@ void CommTest::login(std::initializer_list<object_ptr<Object>> extraUpdates, obj
+ #include "config.h"
+@@ -91,8 +92,7 @@ void CommTest::login(std::initializer_list<object_ptr<Object>> extraUpdates, obj
          make_object<disableProxy>(),
          make_object<getProxies>(),
          makeTdlibParameters(
@@ -877,7 +836,7 @@ index 308db20..7c3af58 100644
          ),
          makeStorageOptimizerOption()
 diff --git a/test/group-chat-test.cpp b/test/group-chat-test.cpp
-index 934d7bc..63fcd79 100644
+index 3a64730..434d2bb 100644
 --- a/test/group-chat-test.cpp
 +++ b/test/group-chat-test.cpp
 @@ -1,4 +1,5 @@
@@ -886,7 +845,7 @@ index 934d7bc..63fcd79 100644
  #include "libpurple-mock.h"
  #include <glib/gstrfuncs.h>
  #include <fmt/format.h>
-@@ -1270,8 +1271,7 @@ TEST_F(GroupChatTest, Roomlist)
+@@ -1265,8 +1266,7 @@ TEST_F(GroupChatTest, Roomlist)
          make_object<disableProxy>(),
          make_object<getProxies>(),
          makeTdlibParameters(
@@ -897,10 +856,10 @@ index 934d7bc..63fcd79 100644
          ),
          makeStorageOptimizerOption()
 diff --git a/test/libpurple-mock.cpp b/test/libpurple-mock.cpp
-index 65d1011..2910112 100644
+index 68533e6..3301820 100644
 --- a/test/libpurple-mock.cpp
 +++ b/test/libpurple-mock.cpp
-@@ -1431,6 +1431,12 @@ const char *purple_blist_node_get_string(PurpleBlistNode *node, const char *key)
+@@ -1484,6 +1484,12 @@ const char *purple_blist_node_get_string(PurpleBlistNode *node, const char *key)
      return static_cast<const char *>(g_hash_table_lookup(node->settings, key));
  }
  
@@ -913,8 +872,8 @@ index 65d1011..2910112 100644
  void purple_blist_node_remove_setting(PurpleBlistNode *node, const char *key)
  {
      g_hash_table_remove(node->settings, key);
-@@ -1968,6 +1974,29 @@ void purple_signal_disconnect(void *instance, const char *signal,
- {
+@@ -2237,6 +2243,24 @@ void emitSignal(const char *signal)
+             reinterpret_cast<void (*)(void *)>(handler.func)(handler.data);
  }
  
 +// The webOS signals (webos-im-outbox-id, webos-im-receipt-hwm, webos-im-send-reaction) go to
@@ -924,11 +883,6 @@ index 65d1011..2910112 100644
 +}
 +
 +void *purple_accounts_get_handle()
-+{
-+    return NULL;
-+}
-+
-+PurpleCore *purple_get_core()
 +{
 +    return NULL;
 +}
@@ -944,16 +898,16 @@ index 65d1011..2910112 100644
  void purple_conversation_autoset_title(PurpleConversation *conv)
  {
 diff --git a/test/login-test.cpp b/test/login-test.cpp
-index cda8ad7..099ef65 100644
+index 29d6ae2..9459e59 100644
 --- a/test/login-test.cpp
 +++ b/test/login-test.cpp
 @@ -1,4 +1,5 @@
  #include "fixture.h"
 +#include "td-client.h"
+ #include "client-utils.h"
+ #include <glib/gstdio.h>
  
- class LoginTest: public CommTest {};
- 
-@@ -20,8 +21,7 @@ TEST_F(LoginTest, ConnectionReadyBeforeAuthReady)
+@@ -22,8 +23,7 @@ TEST_F(LoginTest, ConnectionReadyBeforeAuthReady)
          make_object<disableProxy>(),
          make_object<getProxies>(),
          makeTdlibParameters(
@@ -963,7 +917,7 @@ index cda8ad7..099ef65 100644
              true // use secret chats
          ),
          makeStorageOptimizerOption()
-@@ -76,8 +76,7 @@ TEST_F(LoginTest, RegisterNewAccount_WithAlias_ConnectionReadyBeforeAuthReady)
+@@ -78,8 +78,7 @@ TEST_F(LoginTest, RegisterNewAccount_WithAlias_ConnectionReadyBeforeAuthReady)
          make_object<disableProxy>(),
          make_object<getProxies>(),
          makeTdlibParameters(
@@ -973,7 +927,7 @@ index cda8ad7..099ef65 100644
              true // use secret chats
          ),
          makeStorageOptimizerOption()
-@@ -160,8 +159,7 @@ TEST_F(LoginTest, RegisterNewAccount_NoAlias)
+@@ -162,8 +161,7 @@ TEST_F(LoginTest, RegisterNewAccount_NoAlias)
          make_object<disableProxy>(),
          make_object<getProxies>(),
          makeTdlibParameters(
@@ -983,7 +937,7 @@ index cda8ad7..099ef65 100644
              true // use secret chats
          ),
          makeStorageOptimizerOption()
-@@ -228,8 +226,7 @@ TEST_F(LoginTest, TwoFactorAuthentication)
+@@ -230,8 +228,7 @@ TEST_F(LoginTest, TwoFactorAuthentication)
          make_object<disableProxy>(),
          make_object<getProxies>(),
          makeTdlibParameters(
@@ -993,7 +947,7 @@ index cda8ad7..099ef65 100644
              true // use secret chats
          ),
          makeStorageOptimizerOption()
-@@ -351,8 +348,7 @@ TEST_F(LoginTest, AddedProxyCofiguration)
+@@ -353,8 +350,7 @@ TEST_F(LoginTest, AddedProxyCofiguration)
          makeAddProxy(host, port, make_object<proxyTypeSocks5>(username, password)),
          make_object<getProxies>(),
          makeTdlibParameters(
@@ -1003,7 +957,7 @@ index cda8ad7..099ef65 100644
              true // use secret chats
          ),
          makeStorageOptimizerOption()
-@@ -390,8 +386,7 @@ TEST_F(LoginTest, ChangedProxyCofiguration)
+@@ -392,8 +388,7 @@ TEST_F(LoginTest, ChangedProxyCofiguration)
          makeAddProxy(host, port, make_object<proxyTypeSocks5>(username, password)),
          make_object<getProxies>(),
          makeTdlibParameters(
@@ -1013,7 +967,7 @@ index cda8ad7..099ef65 100644
              true // use secret chats
          ),
          makeStorageOptimizerOption()
-@@ -418,8 +413,7 @@ TEST_F(LoginTest, RemovedProxyCofiguration)
+@@ -420,8 +415,7 @@ TEST_F(LoginTest, RemovedProxyCofiguration)
          make_object<disableProxy>(),
          make_object<getProxies>(),
          makeTdlibParameters(
@@ -1023,7 +977,7 @@ index cda8ad7..099ef65 100644
              true // use secret chats
          ),
          makeStorageOptimizerOption()
-@@ -445,8 +439,7 @@ TEST_F(LoginTest, getChatsSequence)
+@@ -447,8 +441,7 @@ TEST_F(LoginTest, getChatsSequence)
          make_object<disableProxy>(),
          make_object<getProxies>(),
          makeTdlibParameters(
@@ -1033,7 +987,7 @@ index cda8ad7..099ef65 100644
              true // use secret chats
          ),
          makeStorageOptimizerOption()
-@@ -528,8 +521,7 @@ TEST_F(LoginTest, KeepInlineDownloads)
+@@ -530,8 +523,7 @@ TEST_F(LoginTest, KeepInlineDownloads)
          make_object<disableProxy>(),
          make_object<getProxies>(),
          makeTdlibParameters(
@@ -1043,7 +997,7 @@ index cda8ad7..099ef65 100644
              true // use secret chats
          ),
          makeStorageOptimizerOption(false) // keep-inline-downloads
-@@ -653,8 +645,7 @@ protected:
+@@ -657,8 +649,7 @@ protected:
              make_object<disableProxy>(),
              make_object<getProxies>(),
              makeTdlibParameters(
@@ -1053,6 +1007,16 @@ index cda8ad7..099ef65 100644
                  true // use secret chats
              ),
              makeStorageOptimizerOption()
+@@ -876,8 +867,7 @@ TEST_F(LoginThroughChatTest, Registration)
+ class DatabasePasswordTest: public CommTest {
+ protected:
+     const std::string password = "correct horse";
+-    const std::string directory = std::string(purple_user_dir()) + G_DIR_SEPARATOR_S + "tdlib" +
+-                                  G_DIR_SEPARATOR_S + "+" + selfPhoneNumber;
++    const std::string directory = PurpleTdClient::getDatabaseDir(("+" + selfPhoneNumber).c_str());
+ 
+     void TearDown() override
+     {
 diff --git a/test/secret-chat-test.cpp b/test/secret-chat-test.cpp
 index d150f4e..d95c1cb 100644
 --- a/test/secret-chat-test.cpp

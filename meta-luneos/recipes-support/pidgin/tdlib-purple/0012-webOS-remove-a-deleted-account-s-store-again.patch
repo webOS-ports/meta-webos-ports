@@ -1,0 +1,180 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] webOS: remove a deleted account's store again
+
+A deleted account's TDLib store, its session keys among them, was to be
+removed when libpurple's "account-removed" fires. The hook was connected
+as the plug-in loads, but purple_core_init loads protocol plug-ins before
+purple_accounts_init registers the accounts' signals (core.c, 2.14.14):
+the connection was refused ("Something tried to register a callback for
+the 'account-removed' signal"), the hook never ran, and an account added
+again with the same number was logged in on the old session without a
+code being asked for.
+
+It is now connected from an idle callback of high priority, which runs
+once purple_core_init has returned and before the main loop does anything
+else, a request to delete an account among it. The mock refuses the
+signal until it is registered, as libpurple does, and a test sees the
+hook connected all the same.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ tdlib-purple.cpp             | 24 ++++++++++++++++++++++--
+ test/libpurple-mock.cpp      | 28 ++++++++++++++++++++++++----
+ test/libpurple-mock.h        |  4 ++++
+ test/webos-commands-test.cpp | 20 ++++++++++++++++++++
+ 4 files changed, 70 insertions(+), 6 deletions(-)
+
+diff --git a/tdlib-purple.cpp b/tdlib-purple.cpp
+index b41d3e1..0aacd82 100644
+--- a/tdlib-purple.cpp
++++ b/tdlib-purple.cpp
+@@ -1737,8 +1737,15 @@ static void quitting(void *)
+     }
+ }
+ 
++// The idle callback that is to connect the account-removed hook, while it has not run (see tgprpl_load)
++static guint s_accountRemovedSource = 0;
++
+ static gboolean tgprpl_unload (PurplePlugin *plugin)
+ {
++    if (s_accountRemovedSource) {
++        g_source_remove(s_accountRemovedSource);
++        s_accountRemovedSource = 0;
++    }
+     unregisterMessageLinks();
+     pidginUiUnload();
+     AccountThread::finishAll();
+@@ -1819,6 +1826,16 @@ static void tgprpl_account_removed_cb(PurpleAccount *account, gpointer unused)
+     removeDirRecursive(filesDir);
+ }
+ 
++// Run before anything else the main loop has to do, a request to delete an account among it
++static gboolean connectAccountRemoved(gpointer plugin)
++{
++    s_accountRemovedSource = 0;
++    if (!purple_signal_connect(purple_accounts_get_handle(), "account-removed", plugin,
++                               PURPLE_CALLBACK(tgprpl_account_removed_cb), NULL))
++        purple_debug_error(config::pluginId, "account-removed: not connected, a removed account's store will be left\n");
++    return G_SOURCE_REMOVE;
++}
++
+ static gboolean tgprpl_load (PurplePlugin *plugin)
+ {
+     if (!checkTdlibVersion())
+@@ -1830,8 +1847,11 @@ static gboolean tgprpl_load (PurplePlugin *plugin)
+ 
+     // Per-account store teardown: hook "account-removed" (emitted by purple_accounts_delete) so a
+     // deleted Telegram account's tdlib DB + media cache are not orphaned. Handle is the plugin.
+-    purple_signal_connect(purple_accounts_get_handle(), "account-removed", plugin,
+-                          PURPLE_CALLBACK(tgprpl_account_removed_cb), NULL);
++    // Not here but once the main loop runs: purple_core_init loads protocol plug-ins before
++    // purple_accounts_init registers the accounts' signals, so a connection made now is refused
++    // and the store outlives its account.
++    if (!s_accountRemovedSource)
++        s_accountRemovedSource = g_idle_add_full(G_PRIORITY_HIGH, connectAccountRemoved, plugin, NULL);
+ 
+     purple_cmd_register("kick", "s", PURPLE_CMD_P_PLUGIN,
+                         (PurpleCmdFlag)(PURPLE_CMD_FLAG_CHAT | PURPLE_CMD_FLAG_PRPL_ONLY),
+diff --git a/test/libpurple-mock.cpp b/test/libpurple-mock.cpp
+index e233022..13e5a19 100644
+--- a/test/libpurple-mock.cpp
++++ b/test/libpurple-mock.cpp
+@@ -2237,16 +2237,22 @@ struct SignalHandler {
+     void          *data;
+ };
+ static std::vector<SignalHandler> g_signalHandlers;
++static bool g_accountSignalsRegistered = true;
+ 
++// Kept, so that a test can call what the plug-in connected as the signal's emitter would. As in
++// libpurple, an account signal before purple_accounts_init has registered it is refused (0), and
++// a connection made is numbered from 1.
+ gulong purple_signal_connect(void *instance, const char *signal,
+ 	void *handle, PurpleCallback func, void *data)
+ {
++    if (!g_accountSignalsRegistered && !strcmp(signal, "account-removed"))
++        return 0;
+     // Once, as the plugin is loaded again for every test
+-    for (const SignalHandler &handler: g_signalHandlers)
+-        if ((handler.signal == signal) && (handler.func == func))
+-            return 0;
++    for (size_t i = 0; i < g_signalHandlers.size(); i++)
++        if ((g_signalHandlers[i].signal == signal) && (g_signalHandlers[i].func == func))
++            return i + 1;
+     g_signalHandlers.push_back({signal, func, data});
+-    return 0;
++    return g_signalHandlers.size();
+ }
+ 
+ void purple_signal_disconnect(void *instance, const char *signal,
+@@ -2340,6 +2346,20 @@ void purple_conversation_set_name(PurpleConversation *conv, const char *name)
+ 
+ };
+ 
++extern "C++" void forgetConnectedSignal(const char *signal)
++{
++    g_signalHandlers.erase(std::remove_if(g_signalHandlers.begin(), g_signalHandlers.end(),
++                                          [signal](const SignalHandler &handler) {
++                                              return handler.signal == signal;
++                                          }),
++                           g_signalHandlers.end());
++}
++
++extern "C++" void setAccountSignalsRegistered(bool registered)
++{
++    g_accountSignalsRegistered = registered;
++}
++
+ extern "C++" PurpleCallback getConnectedSignal(const char *signal)
+ {
+     for (const SignalHandler &handler: g_signalHandlers)
+diff --git a/test/libpurple-mock.h b/test/libpurple-mock.h
+index 87401dd..81eef82 100644
+--- a/test/libpurple-mock.h
++++ b/test/libpurple-mock.h
+@@ -51,6 +51,10 @@ void setPresenceIdle(bool idle);
+ // What the plug-in connected to a signal, or NULL. Connections stay for the whole run, as the
+ // plug-in makes some only once.
+ PurpleCallback getConnectedSignal(const char *signal);
++void forgetConnectedSignal(const char *signal);
++// Whether purple_accounts_init has registered the accounts' signals, so that they can be connected
++// to; they are by default, but purple_core_init loads protocol plug-ins before
++void setAccountSignalsRegistered(bool registered);
+ 
+ // The webOS signals the plug-in gives imlibpurpleservice that tests look at: "webos-im-edit"
+ // (account, serviceMessageId, text) and "webos-im-delete" (account, serviceMessageId)
+diff --git a/test/webos-commands-test.cpp b/test/webos-commands-test.cpp
+index 03c6fd4..251bed8 100644
+--- a/test/webos-commands-test.cpp
++++ b/test/webos-commands-test.cpp
+@@ -7,6 +7,7 @@
+ #include "webos-receive.h"
+ #include "purple-info.h"
+ #include "sticker.h"
++#include "tdlib-purple.h"
+ #include <cstring>
+ 
+ // Who a notice in a group chat is from, as group-chat-test.cpp has it
+@@ -2404,3 +2405,22 @@ TEST_F(WebosTapTest, OtherFrontEndAsked)
+     // Nothing is stashed for the transport
+     ASSERT_EQ("", takeStashedId(imConversation()));
+ }
++
++// libpurple's purple_core_init loads protocol plug-ins before purple_accounts_init registers the
++// accounts' signals: the hook that removes a deleted account's store is connected once it can be
++class AccountRemovedTest: public CommTest {};
++
++TEST_F(AccountRemovedTest, HookConnectedOnceAccountSignalsAreRegistered)
++{
++    PurplePlugin plugin{};
++    purple_init_plugin(&plugin);
++    plugin.info->unload(&plugin);
++    forgetConnectedSignal("account-removed");
++    setAccountSignalsRegistered(false);
++    plugin.info->load(&plugin);
++    setAccountSignalsRegistered(true);
++    EXPECT_EQ(nullptr, getConnectedSignal("account-removed"));
++
++    while (g_main_context_iteration(NULL, FALSE)) {}
++    EXPECT_NE(nullptr, getConnectedSignal("account-removed"));
++}
