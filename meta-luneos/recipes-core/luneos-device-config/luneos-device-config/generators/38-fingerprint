@@ -1,0 +1,97 @@
+#!/bin/sh
+# Turn the fingerprint stack off on a device that has no fingerprint reader.
+#
+# The generic rootfs ships webos-fingerprint-adapter and Settings > Fingerprint
+# to every device it boots, because no MACHINE_FEATURES describe the device it
+# lands on. On one without a reader - the Zinwa Q25, whose spec sheet claims one
+# in the power key that the hardware does not have - that left a Fingerprint
+# panel offering enrollment on a sensor that does not exist, and an adapter
+# running for nothing.
+#
+# biomd is deliberately left alone: it also backs face unlock (luneos-faced),
+# which needs only the camera. Only the fingerprint half comes out:
+#
+#   webos-fingerprint-adapter.service  skipped by ConditionPathExists on
+#                                      $RUN/no-fingerprint (a drop-in shipped
+#                                      by webos-fingerprint-adapter.bb)
+#   Settings > Fingerprint             launcher icon hidden, the way
+#                                      35-torch-app hides the Torch app
+#
+# Settings > Screen Lock and the lock screen need nothing: with no adapter on
+# the bus they already see no sensor, as on a non-halium build.
+#
+# "Has a reader" is whether the vendor declares a fingerprint HAL in its VINTF
+# manifest - android.hardware.biometrics.fingerprint, HIDL or AIDL, or a
+# vendor's own *.biometrics.fingerprint interface - which a HAL has to be for
+# the framework to find it at all. Only manifests are read, never the
+# compatibility matrix (it lists HALs the framework could use, present or not)
+# and never init scripts: the Q25's init.mt6789.rc mentions fingerprint
+# devices as MediaTek reference boilerplate, and its odm build.prop carries a
+# build "fingerprint". A vendor HAL APEX named for fingerprint counts as well.
+#
+# A vendor with no VINTF manifest at all (pre-Treble) cannot be judged, so
+# nothing is changed there, nor on a device with no Android vendor, where
+# neither the adapter nor the panel is installed in the first place.
+#
+# deviceinfo_has_fingerprint="true" or "false" overrides the search - for a HAL
+# declared some other way, or for a vendor that declares the AIDL example
+# (virtual) fingerprint HAL with no sensor behind it, as the Q25 does for face.
+ANDROID=/android
+PANEL=/usr/palm/applications/org.webosports.app.settings.fingerprint/appinfo.json
+
+rm -f "$RUN/no-fingerprint"
+
+case "${deviceinfo_has_fingerprint:-}" in
+    true)  exit 0 ;;
+    false) has_fp= ;;
+    "")
+        [ -d "$ANDROID/vendor" ] || exit 0
+        manifests=
+        for m in "$ANDROID"/vendor/etc/vintf/manifest*.xml \
+                 "$ANDROID"/vendor/etc/vintf/manifest/*.xml \
+                 "$ANDROID"/vendor/manifest.xml \
+                 "$ANDROID"/odm/etc/vintf/manifest*.xml \
+                 "$ANDROID"/odm/etc/vintf/manifest/*.xml; do
+            [ -f "$m" ] && manifests=1 && break
+        done
+        [ -n "$manifests" ] || exit 0
+
+        has_fp=
+        for m in "$ANDROID"/vendor/etc/vintf/manifest*.xml \
+                 "$ANDROID"/vendor/etc/vintf/manifest/*.xml \
+                 "$ANDROID"/vendor/manifest.xml \
+                 "$ANDROID"/odm/etc/vintf/manifest*.xml \
+                 "$ANDROID"/odm/etc/vintf/manifest/*.xml; do
+            [ -f "$m" ] || continue
+            if grep -qs '<name>[^<]*biometrics\.fingerprint' "$m"; then
+                has_fp=1
+                break
+            fi
+        done
+        if [ -z "$has_fp" ]; then
+            for a in "$ANDROID"/vendor/apex/*fingerprint*; do
+                [ -e "$a" ] && { has_fp=1; break; }
+            done
+        fi
+        ;;
+    *)
+        echo "luneos-device-config: ignoring deviceinfo_has_fingerprint '$deviceinfo_has_fingerprint', not true/false" >&2
+        exit 0
+        ;;
+esac
+[ -n "$has_fp" ] && exit 0
+
+: > "$RUN/no-fingerprint"
+echo "luneos-device-config: no fingerprint reader, skipping webos-fingerprint-adapter"
+
+[ -f "$PANEL" ] || exit 0
+out=$GEN/files$PANEL
+mkdir -p "$(dirname "$out")"
+# Rewrite an existing "visible" key, or add one after the opening brace.
+if grep -q '"visible"[[:space:]]*:' "$PANEL"; then
+    sed 's/"visible"[[:space:]]*:[[:space:]]*[a-z"]*/"visible": false/' "$PANEL" > "$out"
+else
+    # awk, not sed's 0,/re/ address: busybox sed does not have it.
+    awk '!done && sub(/\{/, "{\n    \"visible\": false,") { done = 1 } { print }' "$PANEL" > "$out"
+fi
+echo "luneos-device-config: no fingerprint reader, hiding Settings > Fingerprint"
