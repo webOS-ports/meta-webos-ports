@@ -3,7 +3,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 # oe-core's ofono_2.19.bb sets no PR. Without one here, a rebuilt package
 # carries the same version as the installed one and opkg won't upgrade it.
 # Bump it whenever the patches below change what is built.
-PR = "r5"
+PR = "r6"
 
 DEPENDS += "dbus-glib libmce-glib"
 # The modem stack differs per machine class. The default is the mainline
@@ -174,6 +174,11 @@ do_install:append() {
     # Sandbox for both units; see the file for what ofonod still needs.
     install -D -m 0644 ${UNPACKDIR}/ofono.service.d/luneos-hardening.conf \
         ${D}${systemd_unitdir}/system/ofono.service.d/luneos-hardening.conf
+
+    # The provider database provision.db is built from, as readable JSON:
+    # the Settings app lists from it every access point of the SIM's
+    # network, where ofono itself keeps only one per type.
+    install -m 0644 ${S}/data/provision.json ${D}${datadir}/ofono/provision.json
 
     if [ -e ${UNPACKDIR}/70-ofono-modem.rules ]; then
         # Install udev rule for mainline modem
