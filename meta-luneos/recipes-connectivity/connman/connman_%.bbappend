@@ -86,6 +86,16 @@ SRC_URI += " \
 # and could skip clients, which then stayed in TetheringClients.
 SRC_URI += "file://0020-tethering-do-not-remove-clients-while-walking-the-cl.patch"
 
+# Unit tests for 0016, 0018 and 0020, each failing without its fix. They
+# are noinst programs, so every build compiles and links them for the
+# target; tests/host-check.sh runs them on the build host, under the
+# sanitizers and valgrind too (see tests/README.md).
+SRC_URI += " \
+    file://0021-unit-test-iptables-with-option-merging-that-frees-as.patch \
+    file://0022-unit-test-where-the-DHCP-server-sends-its-OFFER-and-.patch \
+    file://0023-unit-test-tethering-clients-also-when-tethering-is-t.patch \
+"
+
 # See connman-vpn.service.d/luneos-caps.conf for why: upstream's
 # CapabilityBoundingSet on connman-vpn.service is missing CAP_SYS_ADMIN and
 # CAP_DAC_OVERRIDE, which the l2tp plugin's client-side pppd needs to open
