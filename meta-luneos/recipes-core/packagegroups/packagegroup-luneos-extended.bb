@@ -504,6 +504,11 @@ RDEPENDS:${PN}:append:pinetab2 = " waydroid waydroid-sensors"
 RDEPENDS:${PN}:append:qemux86-64 = " waydroid waydroid-sensors waydroid-vmwgfx-dri"
 RDEPENDS:${PN}:append:rpi = " waydroid"
 
+# The Widevine bridge CDM for Chromium. Only halium machines have the Android
+# Widevine HAL it bridges to. It installs off; enable it per device with
+# "wvbridgectl install && wvbridgectl enable".
+RDEPENDS:${PN}:append:halium = " luneos-widevine-bridge"
+
 # Waydroid needs a kernel of 3.18 or newer (binder, ashmem and the namespaces its
 # LineageOS container uses), and the four Halium machines on a 3.4 vendor kernel
 # (sm-t520 is the fourth, the Exynos 5420 tablet) have none of that. The ":halium" line above would otherwise pull waydroid and its
