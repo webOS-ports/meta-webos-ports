@@ -1,0 +1,61 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] i18npool: do not crash when the saxparser output file cannot be opened
+
+The build-host tool saxparser generates the localedata_*.cxx sources via
+OFileWriter. Its constructor opens the output file with fopen() but never
+checks the result, while every write method (writeAsciiString() and the
+rest) does fprintf(m_f, ...) with no NULL check. When fopen() fails the
+first write dereferences a NULL FILE* and the tool dies with a bare
+"Segmentation fault (core dumped)", failing do_compile with no clue why.
+
+fopen() fails transiently under a heavy parallel build: gbuild runs the
+localedata generation with its own parallelism, so many saxparser run at
+once and a signal interrupting the underlying open() surfaces as fopen()
+returning NULL with errno == EINTR. The locale it dies on is therefore
+non-deterministic and load-correlated. It is not a resource limit (checked
+while failing: plenty of free space, file descriptors and inodes).
+
+Retry fopen() on EINTR, and if it still fails print the file name and the
+errno string and exit(1), so a genuine failure is reported instead of
+crashing.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ i18npool/source/localedata/filewriter.cxx | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/i18npool/source/localedata/filewriter.cxx b/i18npool/source/localedata/filewriter.cxx
+--- a/i18npool/source/localedata/filewriter.cxx
++++ b/i18npool/source/localedata/filewriter.cxx
+@@ -18,6 +18,9 @@
+  */
+
+ #include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <errno.h>
+ #include "LocaleNode.hxx"
+
+ // The document handler, which is needed for the saxparser
+@@ -26,7 +29,19 @@
+ OFileWriter::OFileWriter(const char *pcFile, const char *locale ): theLocale(locale) {
+
+     printf("file generated=%s\n", pcFile);
+-    m_f = fopen(pcFile, "w");
++    // fopen() can fail transiently under a heavy parallel build (e.g. EINTR
++    // from signal churn while many localedata generators run at once). Retry on
++    // EINTR, and if it still fails, abort with a clear message: every write
++    // method below does fprintf(m_f, ...) with no NULL check, so a NULL m_f
++    // would otherwise crash with a bare SIGSEGV that is hard to diagnose.
++    do {
++        m_f = fopen(pcFile, "w");
++    } while (m_f == nullptr && errno == EINTR);
++    if (m_f == nullptr) {
++        fprintf(stderr, "saxparser: cannot open output file '%s': %s\n",
++                pcFile, strerror(errno));
++        exit(1);
++    }
+ }
+
+ OFileWriter::~OFileWriter() {

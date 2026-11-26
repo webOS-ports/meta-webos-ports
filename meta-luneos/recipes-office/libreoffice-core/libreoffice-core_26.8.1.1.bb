@@ -21,6 +21,7 @@ SRC_URI = " \
     file://0002-gbuild-create-UnpackedTarball-before-writing-a-.vers.patch \
     file://0003-external-link-the-autotools-externals-with-the-confi.patch \
     file://0004-sal-allow-the-source-directory-in-log-locations-to-b.patch \
+    file://0005-i18npool-do-not-crash-when-the-saxparser-output-file.patch \
 "
 SRC_URI[sha256sum] = "296ba78e7ab0d381b94c3d6342f4ebb2320ee5097ca58781b9b744cab90b9785"
 
@@ -94,11 +95,23 @@ EXTRA_OECONF = " \
 "
 
 # The build machine's half: same compilers bitbake uses for native code, and
-# pkg-config pointed at the native sysroot.
-export CC_FOR_BUILD = "${BUILD_CC}"
-export CXX_FOR_BUILD = "${BUILD_CXX}"
+# pkg-config pointed at the native sysroot. Its configure unsets CFLAGS and
+# never reads the *_FOR_BUILD flags, so the native sysroot's include and
+# library paths ride along in the compiler command. Without them it found
+# zlib.h only on hosts with zlib headers installed, and failed in the CI
+# container ("zlib.h not found").
+export CC_FOR_BUILD = "${BUILD_CC} ${BUILD_CPPFLAGS} ${BUILD_LDFLAGS}"
+export CXX_FOR_BUILD = "${BUILD_CXX} ${BUILD_CPPFLAGS} ${BUILD_LDFLAGS}"
 export PKG_CONFIG_FOR_BUILD = "pkg-config-native"
 export PYTHON_FOR_BUILD = "${PYTHON}"
+
+# The bundled externals (libcdr, libvisio, librevenge, ...) compile with
+# LibreOffice's own gb_CXXFLAGS rather than CXXFLAGS, so DEBUG_PREFIX_MAP never
+# reaches them, and the bundled boost headers come in through an absolute -I:
+# boost's __FILE__ strings put TMPDIR in libwpftdrawlo.so [buildpaths]. All of
+# them pass $(CPPFLAGS) from the environment to their configure. ccache hid
+# this locally: it rewrites paths under its base_dir to relative ones.
+CPPFLAGS:append = " ${DEBUG_PREFIX_MAP}"
 # The build machine's pyuno: its configure asks distutils for the headers, and
 # Python 3.12 has no distutils. The target side has --disable-python.
 export PYTHON_CFLAGS = "-I${STAGING_INCDIR_NATIVE}/python${PYTHON_BASEVERSION}"
