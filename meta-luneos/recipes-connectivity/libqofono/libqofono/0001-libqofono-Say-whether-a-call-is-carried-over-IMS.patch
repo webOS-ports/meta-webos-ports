@@ -1,0 +1,269 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 26 Nov 2026 20:38:05 +0100
+Subject: [PATCH] [libqofono] Say whether a call is carried over IMS
+
+oFono's VoiceCall has an IMS property (on LuneOS, from the MediaTek
+IMS extension): true for a call over VoLTE, VoNR or VoWiFi, false for
+a circuit-switched one. QOfonoVoiceCall reads it as ims, and
+imsChanged follows a handover between the two.
+
+The test serves a fake org.ofono call on a private bus instead of
+phonesim, which has no IMS.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ plugin/plugins.qmltypes                    |   5 +
+ src/qofonovoicecall.cpp                    |  12 ++
+ src/qofonovoicecall.h                      |   3 +
+ test/auto/tests/CMakeLists.txt             |   1 +
+ test/auto/tests/tst_qofonovoicecallims.cpp | 146 +++++++++++++++++++++
+ 5 files changed, 167 insertions(+)
+ create mode 100644 test/auto/tests/tst_qofonovoicecallims.cpp
+
+diff --git a/plugin/plugins.qmltypes b/plugin/plugins.qmltypes
+index 8e05597..319ee67 100644
+--- a/plugin/plugins.qmltypes
++++ b/plugin/plugins.qmltypes
+@@ -1476,6 +1476,7 @@ Module {
+         Property { name: "information"; type: "string"; isReadonly: true }
+         Property { name: "multiparty"; type: "bool"; isReadonly: true }
+         Property { name: "emergency"; type: "bool"; isReadonly: true }
++        Property { name: "ims"; type: "bool"; isReadonly: true }
+         Property { name: "remoteHeld"; type: "bool"; isReadonly: true }
+         Property { name: "icon"; type: "uchar"; isReadonly: true }
+         Signal {
+@@ -1518,6 +1519,10 @@ Module {
+             name: "emergencyChanged"
+             Parameter { name: "emergency"; type: "bool" }
+         }
++        Signal {
++            name: "imsChanged"
++            Parameter { name: "ims"; type: "bool" }
++        }
+         Signal {
+             name: "remoteHeldChanged"
+             Parameter { name: "remoteHeld"; type: "bool" }
+diff --git a/src/qofonovoicecall.cpp b/src/qofonovoicecall.cpp
+index 70dc87c..b9511db 100644
+--- a/src/qofonovoicecall.cpp
++++ b/src/qofonovoicecall.cpp
+@@ -89,6 +89,8 @@ void QOfonoVoiceCall::propertyChanged(const QString &property, const QVariant &v
+         Q_EMIT iconChanged(value.value<quint8>());
+     } else if (property == QLatin1String("Emergency")) {
+         Q_EMIT emergencyChanged(value.toBool());
++    } else if (property == QLatin1String("IMS")) {
++        Q_EMIT imsChanged(value.toBool());
+     } else if (property == QLatin1String("RemoteHeld")) {
+         Q_EMIT remoteHeldChanged(value.toBool());
+     } else if (property == QLatin1String("RemoteMultiparty")) {
+@@ -136,6 +138,16 @@ bool QOfonoVoiceCall::emergency() const
+     return getBool("Emergency");
+ }
+ 
++/*!
++    True if oFono reports the call as carried over IMS (VoLTE, VoNR or
++    VoWiFi). False for a circuit-switched call, and with an oFono or a
++    modem driver that does not report it.
++*/
++bool QOfonoVoiceCall::ims() const
++{
++    return getBool("IMS");
++}
++
+ quint8 QOfonoVoiceCall::icon() const
+ {
+     return getProperty("Icon").value<quint8>();
+diff --git a/src/qofonovoicecall.h b/src/qofonovoicecall.h
+index a52f135..459d757 100644
+--- a/src/qofonovoicecall.h
++++ b/src/qofonovoicecall.h
+@@ -38,6 +38,7 @@ class QOFONOSHARED_EXPORT QOfonoVoiceCall : public QOfonoObject
+     Q_PROPERTY(QString information READ information NOTIFY informationChanged)
+     Q_PROPERTY(bool multiparty READ multiparty NOTIFY multipartyChanged)
+     Q_PROPERTY(bool emergency READ emergency NOTIFY emergencyChanged)
++    Q_PROPERTY(bool ims READ ims NOTIFY imsChanged)
+     Q_PROPERTY(bool remoteHeld READ remoteHeld NOTIFY remoteHeldChanged)
+     Q_PROPERTY(quint8 icon READ icon NOTIFY iconChanged)
+ 
+@@ -65,6 +66,7 @@ public:
+     QString information() const;
+     bool multiparty() const;
+     bool emergency() const;
++    bool ims() const;
+     quint8 icon() const;
+     bool remoteHeld() const;
+     bool remoteMultiparty() const;
+@@ -82,6 +84,7 @@ Q_SIGNALS:
+     void multipartyChanged(bool multiparty);
+     void iconChanged(const quint8 &icon);
+     void emergencyChanged(bool emergency);
++    void imsChanged(bool ims);
+     void remoteHeldChanged(bool remoteHeld);
+     void remoteMultipartyChanged(bool remoteMultiparty);
+ 
+diff --git a/test/auto/tests/CMakeLists.txt b/test/auto/tests/CMakeLists.txt
+index a87fa8b..4aec3ee 100644
+--- a/test/auto/tests/CMakeLists.txt
++++ b/test/auto/tests/CMakeLists.txt
+@@ -17,6 +17,7 @@ set(TEST_SRCS
+     tst_qofonosupplementaryservices.cpp
+     tst_qofonovoicecallmanager.cpp
+     tst_qofonovoicecall.cpp
++    tst_qofonovoicecallims.cpp
+     tst_qofonocallvolume.cpp
+     tst_qofonomultipartycall.cpp
+     tst_qofonocellbroadcast.cpp
+diff --git a/test/auto/tests/tst_qofonovoicecallims.cpp b/test/auto/tests/tst_qofonovoicecallims.cpp
+new file mode 100644
+index 0000000..d3b9962
+--- /dev/null
++++ b/test/auto/tests/tst_qofonovoicecallims.cpp
+@@ -0,0 +1,146 @@
++/*
++ * This file is part of ofono-qt
++ *
++ * This library is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public License
++ * version 2.1 as published by the Free Software Foundation.
++ *
++ * This library is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with this library; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
++ * 02110-1301 USA
++ */
++
++/*
++ * The IMS property of a call, against a fake org.ofono call on a private
++ * bus instead of phonesim:
++ *
++ *     dbus-run-session -- sh -c \
++ *         'DBUS_SYSTEM_BUS_ADDRESS=$DBUS_SESSION_BUS_ADDRESS ./tst_qofonovoicecallims'
++ */
++
++#include <QtTest/QtTest>
++#include <QDBusConnection>
++#include <QDBusConnectionInterface>
++#include <QDBusMessage>
++#include <QDBusVariant>
++#include <QDBusVirtualObject>
++
++#include "qofonovoicecall.h"
++
++static const char CallPath[] = "/ril_0/voicecall01";
++static const char CallInterface[] = "org.ofono.VoiceCall";
++
++class FakeOfonoCall : public QDBusVirtualObject
++{
++    Q_OBJECT
++
++public:
++    explicit FakeOfonoCall(const QDBusConnection &bus) : m_bus(bus) {}
++
++    QVariantMap properties;
++
++    void change(const QString &name, const QVariant &value)
++    {
++        properties.insert(name, value);
++        QDBusMessage signal = QDBusMessage::createSignal(QLatin1String(CallPath),
++                                                         QLatin1String(CallInterface),
++                                                         QStringLiteral("PropertyChanged"));
++        signal << name << QVariant::fromValue(QDBusVariant(value));
++        m_bus.send(signal);
++    }
++
++    QString introspect(const QString &) const override
++    {
++        return QStringLiteral(
++            "<interface name=\"org.ofono.VoiceCall\">"
++            "<method name=\"GetProperties\"><arg type=\"a{sv}\" direction=\"out\"/></method>"
++            "<signal name=\"PropertyChanged\"><arg type=\"s\"/><arg type=\"v\"/></signal>"
++            "</interface>");
++    }
++
++    bool handleMessage(const QDBusMessage &message, const QDBusConnection &connection) override
++    {
++        if (message.interface() != QLatin1String(CallInterface)
++                || message.member() != QLatin1String("GetProperties"))
++            return false;
++        connection.send(message.createReply(QVariant::fromValue(properties)));
++        return true;
++    }
++
++private:
++    QDBusConnection m_bus;
++};
++
++class TestQOfonoVoiceCallIms : public QObject
++{
++    Q_OBJECT
++
++private Q_SLOTS:
++    void initTestCase()
++    {
++        if (qgetenv("DBUS_SYSTEM_BUS_ADDRESS").isEmpty()
++                || qgetenv("DBUS_SYSTEM_BUS_ADDRESS") != qgetenv("DBUS_SESSION_BUS_ADDRESS"))
++            QSKIP("Needs a private bus as the system bus, see the top of this file");
++        // A connection of its own, so the replies and signals come from the
++        // owner of org.ofono, as they would from oFono.
++        m_bus = QDBusConnection::connectToBus(QDBusConnection::SessionBus,
++                                              QStringLiteral("fake_ofono"));
++        QVERIFY(m_bus.isConnected());
++        QVERIFY(m_bus.registerService(QStringLiteral("org.ofono")));
++        m_call = new FakeOfonoCall(m_bus);
++        m_call->properties.insert(QStringLiteral("State"), QStringLiteral("active"));
++        m_call->properties.insert(QStringLiteral("IMS"), true);
++        QVERIFY(m_bus.registerVirtualObject(QLatin1String(CallPath), m_call));
++    }
++
++    void cleanupTestCase()
++    {
++        if (m_bus.isConnected()) {
++            m_bus.unregisterObject(QLatin1String(CallPath));
++            m_bus.unregisterService(QStringLiteral("org.ofono"));
++        }
++        delete m_call;
++        m_call = 0;
++    }
++
++    void imsFollowsOfono()
++    {
++        QOfonoVoiceCall call;
++        QSignalSpy changed(&call, SIGNAL(imsChanged(bool)));
++        call.setVoiceCallPath(QLatin1String(CallPath));
++        QTRY_VERIFY(call.isValid());
++        QVERIFY(call.ims());
++        QCOMPARE(call.property("ims").toBool(), true);
++        // Bindings learn the first value from the signal too
++        QCOMPARE(changed.count(), 1);
++        QCOMPARE(changed.at(0).at(0).toBool(), true);
++
++        // A handover to the circuit-switched network (SRVCC)
++        m_call->change(QStringLiteral("IMS"), false);
++        QTRY_COMPARE(changed.count(), 2);
++        QCOMPARE(changed.at(1).at(0).toBool(), false);
++        QVERIFY(!call.ims());
++    }
++
++    void imsFalseWhenNotReported()
++    {
++        m_call->properties.remove(QStringLiteral("IMS"));
++        QOfonoVoiceCall call;
++        call.setVoiceCallPath(QLatin1String(CallPath));
++        QTRY_VERIFY(call.isValid());
++        QVERIFY(!call.ims());
++    }
++
++private:
++    QDBusConnection m_bus = QDBusConnection(QString());
++    FakeOfonoCall *m_call = 0;
++};
++
++QTEST_MAIN(TestQOfonoVoiceCallIms)
++#include "tst_qofonovoicecallims.moc"

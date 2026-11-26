@@ -1,0 +1,488 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 26 Nov 2026 21:07:19 +0100
+Subject: [PATCH] [voicecall] Say whether a call is carried over IMS.
+
+A handler's isIms is true for a call that goes over IMS (VoLTE, VoNR,
+VoWiFi) rather than the circuit-switched network. The oFono provider
+reads it from libqofono's QOfonoVoiceCall::ims, oFono's IMS call
+property, and imsChanged follows a handover between the two (SRVCC).
+Providers that cannot tell keep the default, false.
+
+It reaches clients in the call's D-Bus properties (getProperties'
+isIms, and imsChanged) and as VoiceCallHandler.isIms in QML, so the
+phone app can show "VoLTE" for a call.
+
+tst_ofonoprovider and tst_dbusservice test it. The cppcheck baseline
+entry for the oFono handler's constructor moves a line down.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ lib/src/abstractvoicecallhandler.h            |  5 ++
+ plugins/declarative/src/voicecallhandler.cpp  | 24 ++++++++
+ plugins/declarative/src/voicecallhandler.h    |  4 ++
+ .../ofono/src/ofonovoicecallhandler.cpp       |  8 +++
+ .../ofono/src/ofonovoicecallhandler.h         |  1 +
+ src/dbus/voicecallhandlerdbusadapter.cpp      | 11 ++++
+ src/dbus/voicecallhandlerdbusadapter.h        |  3 +
+ tests/fakes/fake_voicecall.h                  |  7 +++
+ tests/fakes/ofono/fake_qofono.h               |  9 +++
+ tests/hardening/static-analysis.baseline      |  2 +-
+ tests/tst_dbusservice.cpp                     | 60 +++++++++++++++++++
+ tests/tst_ofonoprovider.cpp                   | 24 ++++++++
+ 12 files changed, 157 insertions(+), 1 deletion(-)
+
+diff --git a/lib/src/abstractvoicecallhandler.h b/lib/src/abstractvoicecallhandler.h
+index 2c950a0..fda87cc 100644
+--- a/lib/src/abstractvoicecallhandler.h
++++ b/lib/src/abstractvoicecallhandler.h
+@@ -49,6 +49,7 @@ class AbstractVoiceCallHandler : public QObject
+     Q_PROPERTY(bool isMultiparty READ isMultiparty NOTIFY multipartyChanged)
+     Q_PROPERTY(bool isForwarded READ isForwarded NOTIFY forwardedChanged)
+     Q_PROPERTY(bool isRemoteHeld READ isRemoteHeld NOTIFY remoteHeldChanged)
++    Q_PROPERTY(bool isIms READ isIms NOTIFY imsChanged)
+     Q_PROPERTY(QString parentHandlerId READ parentHandlerId NOTIFY parentHandlerIdChanged)
+     Q_PROPERTY(QList<AbstractVoiceCallHandler*> childCalls READ childCalls NOTIFY childCallsChanged)
+ 
+@@ -89,6 +90,9 @@ public:
+     virtual bool isEmergency() const = 0;
+     virtual bool isForwarded() const = 0;
+     virtual bool isRemoteHeld() const = 0;
++    // The call goes over IMS (VoLTE, VoNR, VoWiFi), not circuit-switched.
++    // Providers that cannot tell keep the default.
++    virtual bool isIms() const { return false; }
+     virtual QString parentHandlerId() const = 0;
+     virtual QList<AbstractVoiceCallHandler*> childCalls() const = 0;
+ 
+@@ -106,6 +110,7 @@ Q_SIGNALS:
+     void multipartyChanged(bool);
+     void forwardedChanged(bool);
+     void remoteHeldChanged(bool);
++    void imsChanged(bool);
+     void parentHandlerIdChanged(QString);
+     void childCallsChanged();
+ 
+diff --git a/plugins/declarative/src/voicecallhandler.cpp b/plugins/declarative/src/voicecallhandler.cpp
+index c6d50cc..4080629 100644
+--- a/plugins/declarative/src/voicecallhandler.cpp
++++ b/plugins/declarative/src/voicecallhandler.cpp
+@@ -34,6 +34,7 @@ public:
+         , multiparty(false)
+         , forwarded(false)
+         , remoteHeld(false)
++        , ims(false)
+     {}
+ 
+     VoiceCallHandler *q_ptr;
+@@ -57,6 +58,7 @@ public:
+     bool multiparty;
+     bool forwarded;
+     bool remoteHeld;
++    bool ims;
+ };
+ 
+ /*!
+@@ -121,6 +123,7 @@ void VoiceCallHandler::initialize()
+         success &= (bool)QObject::connect(d->interface, SIGNAL(multipartyChanged(bool)), SLOT(onMultipartyChanged(bool)));
+         success &= (bool)QObject::connect(d->interface, SIGNAL(forwardedChanged(bool)), SLOT(onForwardedChanged(bool)));
+         success &= (bool)QObject::connect(d->interface, SIGNAL(remoteHeldChanged(bool)), SLOT(onRemoteHeldChanged(bool)));
++        success &= (bool)QObject::connect(d->interface, SIGNAL(imsChanged(bool)), SLOT(onImsChanged(bool)));
+         success &= (bool)QObject::connect(d->interface, SIGNAL(parentHandlerIdChanged(QString)), SLOT(onMultipartyHandlerIdChanged(QString)));
+         success &= (bool)QObject::connect(d->interface, SIGNAL(childCallsChanged(QStringList)), SLOT(onChildCallsChanged(QStringList)));
+     }
+@@ -155,6 +158,7 @@ void VoiceCallHandler::onGetPropertiesFinished(QDBusPendingCallWatcher *watcher)
+         d->emergency = props["isEmergency"].toBool();
+         d->forwarded = props["isForwarded"].toBool();
+         d->remoteHeld = props["isRemoteHeld"].toBool();
++        d->ims = props["isIms"].toBool();
+         d->parentHandlerId = props["parentHandlerId"].toString();
+ 
+         emit durationChanged();
+@@ -169,6 +173,8 @@ void VoiceCallHandler::onGetPropertiesFinished(QDBusPendingCallWatcher *watcher)
+             emit forwardedChanged();
+         if (d->remoteHeld)
+             emit remoteHeldChanged();
++        if (d->ims)
++            emit imsChanged();
+         if (!d->parentHandlerId.isEmpty()) {
+             d->parentCall = VoiceCallManager::getCallHandler(d->parentHandlerId);
+             emit parentCallChanged();
+@@ -248,6 +254,14 @@ void VoiceCallHandler::onForwardedChanged(bool forwarded)
+     emit forwardedChanged();
+ }
+ 
++void VoiceCallHandler::onImsChanged(bool ims)
++{
++    TRACE
++    Q_D(VoiceCallHandler);
++    d->ims = ims;
++    emit imsChanged();
++}
++
+ void VoiceCallHandler::onRemoteHeldChanged(bool remoteHeld)
+ {
+     TRACE
+@@ -387,6 +401,16 @@ VoiceCallHandler* VoiceCallHandler::parentCall() const
+     return d->parentCall.data();
+ }
+ 
++/*!
++  Returns whether this voice call is carried over IMS (VoLTE).
++ */
++bool VoiceCallHandler::isIms() const
++{
++    TRACE
++    Q_D(const VoiceCallHandler);
++    return d->ims;
++}
++
+ /*!
+   Returns this voice calls' emergency flag property.
+  */
+diff --git a/plugins/declarative/src/voicecallhandler.h b/plugins/declarative/src/voicecallhandler.h
+index 4b2b555..33fb4b0 100644
+--- a/plugins/declarative/src/voicecallhandler.h
++++ b/plugins/declarative/src/voicecallhandler.h
+@@ -32,6 +32,7 @@ class VoiceCallHandler : public QObject
+     Q_PROPERTY(bool isMultiparty READ isMultiparty NOTIFY multipartyChanged)
+     Q_PROPERTY(bool isForwarded READ isForwarded NOTIFY forwardedChanged)
+     Q_PROPERTY(bool isRemoteHeld READ isRemoteHeld NOTIFY remoteHeldChanged)
++    Q_PROPERTY(bool isIms READ isIms NOTIFY imsChanged)
+     Q_PROPERTY(VoiceCallModel* childCalls READ childCalls NOTIFY childCallsChanged)
+     Q_PROPERTY(VoiceCallHandler* parentCall READ parentCall NOTIFY parentCallChanged)
+ 
+@@ -65,6 +66,7 @@ public:
+     bool isEmergency() const;
+     bool isForwarded() const;
+     bool isRemoteHeld() const;
++    bool isIms() const;
+     VoiceCallModel* childCalls() const;
+     VoiceCallHandler* parentCall() const;
+ 
+@@ -78,6 +80,7 @@ Q_SIGNALS:
+     void multipartyChanged();
+     void forwardedChanged();
+     void remoteHeldChanged();
++    void imsChanged();
+     void childCallsChanged();
+     void childCallsListChanged();
+     void parentCallChanged();
+@@ -104,6 +107,7 @@ private Q_SLOTS:
+     void onMultipartyChanged(bool multiparty);
+     void onForwardedChanged(bool forwarded);
+     void onRemoteHeldChanged(bool remoteHeld);
++    void onImsChanged(bool ims);
+     void onMultipartyHandlerIdChanged(QString handlerId);
+     void onChildCallsChanged(const QStringList &);
+     void onGetPropertiesFinished(QDBusPendingCallWatcher *watcher);
+diff --git a/plugins/providers/ofono/src/ofonovoicecallhandler.cpp b/plugins/providers/ofono/src/ofonovoicecallhandler.cpp
+index 13fdbc0..2c3d6c4 100644
+--- a/plugins/providers/ofono/src/ofonovoicecallhandler.cpp
++++ b/plugins/providers/ofono/src/ofonovoicecallhandler.cpp
+@@ -70,6 +70,7 @@ OfonoVoiceCallHandler::OfonoVoiceCallHandler(const QString &handlerId, const QSt
+     QObject::connect(d->ofonoVoiceCall, SIGNAL(lineIdentificationChanged(QString)), SIGNAL(lineIdChanged(QString)));
+     QObject::connect(d->ofonoVoiceCall, SIGNAL(emergencyChanged(bool)), SIGNAL(emergencyChanged(bool)));
+     QObject::connect(d->ofonoVoiceCall, SIGNAL(multipartyChanged(bool)), SIGNAL(multipartyChanged(bool)));
++    QObject::connect(d->ofonoVoiceCall, SIGNAL(imsChanged(bool)), SIGNAL(imsChanged(bool)));
+ 
+     QObject::connect(d->ofonoVoiceCall, SIGNAL(stateChanged(QString)), SLOT(onStatusChanged()));
+     QObject::connect(d->ofonoVoiceCall, &QOfonoVoiceCall::startTimeChanged, this, [this]() {
+@@ -197,6 +198,13 @@ bool OfonoVoiceCallHandler::isRemoteHeld() const
+     return false;
+ }
+ 
++bool OfonoVoiceCallHandler::isIms() const
++{
++    TRACE
++    Q_D(const OfonoVoiceCallHandler);
++    return d->ofonoVoiceCall->ims();
++}
++
+ AbstractVoiceCallHandler::VoiceCallStatus OfonoVoiceCallHandler::status() const
+ {
+     TRACE
+diff --git a/plugins/providers/ofono/src/ofonovoicecallhandler.h b/plugins/providers/ofono/src/ofonovoicecallhandler.h
+index 76bd0c2..c21dc81 100644
+--- a/plugins/providers/ofono/src/ofonovoicecallhandler.h
++++ b/plugins/providers/ofono/src/ofonovoicecallhandler.h
+@@ -54,6 +54,7 @@ public:
+     bool isEmergency() const override;
+     bool isForwarded() const override;
+     bool isRemoteHeld() const override;
++    bool isIms() const override;
+ 
+     // TODO: unimplemented - JB#35997
+     QString parentHandlerId() const override { return QString(); }
+diff --git a/src/dbus/voicecallhandlerdbusadapter.cpp b/src/dbus/voicecallhandlerdbusadapter.cpp
+index bec24c3..c26cfec 100644
+--- a/src/dbus/voicecallhandlerdbusadapter.cpp
++++ b/src/dbus/voicecallhandlerdbusadapter.cpp
+@@ -59,6 +59,7 @@ VoiceCallHandlerDBusAdapter::VoiceCallHandlerDBusAdapter(AbstractVoiceCallHandle
+     QObject::connect(d->handler, SIGNAL(multipartyChanged(bool)), SIGNAL(multipartyChanged(bool)));
+     QObject::connect(d->handler, SIGNAL(forwardedChanged(bool)), SIGNAL(forwardedChanged(bool)));
+     QObject::connect(d->handler, SIGNAL(remoteHeldChanged(bool)), SIGNAL(remoteHeldChanged(bool)));
++    QObject::connect(d->handler, SIGNAL(imsChanged(bool)), SIGNAL(imsChanged(bool)));
+     QObject::connect(d->handler, SIGNAL(parentHandlerIdChanged(QString)), SIGNAL(parentHandlerIdChanged(QString)));
+     QObject::connect(d->handler, &AbstractVoiceCallHandler::childCallsChanged, this, [this]() { emit childCallsChanged(childCalls()); });
+ }
+@@ -152,6 +153,15 @@ bool VoiceCallHandlerDBusAdapter::isRemoteHeld() const
+     return d->handler->isRemoteHeld();
+ }
+ 
++/*!
++  Returns whether this voice call is carried over IMS (VoLTE).
++*/
++bool VoiceCallHandlerDBusAdapter::isIms() const
++{
++    Q_D(const VoiceCallHandlerDBusAdapter);
++    return d->handler->isIms();
++}
++
+ /*!
+   Returns this voice calls' multiparty call handlerId property.
+ */
+@@ -326,6 +336,7 @@ QVariantMap VoiceCallHandlerDBusAdapter::getProperties()
+     props.insert("isMultiparty", QVariant(isMultiparty()));
+     props.insert("isForwarded", QVariant(isForwarded()));
+     props.insert("isRemoteHeld", QVariant(isRemoteHeld()));
++    props.insert("isIms", QVariant(isIms()));
+     props.insert("parentHandlerId", QVariant(parentHandlerId()));
+     props.insert("childCalls", QVariant(childCalls()));
+ 
+diff --git a/src/dbus/voicecallhandlerdbusadapter.h b/src/dbus/voicecallhandlerdbusadapter.h
+index b258e75..1c0839d 100644
+--- a/src/dbus/voicecallhandlerdbusadapter.h
++++ b/src/dbus/voicecallhandlerdbusadapter.h
+@@ -44,6 +44,7 @@ class VoiceCallHandlerDBusAdapter : public QDBusAbstractAdaptor
+     Q_PROPERTY(bool isMultiparty READ isMultiparty NOTIFY multipartyChanged)
+     Q_PROPERTY(bool isForwarded READ isForwarded NOTIFY forwardedChanged)
+     Q_PROPERTY(bool isRemoteHeld READ isRemoteHeld NOTIFY remoteHeldChanged)
++    Q_PROPERTY(bool isIms READ isIms NOTIFY imsChanged)
+     Q_PROPERTY(QString parentHandlerId READ parentHandlerId NOTIFY parentHandlerIdChanged)
+     Q_PROPERTY(QStringList childCalls READ childCalls NOTIFY childCallsChanged)
+ 
+@@ -63,6 +64,7 @@ public:
+     bool isEmergency() const;
+     bool isForwarded() const;
+     bool isRemoteHeld() const;
++    bool isIms() const;
+     QString parentHandlerId() const;
+     QStringList childCalls() const;
+ 
+@@ -76,6 +78,7 @@ Q_SIGNALS:
+     void multipartyChanged(bool);
+     void forwardedChanged(bool);
+     void remoteHeldChanged(bool);
++    void imsChanged(bool);
+     void parentHandlerIdChanged(QString);
+     void childCallsChanged(QStringList);
+ 
+diff --git a/tests/fakes/fake_voicecall.h b/tests/fakes/fake_voicecall.h
+index f00c56a..cc035cf 100644
+--- a/tests/fakes/fake_voicecall.h
++++ b/tests/fakes/fake_voicecall.h
+@@ -50,6 +50,7 @@ public:
+     bool isEmergency() const override { return m_emergency; }
+     bool isForwarded() const override { return false; }
+     bool isRemoteHeld() const override { return false; }
++    bool isIms() const override { return m_ims; }
+     QString parentHandlerId() const override { return QString(); }
+     QList<AbstractVoiceCallHandler *> childCalls() const override
+     {
+@@ -64,6 +65,11 @@ public:
+     }
+     void setDuration(int seconds) { m_duration = seconds; }
+     void setEmergency(bool emergency) { m_emergency = emergency; }
++    void setIms(bool ims)
++    {
++        m_ims = ims;
++        emit imsChanged(ims);
++    }
+     void setLineId(const QString &lineId) { m_lineId = lineId; }
+ 
+     // Requests made of this call, e.g. "hangup", "filter:0", "dtmf:1"
+@@ -89,6 +95,7 @@ private:
+     VoiceCallStatus m_status;
+     int m_duration = 0;
+     bool m_emergency = false;
++    bool m_ims = false;
+     QString m_lineId;
+ };
+ 
+diff --git a/tests/fakes/ofono/fake_qofono.h b/tests/fakes/ofono/fake_qofono.h
+index c5e8ce9..bd25518 100644
+--- a/tests/fakes/ofono/fake_qofono.h
++++ b/tests/fakes/ofono/fake_qofono.h
+@@ -57,6 +57,7 @@ public:
+     QString startTime() const { return m_startTime; }
+     bool multiparty() const { return multipartyCall; }
+     bool emergency() const { return false; }
++    bool ims() const { return imsCall; }
+ 
+     void answer() { requests << QStringLiteral("answer"); }
+     void hangup() { requests << QStringLiteral("hangup"); }
+@@ -85,13 +86,21 @@ public:
+         emit startTimeChanged(time);
+     }
+ 
++    void changeIms(bool ims)
++    {
++        imsCall = ims;
++        emit imsChanged(ims);
++    }
++
+     QStringList requests;
+     bool multipartyCall = false;
++    bool imsCall = false;
+ 
+ Q_SIGNALS:
+     void lineIdentificationChanged(const QString &);
+     void emergencyChanged(bool);
+     void multipartyChanged(bool);
++    void imsChanged(bool);
+     void stateChanged(const QString &);
+     void validChanged(bool);
+     void startTimeChanged(const QString &);
+diff --git a/tests/hardening/static-analysis.baseline b/tests/hardening/static-analysis.baseline
+index 1be0a94..835d26f 100644
+--- a/tests/hardening/static-analysis.baseline
++++ b/tests/hardening/static-analysis.baseline
+@@ -50,7 +50,7 @@ clang-tidy: src/dbus/voicecallhandlerdbusadapter.cpp: The value '3' provided to
+   why: deliberate: unknown D-Bus integers map to 3, inside the enumeration's value range ([dcl.enum]/8, two bits) but no action, so filter() rejects it
+ clang-tidy: src/dbus/voicecallhandlerdbusadapter.cpp: returning a constant reference parameter may cause use-after-free when the parameter is constructed from a temporary [bugprone-return-const-ref-from-parameter]
+   why: QDBusArgument operator>> must return the const QDBusArgument & it was given; Qt's D-Bus marshalling signature
+-cppcheck: plugins/providers/ofono/src/ofonovoicecallhandler.h: Virtual function 'status' is called from constructor 'OfonoVoiceCallHandler(const QString&handlerId,const QString&path,OfonoVoiceCallProvider*provider,QOfonoVoiceCallManager*manager)' at line 74. Dynamic binding is not used. [virtualCallInConstructor]
++cppcheck: plugins/providers/ofono/src/ofonovoicecallhandler.h: Virtual function 'status' is called from constructor 'OfonoVoiceCallHandler(const QString&handlerId,const QString&path,OfonoVoiceCallProvider*provider,QOfonoVoiceCallManager*manager)' at line 75. Dynamic binding is not used. [virtualCallInConstructor]
+   why: the handler classes are not subclassed; the call is meant to reach this class's own implementation
+   why: false positive: QOfonoManager::isValid() is only declared in the header, cppcheck guesses its value
+   why: false positive: 'new QOfonoManager(this)' passes the parent, nothing is converted to bool
+diff --git a/tests/tst_dbusservice.cpp b/tests/tst_dbusservice.cpp
+index 4c56eb0..f1a100a 100644
+--- a/tests/tst_dbusservice.cpp
++++ b/tests/tst_dbusservice.cpp
+@@ -28,6 +28,10 @@
+ 
+ #include <QDBusConnection>
+ #include <QDBusConnectionInterface>
++#include <QDBusMessage>
++#include <QDBusPendingCallWatcher>
++#include <QDBusPendingReply>
++#include <QSignalSpy>
+ #include <QtTest>
+ 
+ typedef AbstractVoiceCallHandler H;
+@@ -58,8 +62,26 @@ private Q_SLOTS:
+     void removedCallLeavesWithItsHandler();
+     void keptHandlerLeavesLater();
+     void callBackBeforeItLeftStays();
++    void imsReachesClients();
+ 
+ private:
++    // The service answers from this thread, so the call must not block it.
++    QVariantMap properties(const QString &sender, const QString &path)
++    {
++        QDBusMessage msg = QDBusMessage::createMethodCall(sender, path,
++                                                          QLatin1String(CallInterface),
++                                                          QStringLiteral("getProperties"));
++        QDBusPendingCall pending = m_client.asyncCall(msg);
++        QDBusPendingCallWatcher watcher(pending);
++        QSignalSpy finished(&watcher, SIGNAL(finished(QDBusPendingCallWatcher*)));
++        if (!finished.wait(3000) && !pending.isFinished())
++            return QVariantMap();
++        QDBusPendingReply<QVariantMap> reply = pending;
++        if (reply.isError())
++            qWarning() << "getProperties:" << reply.error().message();
++        return reply.isError() ? QVariantMap() : reply.value();
++    }
++
+     static bool registered(const QString &id)
+     {
+         return QDBusConnection::sessionBus().objectRegisteredAt(QStringLiteral("/calls/") + id);
+@@ -167,6 +189,44 @@ void tst_DBusService::callBackBeforeItLeftStays()
+     QVERIFY(registered(QStringLiteral("back")));
+ }
+ 
++class ImsListener : public QObject
++{
++    Q_OBJECT
++
++public:
++    QList<bool> changes;
++
++public Q_SLOTS:
++    void onImsChanged(bool ims) { changes << ims; }
++};
++
++// Clients see whether a call goes over IMS, in its properties and when it
++// changes.
++void tst_DBusService::imsReachesClients()
++{
++    const QString sender = QDBusConnection::sessionBus().baseService();
++    const QString path = QStringLiteral("/calls/ims1");
++    FakeVoiceCallHandler *call = m_provider->addCall(QStringLiteral("ims1"), false,
++                                                     H::STATUS_ACTIVE);
++    call->setIms(true);
++
++    QVariantMap props = properties(sender, path);
++    QVERIFY(props.contains(QStringLiteral("isIms")));
++    QCOMPARE(props.value(QStringLiteral("isIms")).toBool(), true);
++
++    ImsListener listener;
++    QVERIFY(m_client.connect(sender, path, QLatin1String(CallInterface),
++                             QStringLiteral("imsChanged"),
++                             &listener, SLOT(onImsChanged(bool))));
++    QVERIFY(m_client.interface()->isServiceRegistered(sender).value());
++
++    call->setIms(false);
++    QTRY_COMPARE_WITH_TIMEOUT(listener.changes, QList<bool>() << false, 3000);
++
++    props = properties(sender, path);
++    QCOMPARE(props.value(QStringLiteral("isIms")).toBool(), false);
++}
++
+ QTEST_GUILESS_MAIN(tst_DBusService)
+ 
+ #include "tst_dbusservice.moc"
+diff --git a/tests/tst_ofonoprovider.cpp b/tests/tst_ofonoprovider.cpp
+index 4a6fdf3..e7c8550 100644
+--- a/tests/tst_ofonoprovider.cpp
++++ b/tests/tst_ofonoprovider.cpp
+@@ -67,6 +67,7 @@ private Q_SLOTS:
+     void factoryTakesModemsListedLater();
+     void factoryTakesModemsKnownAtStart();
+     void factoryFollowsModemChanges();
++    void imsFollowsOfono();
+ 
+ private:
+     OfonoVoiceCallProvider *createProvider(const char *modemPath = ModemPath);
+@@ -529,6 +530,29 @@ void tst_OfonoProvider::factoryFollowsModemChanges()
+     QCoreApplication::sendPostedEvents(Q_NULLPTR, QEvent::DeferredDelete);
+ }
+ 
++// Whether oFono carries the call over IMS reaches the handler, and a
++// handover out of IMS (SRVCC) is signalled.
++void tst_OfonoProvider::imsFollowsOfono()
++{
++    const QString path = QStringLiteral("/ril_0/voicecall01");
++    OfonoVoiceCallHandler *handler = addValidCall(path, QStringLiteral("dialing"));
++    QVERIFY(handler);
++    QOfonoVoiceCall *call = QOfonoVoiceCall::instances().value(path);
++    QVERIFY(call);
++    QVERIFY(!handler->isIms());
++
++    QSignalSpy spy(handler, SIGNAL(imsChanged(bool)));
++    call->changeIms(true);
++    QVERIFY(handler->isIms());
++    QCOMPARE(spy.count(), 1);
++    QCOMPARE(spy.at(0).at(0).toBool(), true);
++
++    call->changeIms(false);
++    QVERIFY(!handler->isIms());
++    QCOMPARE(spy.count(), 2);
++    QCOMPARE(spy.at(1).at(0).toBool(), false);
++}
++
+ QTEST_GUILESS_MAIN(tst_OfonoProvider)
+ 
+ #include "tst_ofonoprovider.moc"

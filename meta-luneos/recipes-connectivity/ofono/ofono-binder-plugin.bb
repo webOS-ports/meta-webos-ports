@@ -46,6 +46,8 @@ SRC_URI = "git://github.com/mer-hybris/ofono-binder-plugin.git;branch=master;pro
            file://0032-unit-Test-the-luna-displaymanager-display-state.patch \
            file://0033-ofono-binder-Tell-the-modem-the-XCAP-access-point.patch \
            file://0034-unit-Test-the-APN-types-of-the-XCAP-data-profile.patch \
+           file://0035-ofono-binder-Tell-oFono-which-calls-are-carried-over.patch \
+           file://0036-unit-Test-which-calls-oFono-hears-are-IMS.patch \
 "
 
 PV = "1.1.41"

@@ -1,0 +1,247 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] unit: test the IMS property of a call
+
+A call the driver reports as IMS has IMS true in GetProperties, one it
+reports as circuit-switched false, and a call that moves out of IMS
+signals the change once, not again when the driver repeats it.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ unit/test-emulator-multimodem.c | 203 ++++++++++++++++++++++++++++++++
+ 1 file changed, 203 insertions(+)
+
+diff --git a/unit/test-emulator-multimodem.c b/unit/test-emulator-multimodem.c
+index fe2ba2d..69f5d6c 100644
+--- a/unit/test-emulator-multimodem.c
++++ b/unit/test-emulator-multimodem.c
+@@ -832,12 +832,161 @@ static void call_notify(struct phone *p, int modem, int id, int status,
+ 	ofono_voicecall_notify(p->fvc[modem].vc, &call);
+ }
+ 
++static void call_notify_ims(struct phone *p, int modem, int id, int status,
++				const char *number, ofono_bool_t ims)
++{
++	struct ofono_call call;
++
++	ofono_call_init(&call);
++	call.id = id;
++	call.status = status;
++	call.direction = CALL_DIRECTION_MOBILE_ORIGINATED;
++	g_strlcpy(call.phone_number.number, number,
++			sizeof(call.phone_number.number));
++	call.phone_number.type = 129;
++	call.clip_validity = CLIP_VALIDITY_VALID;
++	call.ims = ims;
++
++	ofono_voicecall_notify(p->fvc[modem].vc, &call);
++}
++
+ static void call_gone(struct phone *p, int modem, int id)
+ {
+ 	ofono_voicecall_disconnected(p->fvc[modem].vc, id,
+ 				OFONO_DISCONNECT_REASON_REMOTE_HANGUP, NULL);
+ }
+ 
++/* ---- a D-Bus client of the voicecall atom ------------------------------- */
++
++struct client {
++	DBusConnection *conn;
++	GSList *ims_changes;	/* "<path> <0|1>", in order */
++};
++
++static DBusHandlerResult client_filter(DBusConnection *c, DBusMessage *msg,
++					void *data)
++{
++	struct client *cl = data;
++	DBusMessageIter iter, var;
++	const char *name;
++	dbus_bool_t value;
++
++	if (!dbus_message_is_signal(msg, OFONO_VOICECALL_INTERFACE,
++							"PropertyChanged"))
++		return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
++
++	if (!dbus_message_iter_init(msg, &iter) ||
++			dbus_message_iter_get_arg_type(&iter) !=
++							DBUS_TYPE_STRING)
++		return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
++
++	dbus_message_iter_get_basic(&iter, &name);
++	if (strcmp(name, "IMS"))
++		return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
++
++	dbus_message_iter_next(&iter);
++	dbus_message_iter_recurse(&iter, &var);
++	assert(dbus_message_iter_get_arg_type(&var) == DBUS_TYPE_BOOLEAN);
++	dbus_message_iter_get_basic(&var, &value);
++
++	cl->ims_changes = g_slist_append(cl->ims_changes,
++			g_strdup_printf("%s %d", dbus_message_get_path(msg),
++					value ? 1 : 0));
++
++	return DBUS_HANDLER_RESULT_HANDLED;
++}
++
++static struct client *client_new(void)
++{
++	struct client *cl = g_new0(struct client, 1);
++	DBusError err;
++
++	dbus_error_init(&err);
++	cl->conn = dbus_bus_get_private(DBUS_BUS_SESSION, &err);
++	assert(cl->conn);
++	dbus_connection_set_exit_on_disconnect(cl->conn, FALSE);
++	dbus_bus_add_match(cl->conn, "type='signal',"
++				"interface='" OFONO_VOICECALL_INTERFACE "',"
++				"member='PropertyChanged'", &err);
++	assert(!dbus_error_is_set(&err));
++	dbus_connection_add_filter(cl->conn, client_filter, cl, NULL);
++
++	return cl;
++}
++
++/* Let both ends run until the client has seen what is on the bus */
++static void client_spin(struct client *cl, unsigned int ms)
++{
++	gint64 end = g_get_monotonic_time() + ms * 1000;
++
++	while (g_get_monotonic_time() < end) {
++		g_main_context_iteration(NULL, FALSE);
++		dbus_connection_read_write_dispatch(cl->conn, 0);
++		g_usleep(1000);
++	}
++}
++
++/* The IMS property of a call, from GetProperties: -1 if it is missing */
++static int client_get_ims(struct client *cl, const char *path)
++{
++	DBusMessage *msg, *reply;
++	DBusPendingCall *pending;
++	DBusMessageIter iter, dict;
++	int ims = -1;
++
++	msg = dbus_message_new_method_call(dbus_bus_get_unique_name(conn),
++						path, OFONO_VOICECALL_INTERFACE,
++						"GetProperties");
++	assert(msg);
++	assert(dbus_connection_send_with_reply(cl->conn, msg, &pending, 2000));
++	dbus_message_unref(msg);
++
++	while (!dbus_pending_call_get_completed(pending)) {
++		g_main_context_iteration(NULL, FALSE);
++		dbus_connection_read_write_dispatch(cl->conn, 1);
++	}
++
++	reply = dbus_pending_call_steal_reply(pending);
++	dbus_pending_call_unref(pending);
++	assert(dbus_message_get_type(reply) ==
++					DBUS_MESSAGE_TYPE_METHOD_RETURN);
++
++	dbus_message_iter_init(reply, &iter);
++	dbus_message_iter_recurse(&iter, &dict);
++
++	while (dbus_message_iter_get_arg_type(&dict) == DBUS_TYPE_DICT_ENTRY) {
++		DBusMessageIter entry, var;
++		const char *key;
++		dbus_bool_t value;
++
++		dbus_message_iter_recurse(&dict, &entry);
++		dbus_message_iter_get_basic(&entry, &key);
++		dbus_message_iter_next(&entry);
++		dbus_message_iter_recurse(&entry, &var);
++
++		if (!strcmp(key, "IMS")) {
++			assert(dbus_message_iter_get_arg_type(&var) ==
++							DBUS_TYPE_BOOLEAN);
++			dbus_message_iter_get_basic(&var, &value);
++			ims = value ? 1 : 0;
++		}
++
++		dbus_message_iter_next(&dict);
++	}
++
++	dbus_message_unref(reply);
++	return ims;
++}
++
++static void client_free(struct client *cl)
++{
++	dbus_connection_remove_filter(cl->conn, client_filter, cl);
++	dbus_connection_close(cl->conn);
++	dbus_connection_unref(cl->conn);
++	g_slist_free_full(cl->ims_changes, g_free);
++	g_free(cl);
++}
++
+ /* ---- tests ------------------------------------------------------------- */
+ 
+ /* A call on the second modem rings, with its number, and the first is idle */
+@@ -1155,6 +1304,55 @@ static void test_link_lost_call_both_modems(void)
+ 	phone_free(p);
+ }
+ 
++/* A call the driver reports as IMS says so on D-Bus, a CS call does not */
++static void test_ims_property(void)
++{
++	struct phone *p = phone_new(2);
++	struct client *cl = client_new();
++
++	call_notify_ims(p, 0, 1, CALL_STATUS_DIALING, "0612345678", TRUE);
++	call_notify_ims(p, 1, 1, CALL_STATUS_DIALING, "0687654321", FALSE);
++	client_spin(cl, 50);
++
++	assert(client_get_ims(cl, "/ril_0/voicecall01") == 1);
++	assert(client_get_ims(cl, "/ril_1/voicecall01") == 0);
++
++	/* Both calls are new: no change was signalled for either */
++	assert(cl->ims_changes == NULL);
++
++	call_gone(p, 0, 1);
++	call_gone(p, 1, 1);
++	client_spin(cl, 50);
++	client_free(cl);
++	phone_free(p);
++}
++
++/* A handover out of IMS (SRVCC) changes the property and signals it once */
++static void test_ims_property_changes(void)
++{
++	struct phone *p = phone_new(1);
++	struct client *cl = client_new();
++
++	call_notify_ims(p, 0, 1, CALL_STATUS_ACTIVE, "0612345678", TRUE);
++	client_spin(cl, 50);
++	assert(client_get_ims(cl, "/ril_0/voicecall01") == 1);
++
++	/* The same state again is no change */
++	call_notify_ims(p, 0, 1, CALL_STATUS_ACTIVE, "0612345678", TRUE);
++	call_notify_ims(p, 0, 1, CALL_STATUS_ACTIVE, "0612345678", FALSE);
++	call_notify_ims(p, 0, 1, CALL_STATUS_ACTIVE, "0612345678", FALSE);
++	client_spin(cl, 100);
++
++	assert(g_slist_length(cl->ims_changes) == 1);
++	assert(!strcmp(cl->ims_changes->data, "/ril_0/voicecall01 0"));
++	assert(client_get_ims(cl, "/ril_0/voicecall01") == 0);
++
++	call_gone(p, 0, 1);
++	client_spin(cl, 50);
++	client_free(cl);
++	phone_free(p);
++}
++
+ int main(int argc, char **argv)
+ {
+ 	DBusError err;
+@@ -1193,6 +1391,11 @@ int main(int argc, char **argv)
+ 	g_test_add_func("/emulator-multimodem/link-lost-call-both-modems",
+ 				test_link_lost_call_both_modems);
+ 
++	g_test_add_func("/emulator-multimodem/ims-property",
++				test_ims_property);
++	g_test_add_func("/emulator-multimodem/ims-property-changes",
++				test_ims_property_changes);
++
+ 	r = g_test_run();
+ 
+ 	__ofono_dbus_cleanup();

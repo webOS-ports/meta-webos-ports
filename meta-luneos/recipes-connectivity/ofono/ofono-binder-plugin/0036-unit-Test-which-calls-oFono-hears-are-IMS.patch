@@ -1,0 +1,92 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [unit] Test which calls oFono hears are IMS
+
+An extension call is IMS when its flags say so, incoming or outgoing,
+and not otherwise; a call dialled through the radio is not.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ unit/unit_voicecall/unit_voicecall.c | 41 ++++++++++++++++++++++++++++
+ 1 file changed, 41 insertions(+)
+
+diff --git a/unit/unit_voicecall/unit_voicecall.c b/unit/unit_voicecall/unit_voicecall.c
+index 0d16f72..1772761 100644
+--- a/unit/unit_voicecall/unit_voicecall.c
++++ b/unit/unit_voicecall/unit_voicecall.c
+@@ -91,6 +91,7 @@ typedef struct test_context {
+     guint cb_failed;
+     guint last_id;       /* In ofono_voicecall_notify */
+     int last_status;
++    ofono_bool_t last_ims;
+ } TestContext;
+ 
+ static TestContext test;
+@@ -819,6 +820,7 @@ ofono_voicecall_notify(
+     test.notified++;
+     test.last_id = call->id;
+     test.last_status = call->status;
++    test.last_ims = call->ims;
+ }
+ 
+ void
+@@ -1608,6 +1610,8 @@ test_dial(
+     test_answer_poll();
+     g_assert_cmpuint(test.cb_ok, == , 1);
+     g_assert_cmpuint(test.last_status, == , OFONO_CALL_STATUS_DIALING);
++    /* A call the radio reports is circuit-switched, not IMS */
++    g_assert(!test.last_ims);
+ 
+     test_respond_ok(RADIO_REQ_DIAL);
+     test_finish();
+@@ -1752,6 +1756,42 @@ test_api(
+     g_assert_cmpstr(test_probe_api(TRUE, RADIO_INTERFACE_NONE), == , "aidl");
+ }
+ 
++/* An extension call is IMS when the extension says so, and only then */
++static
++void
++test_ext_call_ims(
++    void)
++{
++    static const BINDER_EXT_CALL_FLAGS flags[] = {
++        BINDER_EXT_CALL_FLAG_IMS,
++        BINDER_EXT_CALL_FLAG_IMS | BINDER_EXT_CALL_FLAG_INCOMING,
++        BINDER_EXT_CALL_FLAGS_NONE,
++        BINDER_EXT_CALL_FLAG_INCOMING
++    };
++    static const gboolean ims[] = { TRUE, TRUE, FALSE, FALSE };
++    guint i;
++
++    for (i = 0; i < G_N_ELEMENTS(flags); i++) {
++        BinderExtCallInfo ci;
++        BinderVoiceCallInfo* call;
++
++        memset(&ci, 0, sizeof(ci));
++        ci.call_id = 1;
++        ci.type = BINDER_EXT_CALL_TYPE_VOICE;
++        ci.state = BINDER_EXT_CALL_STATE_ACTIVE;
++        ci.flags = flags[i];
++        ci.number = "0612345678";
++
++        call = binder_voicecall_info_ext_new(&ci, NULL);
++        g_assert_cmpint(call->oc.ims, == , ims[i]);
++        g_assert_cmpint(call->oc.direction, == ,
++            (flags[i] & BINDER_EXT_CALL_FLAG_INCOMING) ?
++            OFONO_CALL_DIRECTION_MOBILE_TERMINATED :
++            OFONO_CALL_DIRECTION_MOBILE_ORIGINATED);
++        binder_voicecall_info_free(call);
++    }
++}
++
+ int main(int argc, char* argv[])
+ {
+     char** paths = g_new0(char*, G_N_ELEMENTS(test_ops) + 1);
+@@ -1792,6 +1832,7 @@ int main(int argc, char* argv[])
+     g_test_add_func(TEST_("remove_pending"), test_remove_pending);
+     g_test_add_func(TEST_("remote_hangup"), test_remote_hangup);
+     g_test_add_func(TEST_("api"), test_api);
++    g_test_add_func(TEST_("ext_call_ims"), test_ext_call_ims);
+     ret = g_test_run();
+     g_strfreev(paths);
+     return ret;

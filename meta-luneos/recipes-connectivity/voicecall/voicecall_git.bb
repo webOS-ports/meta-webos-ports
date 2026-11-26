@@ -39,6 +39,7 @@ SRC_URI = "git://github.com/sailfishos/voicecall.git;protocol=https;branch=maste
            file://0021-cellbroadcast-Keep-the-alerts-oFono-sends-without-up.patch \
            file://0022-tests-Leave-the-D-Bus-test-out-of-the-TSan-run.patch \
            file://0023-tests-Drop-the-analysis-findings-the-last-fixes-took.patch \
+           file://0024-voicecall-Say-whether-a-call-is-carried-over-IMS.patch \
 "
 
 #enable debugging in voicecall. This is now merged upstream so we don't need patches anymore to enable this for each individual file.

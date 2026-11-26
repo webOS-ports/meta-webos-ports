@@ -8,7 +8,9 @@ DEPENDS += "qtbase qtdeclarative"
 SRCREV = "591a6c424fa1dcec44d697c80b07a65cd8faee2f"
 PV = "0.133"
 
-SRC_URI = "git://github.com/sailfishos/libqofono.git;protocol=https;branch=master"
+SRC_URI = "git://github.com/sailfishos/libqofono.git;protocol=https;branch=master \
+           file://0001-libqofono-Say-whether-a-call-is-carried-over-IMS.patch \
+"
 
 # Upstream dropped qmake in b43e54a and builds with CMake only, so this no longer
 # inherits qt6-qmake. QT_MAJOR_VERSION is a cache variable that still defaults to 5
