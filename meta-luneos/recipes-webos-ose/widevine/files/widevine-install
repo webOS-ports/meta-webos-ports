@@ -1,22 +1,64 @@
 #!/bin/sh
-# widevine-install - fetch Google's Widevine CDM from Google and install it.
+# widevine-install - fetch Google's Widevine CDM from Google and install it,
+# asking before the download and showing its progress through the webOS
+# notification service - the same way Waydroid asks before downloading Android.
 #
 # LuneOS ships only this script (free software, part of luneos-widevine-bridge).
-# The proprietary Widevine CDM itself is NOT shipped or mirrored by LuneOS: it is
-# downloaded from Google's own servers, on this device, only when the owner opts
-# in (the First Use "streaming DRM" choice). Use of the CDM is subject to
-# Google's terms. This mirrors how Debian's widevine-installer works.
+# Google's Widevine CDM is NOT shipped or mirrored by LuneOS: it is downloaded
+# from Google's own servers, on this device, only after the owner opts in (the
+# First Use "Proprietary" tick box, which sets enableWidevineCdm) and confirms
+# the download in the prompt below. Use of the CDM is subject to Google's terms.
+# This mirrors how Debian's widevine-installer works.
 #
-# Chromium (neva) loads the CDM from /var/lib/widevine/WidevineCdm; see
-# neva/app_runtime/common/library_widevine_cdm.cc. Only arm64 is installable
-# on-device: 32-bit arm has no Google Chrome Linux build and would need a
-# multi-GB ChromeOS recovery image.
-set -eu
+# Driven by two system preferences, and re-run by widevine-install.path whenever
+# the preference store changes:
+#   enableWidevineCdm         - the owner ticked "streaming DRM" in First Use
+#   widevineDownloadConfirmed - the owner tapped "Download" in the prompt
+#
+# Chromium (neva) loads the CDM from /var/lib/widevine/WidevineCdm. arm64 only:
+# 32-bit arm has no Google Chrome Linux build.
+set -u
 
 WV_DIR="${WIDEVINE_DIR:-/var/lib/widevine/WidevineCdm}"
 DEB_URL="https://dl.google.com/linux/direct/google-chrome-stable_current_arm64.deb"
+RUN="/run/widevine-install"
+SRC_ID="WidevineInstall"
 log() { echo "widevine-install: $*"; }
 
+# --- webOS notifications (best-effort: they never fail the install) ----------
+_json() {
+    python3 -I -c '
+import json, sys
+a = sys.argv[1:]
+print(json.dumps({k: json.loads(v[1:]) if v.startswith("@") else v
+                  for k, v in zip(a[::2], a[1::2])}))' "$@" 2>/dev/null
+}
+_luna() { luna-send -n 1 "luna://$1" "$2" 2>/dev/null; }
+_pref() {
+    _luna com.palm.systemservice/getPreferences "$(_json keys "@[\"$1\"]")" \
+        | python3 -I -c 'import json,sys
+try: print(json.load(sys.stdin).get(sys.argv[1], ""))
+except Exception: print("")' "$1" 2>/dev/null
+}
+_is_true() { [ "$1" = "True" ] || [ "$1" = "true" ]; }
+_toast() { _luna com.webos.notification/createToast \
+    "$(_json sourceId "$SRC_ID" message "$1")" >/dev/null 2>&1 || true; }
+_close_alert() {
+    _id=$(cat "$RUN/alert" 2>/dev/null || true)
+    [ -n "$_id" ] && _luna com.webos.notification/closeAlert "$(_json alertId "$_id")" >/dev/null 2>&1
+    rm -f "$RUN/alert" 2>/dev/null || true
+}
+# _alert <title> <message> <buttons-json-array>; one at a time (close the last).
+_alert() {
+    mkdir -p "$RUN" 2>/dev/null || true
+    _close_alert
+    _r=$(_luna com.webos.notification/createAlert \
+        "$(_json sourceId "$SRC_ID" title "$1" message "$2" buttons "@$3")")
+    printf '%s' "$_r" | sed -n 's/.*"alertId" *: *"\([^"]*\)".*/\1/p' > "$RUN/alert" 2>/dev/null || true
+}
+_mb() { python3 -I -c 'import sys; n=int(sys.argv[1] or 0); print("%d MB" % max(1, round(n/1e6)))' "$1" 2>/dev/null; }
+
+# --- preconditions -----------------------------------------------------------
 case "$(uname -m)" in
     aarch64|arm64) PLAT="linux_arm64" ;;
     *) log "unsupported arch $(uname -m); only arm64 is installable on-device"; exit 0 ;;
@@ -24,45 +66,78 @@ esac
 
 SO="$WV_DIR/_platform_specific/$PLAT/libwidevinecdm.so"
 if [ -s "$SO" ] && [ -s "$WV_DIR/manifest.json" ]; then
-    log "already installed at $WV_DIR"; exit 0
+    _close_alert; log "already installed at $WV_DIR"; exit 0
 fi
 
-command -v ar >/dev/null 2>&1 || { log "missing 'ar' (binutils)"; exit 1; }
+_is_true "$(_pref enableWidevineCdm)" || { _close_alert; exit 0; }
 
+# --- ask before downloading --------------------------------------------------
+if ! _is_true "$(_pref widevineDownloadConfirmed)"; then
+    mobile=$(_luna com.palm.connectionmanager/getStatus '{}' | python3 -I -c 'import json,sys
+try:
+    n=json.load(sys.stdin)
+    print("1" if n.get("wan",{}).get("connected") is True and n.get("wifi",{}).get("state")!="connected" else "")
+except Exception: print("")' 2>/dev/null)
+    msg="LuneOS can download Google's Widevine software (about 140 MB) from Google so that Netflix and other protected video can play. The software is Google's and proprietary; your use of it is subject to Google's terms."
+    [ -n "$mobile" ] && msg="$msg You are on mobile data, so this may cost you."
+    dl_btn=$(_json label Download buttonType ok onclick "luna://com.palm.systemservice/setPreferences" params "@$(_json widevineDownloadConfirmed @true)")
+    no_btn=$(_json label "Not now" buttonType cancel onclick "luna://com.palm.systemservice/setPreferences" params "@$(_json enableWidevineCdm @false)")
+    _alert "Install streaming DRM?" "$msg" "[$dl_btn, $no_btn]"
+    log "asked the owner to confirm the download"
+    exit 0
+fi
+
+# --- download (with progress) + install --------------------------------------
+mkdir -p "$RUN" 2>/dev/null || true
+if ! mkdir "$RUN/lock" 2>/dev/null; then
+    log "another install is already running"; exit 0
+fi
 work="$(mktemp -d "${TMPDIR:-/var/tmp}/widevine-install.XXXXXX")"
-trap 'rm -rf "$work"' EXIT INT TERM
-cd "$work"
+cleanup() { rm -rf "$RUN/lock" "$work" 2>/dev/null || true; }
+trap cleanup EXIT INT TERM
 
-log "downloading Google Chrome (arm64) from Google ..."
-if command -v curl >/dev/null 2>&1; then
-    curl -fL --retry 3 --connect-timeout 30 -o chrome.deb "$DEB_URL"
-else
-    wget -O chrome.deb "$DEB_URL"
+command -v ar >/dev/null 2>&1 || { log "missing 'ar' (binutils)"; _toast "Could not install streaming DRM: a tool is missing."; exit 1; }
+
+cd "$work"
+total=$(curl -fsSIL "$DEB_URL" 2>/dev/null | tr -d '\r' | awk 'tolower($1)=="content-length:"{v=$2} END{print v}')
+[ -n "${total:-}" ] && [ "$total" -gt 0 ] 2>/dev/null || total=142000000
+
+_close_alert
+_toast "Downloading streaming DRM (Widevine)..."
+log "downloading $DEB_URL"
+curl -fL --retry 3 --connect-timeout 30 -o chrome.deb "$DEB_URL" >/dev/null 2>&1 &
+cpid=$!
+while kill -0 "$cpid" 2>/dev/null; do
+    cur=0; [ -f chrome.deb ] && cur=$(wc -c < chrome.deb 2>/dev/null)
+    [ -n "$cur" ] || cur=0
+    pct=$(( cur * 100 / total )); [ "$pct" -gt 100 ] && pct=100
+    _alert "Streaming DRM" "Downloading Widevine: ${pct}% ($(_mb "$cur") of about $(_mb "$total"))." "[$(_json label OK buttonType ok)]"
+    sleep 4
+done
+wait "$cpid"; rc=$?
+if [ "$rc" -ne 0 ] || [ ! -s chrome.deb ]; then
+    _close_alert; _toast "Could not download streaming DRM. Check your connection; it will try again."
+    log "download failed (rc=$rc)"; exit 1
 fi
 
-log "extracting Widevine CDM ..."
+log "extracting Widevine CDM"
 ar x chrome.deb
 data="$(ls data.tar.* 2>/dev/null | head -n 1)"
-[ -n "$data" ] || { log "no data.tar.* member in the package"; exit 1; }
+[ -n "$data" ] || { _close_alert; _toast "The streaming DRM download was not usable."; exit 1; }
 mkdir x
-# Extract only the WidevineCdm subtree (a few MB), not all of Chrome (~350 MB).
 tar -C x -xf "$data" ./opt/google/chrome/WidevineCdm 2>/dev/null \
     || tar -C x -xf "$data" opt/google/chrome/WidevineCdm 2>/dev/null || true
-
 SRC="x/opt/google/chrome/WidevineCdm"
 [ -f "$SRC/_platform_specific/$PLAT/libwidevinecdm.so" ] \
-    || { log "WidevineCdm not found in the package"; exit 1; }
+    || { _close_alert; _toast "Streaming DRM could not be installed."; log "WidevineCdm not found in the package"; exit 1; }
 
 log "installing to $WV_DIR"
-# Busybox userland: no coreutils 'install', so mkdir/cp/chmod.
 mkdir -p "$WV_DIR/_platform_specific/$PLAT"
-cp "$SRC/_platform_specific/$PLAT/libwidevinecdm.so" "$SO.new"
-chmod 0644 "$SO.new"
-mv -f "$SO.new" "$SO"
-cp "$SRC/manifest.json" "$WV_DIR/manifest.json.new"
-chmod 0644 "$WV_DIR/manifest.json.new"
-mv -f "$WV_DIR/manifest.json.new" "$WV_DIR/manifest.json"
+cp "$SRC/_platform_specific/$PLAT/libwidevinecdm.so" "$SO.new"; chmod 0644 "$SO.new"; mv -f "$SO.new" "$SO"
+cp "$SRC/manifest.json" "$WV_DIR/manifest.json.new"; chmod 0644 "$WV_DIR/manifest.json.new"; mv -f "$WV_DIR/manifest.json.new" "$WV_DIR/manifest.json"
 if [ -f "$SRC/LICENSE" ]; then cp "$SRC/LICENSE" "$WV_DIR/LICENSE"; chmod 0644 "$WV_DIR/LICENSE"; fi
 
+_close_alert
 ver="$(sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p' "$WV_DIR/manifest.json" 2>/dev/null | head -n 1)"
-log "done (CDM ${ver:-unknown}); restart the browser to load it"
+_toast "Streaming DRM is ready. Restart the browser to watch Netflix and other protected video."
+log "done (CDM ${ver:-unknown})"
