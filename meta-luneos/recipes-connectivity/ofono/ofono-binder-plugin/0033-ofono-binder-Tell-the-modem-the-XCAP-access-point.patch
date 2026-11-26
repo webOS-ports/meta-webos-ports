@@ -1,0 +1,108 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [ofono-binder] Tell the modem the XCAP access point
+
+On LTE with IMS the modem reads and changes supplementary services
+(call forwarding, call waiting, barring, caller ID) over XCAP, through
+an access point of its own. Android hands that access point to the
+modem with the other data profiles, with the APN type XCAP; the plugin
+sent internet, MMS and IMS only.
+
+Without it, a MediaTek modem (MT6789, Q25) fails every supplementary
+service request over XCAP ("+EXCAPRCN: 831" after about 5 seconds) and
+makes it again over the circuit-switched network, which takes the phone
+from LTE to 3G and back for each request.
+
+Send oFono's XCAP context, when there is one, as a data profile of its
+own with the XCAP APN type. Tried on the Q25 with Odido's "hos": call
+forwarding is read over XCAP ("+EXCAPRCN: 200") and the phone stays on
+LTE.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/binder_data.c    |  3 +++
+ src/binder_network.c | 15 +++++++++++++++
+ src/binder_types.h   |  8 ++++++++
+ src/binder_util.c    |  3 +++
+ 4 files changed, 29 insertions(+)
+
+diff --git a/src/binder_data.c b/src/binder_data.c
+index 63ec322..29a2d9f 100644
+--- a/src/binder_data.c
++++ b/src/binder_data.c
+@@ -1248,6 +1248,9 @@ binder_data_call_setup_new(
+         case OFONO_GPRS_CONTEXT_TYPE_IMS:
+             setup->profile_id = RADIO_DATA_PROFILE_IMS;
+             break;
++        case OFONO_GPRS_CONTEXT_TYPE_XCAP:
++            setup->profile_id = BINDER_DATA_PROFILE_XCAP;
++            break;
+         case OFONO_GPRS_CONTEXT_TYPE_ANY:
+         case OFONO_GPRS_CONTEXT_TYPE_INTERNET:
+         case OFONO_GPRS_CONTEXT_TYPE_WAP:
+diff --git a/src/binder_network.c b/src/binder_network.c
+index d65f46b..7461497 100644
+--- a/src/binder_network.c
++++ b/src/binder_network.c
+@@ -914,6 +914,9 @@ binder_network_check_data_profiles(
+         const struct ofono_gprs_primary_context* ims =
+             ofono_gprs_context_settings_by_type(gprs,
+                 OFONO_GPRS_CONTEXT_TYPE_IMS);
++        const struct ofono_gprs_primary_context* xcap =
++            ofono_gprs_context_settings_by_type(gprs,
++                OFONO_GPRS_CONTEXT_TYPE_XCAP);
+ 
+         if (internet) {
+             DBG_(self, "internet apn \"%s\"", internet->apn);
+@@ -940,6 +943,18 @@ binder_network_check_data_profiles(
+                 RADIO_DATA_PROFILE_IMS));
+         }
+ 
++        /*
++         * The access point the modem reaches the operator's XCAP server
++         * through, for supplementary services on LTE. Without it a MediaTek
++         * modem fails every one of them over XCAP and makes it again on the
++         * circuit-switched network, taking the phone off LTE each time.
++         */
++        if (xcap) {
++            DBG_(self, "xcap apn \"%s\"", xcap->apn);
++            l = g_slist_append(l, binder_network_data_profile_new(xcap,
++                BINDER_DATA_PROFILE_XCAP));
++        }
++
+         if (binder_network_data_profiles_equal(self->data_profiles, l)) {
+             binder_network_data_profiles_free(l);
+         } else {
+diff --git a/src/binder_types.h b/src/binder_types.h
+index 772f7d3..00739be 100644
+--- a/src/binder_types.h
++++ b/src/binder_types.h
+@@ -52,6 +52,14 @@ typedef enum binder_feature_mask {
+     BINDER_FEATURE_ALL            = 0x07ff  /* all */
+ } BINDER_FEATURE_MASK;
+ 
++/*
++ * The data profile the XCAP access point goes to the modem as. The RIL takes
++ * the access point's use from the profile's APN types, not from its id, so
++ * any OEM id would do: this one is the OEM base plus the bit of
++ * RADIO_APN_TYPE_XCAP.
++ */
++#define BINDER_DATA_PROFILE_XCAP (RADIO_DATA_PROFILE_OEM_BASE + 11)
++
+ typedef struct binder_data_profile_config {
+     gboolean use_data_profiles;
+     guint default_profile_id;
+diff --git a/src/binder_util.c b/src/binder_util.c
+index 4de87dd..9810e87 100644
+--- a/src/binder_util.c
++++ b/src/binder_util.c
+@@ -131,6 +131,9 @@ binder_radio_apn_types_for_profile(
+     case RADIO_DATA_PROFILE_FOTA:
+         apn_types |= RADIO_APN_TYPE_FOTA;
+         break;
++    case BINDER_DATA_PROFILE_XCAP:
++        apn_types |= RADIO_APN_TYPE_XCAP;
++        break;
+     default:
+         if (profile_id == config->mms_profile_id ||
+             profile_id == config->default_profile_id) {

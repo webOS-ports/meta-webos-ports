@@ -1,0 +1,110 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] gprs: provision the XCAP access point of a SIM that
+ has its contexts
+
+Contexts are provisioned only for a SIM with none stored, so a SIM set
+up before oFono knew the XCAP type would never get its XCAP access
+point, short of ResetContexts, which also throws away the user's own
+access point settings.
+
+When the stored contexts hold no XCAP one, provision that one alone,
+once. Record that it was done ("XcapProvisioned" in the gprs settings)
+so an XCAP context the user removed is not added back on the next
+start. Provisioning a SIM from scratch records it as well.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/gprs.c | 47 ++++++++++++++++++++++++++++++++++++++++++-----
+ 1 file changed, 42 insertions(+), 5 deletions(-)
+
+diff --git a/src/gprs.c b/src/gprs.c
+index 1d59830..84d7328 100644
+--- a/src/gprs.c
++++ b/src/gprs.c
+@@ -2473,8 +2473,17 @@ static void provision_context(const struct provision_db_entry *ap,
+ 	gprs->contexts = g_slist_append(gprs->contexts, context);
+ }
+ 
++/*
++ * Provisioning a SIM's contexts also provisions its XCAP access point. A SIM
++ * whose contexts were stored before oFono knew the XCAP type gets it once,
++ * on its own; this records that, so an XCAP context the user removed stays
++ * removed.
++ */
++#define XCAP_PROVISIONED_KEY "XcapProvisioned"
++
+ static void provision_contexts(struct ofono_gprs *gprs, const char *mcc,
+-				const char *mnc, const char *spn)
++				const char *mnc, const char *spn,
++				unsigned int types)
+ {
+ 	struct provision_db_entry *settings;
+ 	size_t count;
+@@ -2486,9 +2495,34 @@ static void provision_contexts(struct ofono_gprs *gprs, const char *mcc,
+ 	}
+ 
+ 	for (i = 0; i < count; i++)
+-		provision_context(&settings[i], gprs);
++		if (settings[i].type & types)
++			provision_context(&settings[i], gprs);
+ 
+ 	l_free(settings);
++
++	if (gprs->settings && (types & OFONO_GPRS_CONTEXT_TYPE_XCAP)) {
++		g_key_file_set_boolean(gprs->settings, SETTINGS_GROUP,
++					XCAP_PROVISIONED_KEY, TRUE);
++		storage_sync(gprs->imsi, SETTINGS_STORE, gprs->settings);
++	}
++}
++
++static gboolean gprs_needs_xcap_provisioning(struct ofono_gprs *gprs)
++{
++	GSList *l;
++
++	if (gprs->settings == NULL || g_key_file_get_boolean(gprs->settings,
++				SETTINGS_GROUP, XCAP_PROVISIONED_KEY, NULL))
++		return FALSE;
++
++	for (l = gprs->contexts; l; l = l->next) {
++		struct pri_context *ctx = l->data;
++
++		if (ctx->type == OFONO_GPRS_CONTEXT_TYPE_XCAP)
++			return FALSE;
++	}
++
++	return TRUE;
+ }
+ 
+ static void remove_non_active_context(struct ofono_gprs *gprs,
+@@ -2566,7 +2600,8 @@ static DBusMessage *gprs_reset_contexts(DBusConnection *conn,
+ 	gprs->last_context_id = 0;
+ 
+ 	provision_contexts(gprs, ofono_sim_get_mcc(sim),
+-				ofono_sim_get_mnc(sim), ofono_sim_get_spn(sim));
++				ofono_sim_get_mnc(sim), ofono_sim_get_spn(sim),
++				~0U);
+ 
+ 	if (gprs->contexts == NULL) /* Automatic provisioning failed */
+ 		add_context(gprs, NULL, OFONO_GPRS_CONTEXT_TYPE_INTERNET);
+@@ -3381,8 +3416,10 @@ static void spn_read_cb(const char *spn, const char *dc, void *data)
+ 	struct ofono_modem *modem = __ofono_atom_get_modem(gprs->atom);
+ 	struct ofono_sim *sim = __ofono_atom_find(OFONO_ATOM_TYPE_SIM, modem);
+ 
++	/* Contexts loaded from storage: only the XCAP one is missing */
+ 	provision_contexts(gprs, ofono_sim_get_mcc(sim),
+-					ofono_sim_get_mnc(sim), spn);
++				ofono_sim_get_mnc(sim), spn,
++				gprs->contexts ? OFONO_GPRS_CONTEXT_TYPE_XCAP : ~0U);
+ 
+ 	ofono_sim_remove_spn_watch(sim, &gprs->spn_watch);
+ 
+@@ -3404,7 +3441,7 @@ void ofono_gprs_register(struct ofono_gprs *gprs)
+ 
+ 	gprs_load_settings(gprs, ofono_sim_get_imsi(sim));
+ 
+-	if (gprs->contexts)
++	if (gprs->contexts && !gprs_needs_xcap_provisioning(gprs))
+ 		goto finish;
+ 
+ 	ofono_sim_add_spn_watch(sim, &gprs->spn_watch, spn_read_cb, gprs, NULL);

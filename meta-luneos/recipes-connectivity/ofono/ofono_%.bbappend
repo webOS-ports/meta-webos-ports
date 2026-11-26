@@ -3,7 +3,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 # oe-core's ofono_2.19.bb sets no PR. Without one here, a rebuilt package
 # carries the same version as the installed one and opkg won't upgrade it.
 # Bump it whenever the patches below change what is built.
-PR = "r1"
+PR = "r6"
 
 DEPENDS += "dbus-glib libmce-glib"
 # The modem stack differs per machine class. The default is the mainline
@@ -82,7 +82,52 @@ SRC_URI:append = " \
   file://0139-sim-forget-the-IMPI-when-the-SIM-state-is-freed.patch \
   file://0140-sim-let-an-LPA-reset-the-card-through-EuiccManager.patch \
   file://0141-unit-test-EuiccManager.ResetCard.patch \
+  file://0142-sim-report-the-card-slots-when-there-is-no-card.patch \
+  file://0143-unit-test-the-card-slots-with-no-card-present.patch \
+  file://0144-common-name-the-5G-access-technologies.patch \
+  file://0145-plugins-report-SMS-status-reports-on-D-Bus-org.ofono.patch \
+  file://0146-unit-test-the-SMS-status-report-signal.patch \
+  file://0147-provision-keep-the-best-access-point-of-each-type.patch \
+  file://0148-provisiontool-merge-providers-that-share-an-MCC-MNC.patch \
+  file://0149-gprs-add-an-XCAP-context-type.patch \
+  file://0150-gprs-provision-the-XCAP-access-point-of-a-SIM-that-h.patch \
+  file://0151-unit-test-provisioning-an-XCAP-access-point.patch \
 "
+
+# The XCAP access point of each network, which oFono's own provider data
+# lacks: the modem needs it for supplementary services on LTE (call
+# forwarding, waiting, barring, caller ID), or it makes every such request
+# on the circuit-switched network and takes the phone off LTE each time.
+# Built from Android's APN lists by xcap-apns.py, which says where from.
+SRC_URI:append = " file://xcap-apns.json"
+
+# Add them to data/provision.json before provision.db is built from it.
+# Only for networks the database already has, so a network never ends up
+# with an XCAP context and no internet one.
+python ofono_add_xcap_apns() {
+    import json
+    import os
+
+    path = os.path.join(d.getVar('S'), 'data', 'provision.json')
+    with open(path) as f:
+        providers = json.load(f)
+
+    if any('xcap' in apn.get('type', [])
+           for p in providers for apn in p['apns']):
+        return
+
+    known = {i for p in providers if 'spn' not in p for i in p['ids']}
+
+    with open(os.path.join(d.getVar('UNPACKDIR'), 'xcap-apns.json')) as f:
+        xcap = [p for p in json.load(f) if p['ids'][0] in known]
+
+    with open(path, 'w') as f:
+        json.dump(providers + xcap, f, indent=2, ensure_ascii=False)
+        f.write('\n')
+
+    bb.note('Added the XCAP access points of %d networks' % len(xcap))
+}
+do_patch[postfuncs] += "ofono_add_xcap_apns"
 
 # On Halium the modem is driven by ofono-binder-plugin. The in-tree ril
 # driver also claims /ril_0 and gets there first, so binder registration
@@ -129,6 +174,11 @@ do_install:append() {
     # Sandbox for both units; see the file for what ofonod still needs.
     install -D -m 0644 ${UNPACKDIR}/ofono.service.d/luneos-hardening.conf \
         ${D}${systemd_unitdir}/system/ofono.service.d/luneos-hardening.conf
+
+    # The provider database provision.db is built from, as readable JSON:
+    # the Settings app lists from it every access point of the SIM's
+    # network, where ofono itself keeps only one per type.
+    install -m 0644 ${S}/data/provision.json ${D}${datadir}/ofono/provision.json
 
     if [ -e ${UNPACKDIR}/70-ofono-modem.rules ]; then
         # Install udev rule for mainline modem

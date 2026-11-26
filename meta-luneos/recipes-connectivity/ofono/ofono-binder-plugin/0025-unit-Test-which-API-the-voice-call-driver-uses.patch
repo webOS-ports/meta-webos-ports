@@ -1,0 +1,106 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [unit] Test which API the voice call driver uses
+
+The voice call driver asks its client for the IRadio version since the
+IRadio 1.6 support, which the fake client did not have, so unit_voicecall
+no longer linked. Give the fake client an IRadio version, 1.0 unless a
+test says otherwise, and check the API the driver picks: plain HIDL up
+to 1.5, the 1.6 one for IRadio 1.6, and AIDL for IRadioVoice.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ unit/unit_voicecall/unit_voicecall.c | 59 +++++++++++++++++++++++++++-
+ 1 file changed, 58 insertions(+), 1 deletion(-)
+
+diff --git a/unit/unit_voicecall/unit_voicecall.c b/unit/unit_voicecall/unit_voicecall.c
+index e0b578e..0d16f72 100644
+--- a/unit/unit_voicecall/unit_voicecall.c
++++ b/unit/unit_voicecall/unit_voicecall.c
+@@ -74,6 +74,8 @@ typedef struct test_context {
+     GSList* allocs;
+     guint last_timer_id;
+     gboolean submit_fails;
++    gboolean aidl;       /* The client is IRadioVoice */
++    RADIO_INTERFACE hidl; /* Otherwise its IRadio version, 1.0 by default */
+ 
+     /* What the modem thinks */
+     RadioCall calls[TEST_MAX_CALLS];
+@@ -364,7 +366,15 @@ RADIO_AIDL_INTERFACE
+ radio_client_aidl_interface(
+     RadioClient* client)
+ {
+-    return RADIO_AIDL_INTERFACE_NONE;
++    return test.aidl ? RADIO_VOICE_INTERFACE : RADIO_AIDL_INTERFACE_NONE;
++}
++
++RADIO_INTERFACE
++radio_client_interface(
++    RadioClient* client)
++{
++    /* An AIDL instance has no IRadio version */
++    return test.aidl ? RADIO_INTERFACE_NONE : test.hidl;
+ }
+ 
+ gulong
+@@ -1696,6 +1706,52 @@ test_remote_hangup(
+ 
+ #define TEST_(name) "/voicecall/" name
+ 
++/*==========================================================================*
++ * Which API the driver talks
++ *==========================================================================*/
++
++/* Probe a driver for this client and return the name of its API */
++static
++const char*
++test_probe_api(
++    gboolean aidl,
++    RADIO_INTERFACE hidl)
++{
++    const char* name;
++
++    memset(&test, 0, sizeof(test));
++    test.aidl = aidl;
++    test.hidl = hidl;
++    test.vc = (struct ofono_voicecall*) &test;
++    test.ofono = (struct ofono_modem*) &test;
++    test.modem.clients.voice_client = &test.client;
++    test.modem.clients.network_client = &test.client;
++    test.modem.log_prefix = "";
++    binder_voicecall_init();
++    g_assert_cmpint(test.driver->probe(test.vc, 0, test.ofono), == , 0);
++    name = ((BinderVoiceCall*)test.vc_data)->api->name;
++    test.driver->remove(test.vc);
++    while (g_main_context_iteration(NULL, FALSE));
++    binder_voicecall_cleanup();
++    g_slist_free_full(test.allocs, g_free);
++    test.allocs = NULL;
++    return name;
++}
++
++static
++void
++test_api(
++    void)
++{
++    g_assert_cmpstr(test_probe_api(FALSE, RADIO_INTERFACE_1_4), == , "hidl");
++    g_assert_cmpstr(test_probe_api(FALSE, RADIO_INTERFACE_1_5), == , "hidl");
++    /* IRadio 1.6 asks for the 1.6 call list */
++    g_assert_cmpstr(test_probe_api(FALSE, RADIO_INTERFACE_1_6), == ,
++        "hidl_1_6");
++    /* IRadioVoice talks AIDL, whatever the version says */
++    g_assert_cmpstr(test_probe_api(TRUE, RADIO_INTERFACE_NONE), == , "aidl");
++}
++
+ int main(int argc, char* argv[])
+ {
+     char** paths = g_new0(char*, G_N_ELEMENTS(test_ops) + 1);
+@@ -1735,6 +1791,7 @@ int main(int argc, char* argv[])
+     g_test_add_func(TEST_("dtmf"), test_dtmf);
+     g_test_add_func(TEST_("remove_pending"), test_remove_pending);
+     g_test_add_func(TEST_("remote_hangup"), test_remote_hangup);
++    g_test_add_func(TEST_("api"), test_api);
+     ret = g_test_run();
+     g_strfreev(paths);
+     return ret;

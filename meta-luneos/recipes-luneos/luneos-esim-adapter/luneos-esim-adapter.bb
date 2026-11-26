@@ -18,7 +18,7 @@ RRECOMMENDS:${PN} += "ofono"
 
 PE = "1"
 PV = "0.1.0-1+git"
-SRCREV = "05766a154695e58d0ca7b2f6a5e9626bd8deddb9"
+SRCREV = "985da5ca8a80d6d637c5725b7860c7cda6ca797b"
 
 inherit webos_ports_repo
 inherit webos_filesystem_paths

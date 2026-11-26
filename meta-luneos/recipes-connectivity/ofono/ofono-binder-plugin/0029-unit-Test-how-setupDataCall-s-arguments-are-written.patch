@@ -1,0 +1,423 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [unit] Test how setupDataCall's arguments are written
+
+Records the GBinderWriter calls the data driver makes for
+setupDataCall_1_5 and setupDataCall_1_6, and checks that the 1.6
+safe_unions OptionalSliceInfo and OptionalTrafficDescriptor go over as
+buffer objects of their own, 24 and 56 bytes, all zero for noinit.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ unit/Makefile              |   1 +
+ unit/unit_data/Makefile    |   7 +
+ unit/unit_data/unit_data.c | 374 +++++++++++++++++++++++++++++++++++++
+ 3 files changed, 382 insertions(+)
+ create mode 100644 unit/unit_data/Makefile
+ create mode 100644 unit/unit_data/unit_data.c
+
+diff --git a/unit/Makefile b/unit/Makefile
+index ce1c2cb..9d98b89 100644
+--- a/unit/Makefile
++++ b/unit/Makefile
+@@ -6,6 +6,7 @@ all:
+ %:
+ 	@$(MAKE) -C unit_base $*
+ 	@$(MAKE) -C unit_call_settings $*
++	@$(MAKE) -C unit_data $*
+ 	@$(MAKE) -C unit_devmon $*
+ 	@$(MAKE) -C unit_ext_call $*
+ 	@$(MAKE) -C unit_ext_ims $*
+diff --git a/unit/unit_data/Makefile b/unit/unit_data/Makefile
+new file mode 100644
+index 0000000..c8ed557
+--- /dev/null
++++ b/unit/unit_data/Makefile
+@@ -0,0 +1,7 @@
++# -*- Mode: makefile-gmake -*-
++
++LINK_PKGS += libgbinder libgbinder-radio
++
++EXE = unit_data
++
++include ../common/Makefile
+diff --git a/unit/unit_data/unit_data.c b/unit/unit_data/unit_data.c
+new file mode 100644
+index 0000000..0745759
+--- /dev/null
++++ b/unit/unit_data/unit_data.c
+@@ -0,0 +1,374 @@
++/*
++ *  oFono - Open Source Telephony - binder based adaptation
++ *
++ *  Copyright (C) 2026 Herman van Hazendonk <github.com@herrie.org>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU General Public License for more details.
++ */
++
++/*
++ * Checks how the data driver writes its setupDataCall arguments. The
++ * GBinderWriter calls are recorded instead of building a parcel, so the
++ * test sees which argument went over as what: a plain value or a buffer
++ * object of its own, which is how HIDL sends any struct or safe_union.
++ */
++
++#include "binder_data.c"
++
++#include <ofono/watch.h>
++
++#include <gutil_log.h>
++
++GLOG_MODULE_DEFINE("unit_data");
++
++#define TEST_(t) "/data/" t
++
++static struct test_writer_log {
++    GString* calls;        /* What was appended, in order */
++    GSList* allocs;        /* gbinder_writer_malloc() memory */
++    GSList* buffers;       /* Contents of each buffer object, in order */
++} test;
++
++/*==========================================================================*
++ * Recording GBinderWriter
++ *==========================================================================*/
++
++static
++void
++test_call(
++    const char* format,
++    ...) G_GNUC_PRINTF(1,2);
++
++static
++void
++test_call(
++    const char* format,
++    ...)
++{
++    va_list va;
++
++    if (test.calls->len) {
++        g_string_append_c(test.calls, ' ');
++    }
++    va_start(va, format);
++    g_string_append_vprintf(test.calls, format, va);
++    va_end(va);
++}
++
++void*
++gbinder_writer_malloc(
++    GBinderWriter* writer,
++    gsize size)
++{
++    void* ptr = g_malloc(size);
++
++    test.allocs = g_slist_prepend(test.allocs, ptr);
++    return ptr;
++}
++
++void*
++gbinder_writer_malloc0(
++    GBinderWriter* writer,
++    gsize size)
++{
++    void* ptr = g_malloc0(size);
++
++    test.allocs = g_slist_prepend(test.allocs, ptr);
++    return ptr;
++}
++
++void
++gbinder_writer_append_int32(
++    GBinderWriter* writer,
++    guint32 value)
++{
++    test_call("i32");
++}
++
++void
++gbinder_writer_append_int8(
++    GBinderWriter* writer,
++    guint8 value)
++{
++    test_call("i8");
++}
++
++void
++gbinder_writer_append_bool(
++    GBinderWriter* writer,
++    gboolean value)
++{
++    test_call("bool");
++}
++
++void
++gbinder_writer_append_hidl_string_vec(
++    GBinderWriter* writer,
++    const char* data[],
++    gssize count)
++{
++    test_call("strvec");
++}
++
++void
++gbinder_writer_append_struct(
++    GBinderWriter* writer,
++    const void* ptr,
++    const GBinderWriterType* type,
++    const GBinderParent* parent)
++{
++    test_call("struct(%u)", (guint) type->size);
++}
++
++guint
++gbinder_writer_append_buffer_object(
++    GBinderWriter* writer,
++    const void* buf,
++    gsize len)
++{
++    test_call("buf(%u)", (guint) len);
++    test.buffers = g_slist_append(test.buffers, g_bytes_new(buf, len));
++    return 0;
++}
++
++/*==========================================================================*
++ * Stubs for what binder_data.c links against but the tests don't run
++ *==========================================================================*/
++
++void ofono_debug(const char* format, ...) {}
++void ofono_warn(const char* format, ...) {}
++void ofono_error(const char* format, ...) {}
++
++void
++ofono_encode_hex(
++    const void* in,
++    unsigned int n,
++    char out[])
++{
++    out[0] = 0;
++}
++
++enum ofono_radio_access_mode
++ofono_radio_access_max_mode(
++    enum ofono_radio_access_mode mask)
++{
++    return mask;
++}
++
++const char*
++ofono_radio_access_mode_to_string(
++    enum ofono_radio_access_mode m)
++{
++    return "";
++}
++
++const char*
++ofono_access_technology_to_string(
++    enum ofono_access_technology t)
++{
++    return "";
++}
++
++const char*
++ofono_netreg_status_to_string(
++    enum ofono_netreg_status status)
++{
++    return "";
++}
++
++const struct ofono_gprs_primary_context*
++ofono_gprs_context_settings_by_type(
++    struct ofono_gprs* gprs,
++    enum ofono_gprs_context_type type)
++{
++    return NULL;
++}
++
++struct ofono_watch*
++ofono_watch_new(
++    const char* path)
++{
++    return NULL;
++}
++
++struct ofono_watch*
++ofono_watch_ref(
++    struct ofono_watch* w)
++{
++    return w;
++}
++
++void
++ofono_watch_unref(
++    struct ofono_watch* w)
++{
++}
++
++unsigned long
++ofono_watch_add_modem_changed_handler(
++    struct ofono_watch* w,
++    ofono_watch_cb_t cb,
++    void* user_data)
++{
++    return 0;
++}
++
++unsigned long
++ofono_watch_add_imsi_changed_handler(
++    struct ofono_watch* w,
++    ofono_watch_cb_t cb,
++    void* user_data)
++{
++    return 0;
++}
++
++unsigned long
++ofono_watch_add_gprs_changed_handler(
++    struct ofono_watch* w,
++    ofono_watch_cb_t cb,
++    void* user_data)
++{
++    return 0;
++}
++
++unsigned long
++ofono_watch_add_gprs_settings_changed_handler(
++    struct ofono_watch* w,
++    ofono_watch_gprs_settings_cb_t cb,
++    void* user_data)
++{
++    return 0;
++}
++
++void
++ofono_watch_remove_handlers(
++    struct ofono_watch* w,
++    unsigned long* ids,
++    unsigned int count)
++{
++}
++
++/*==========================================================================*
++ * Tests
++ *==========================================================================*/
++
++static
++void
++test_start(
++    void)
++{
++    memset(&test, 0, sizeof(test));
++    test.calls = g_string_new(NULL);
++}
++
++static
++void
++test_finish(
++    void)
++{
++    g_string_free(test.calls, TRUE);
++    g_slist_free_full(test.allocs, g_free);
++    g_slist_free_full(test.buffers, (GDestroyNotify) g_bytes_unref);
++}
++
++static
++void
++test_setup_init(
++    BinderDataRequestSetup* setup,
++    BinderDataProfileConfig* config)
++{
++    memset(setup, 0, sizeof(*setup));
++    memset(config, 0, sizeof(*config));
++    setup->apn = "internet";
++    setup->proto = OFONO_GPRS_PROTO_IPV4V6;
++    setup->auth_method = OFONO_GPRS_AUTH_METHOD_NONE;
++}
++
++static
++gboolean
++test_all_zero(
++    GBytes* bytes)
++{
++    gsize i, size;
++    const guint8* data = g_bytes_get_data(bytes, &size);
++
++    for (i = 0; i < size; i++) {
++        if (data[i]) {
++            return FALSE;
++        }
++    }
++    return TRUE;
++}
++
++/* The arguments setupDataCall_1_5 has, written the 1.5 way */
++static
++void
++test_setup_data_call_1_5(
++    void)
++{
++    BinderDataRequestSetup setup;
++    BinderDataProfileConfig config;
++    GBinderWriter writer;
++
++    test_start();
++    test_setup_init(&setup, &config);
++    memset(&writer, 0, sizeof(writer));
++    binder_data_api_write_setup_data_call_args_hidl_1_5(&writer, &setup,
++        &config, RADIO_TECH_LTE);
++    g_assert_cmpstr(test.calls->str, == ,
++        "i32 struct(112) bool i32 strvec strvec");
++    test_finish();
++}
++
++/*
++ * setupDataCall_1_6 adds pduSessionId, the OptionalSliceInfo and
++ * OptionalTrafficDescriptor safe_unions, and matchAllRuleAllowed. Each
++ * safe_union is a buffer object of its own, sent as noinit: all zero.
++ */
++static
++void
++test_setup_data_call_1_6(
++    void)
++{
++    BinderDataRequestSetup setup;
++    BinderDataProfileConfig config;
++    GBinderWriter writer;
++
++    test_start();
++    test_setup_init(&setup, &config);
++    memset(&writer, 0, sizeof(writer));
++    binder_data_api_write_setup_data_call_args_hidl_1_6(&writer, &setup,
++        &config, RADIO_TECH_LTE);
++    g_assert_cmpstr(test.calls->str, == ,
++        "i32 struct(112) bool i32 strvec strvec i32 buf(24) buf(56) bool");
++    g_assert_cmpuint(g_slist_length(test.buffers), == , 2);
++    g_assert(test_all_zero(test.buffers->data));
++    g_assert(test_all_zero(test.buffers->next->data));
++    test_finish();
++}
++
++int main(int argc, char* argv[])
++{
++    g_test_init(&argc, &argv, NULL);
++    gutil_log_default.level = g_test_verbose() ?
++        GLOG_LEVEL_VERBOSE : GLOG_LEVEL_NONE;
++    gutil_log_timestamp = FALSE;
++    g_test_add_func(TEST_("setup_data_call_1_5"), test_setup_data_call_1_5);
++    g_test_add_func(TEST_("setup_data_call_1_6"), test_setup_data_call_1_6);
++    return g_test_run();
++}
++
++/*
++ * Local Variables:
++ * mode: C
++ * c-basic-offset: 4
++ * indent-tabs-mode: nil
++ * End:
++ */
