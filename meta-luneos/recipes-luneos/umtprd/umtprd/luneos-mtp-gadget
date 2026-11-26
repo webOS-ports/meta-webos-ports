@@ -45,12 +45,30 @@ F_MTP_CONF=/etc/umtprd/umtprd-f_mtp.conf
 log(){ logger -t luneos-mtp-gadget "$@"; }
 die(){ log "$@"; exit 1; }
 
+# adbd closes its FunctionFS on every unbind and opens it again by itself, which
+# takes a moment. A bind in that moment leaves adbd without its FUNCTIONFS_BIND:
+# a second later it gives up and closes ep0, and closing ep0 unbinds the whole
+# gadget, MTP with it, with nothing left to bind it again. So wait for adbd's
+# endpoints, and only call it bound once it has outlived that second.
+ADB_FFS=/dev/usb-ffs/adb
+adb_in_gadget(){   # $1=gadget dir
+    for _l in "$1"/configs/*/ffs.adb*; do
+        [ -L "$_l" ] && return 0
+    done
+    return 1
+}
+
 bind_udc(){   # $1=gadget dir, $2=udc name; retry — a transient EBUSY is common
     _g=$1; _u=$2
-    for _ in 1 2 3 4 5; do
+    for _ in 1 2 3 4 5 6 7 8; do
+        sleep 0.3
+        if adb_in_gadget "$_g" && [ ! -e "$ADB_FFS/ep1" ]; then
+            sleep 0.2
+            continue
+        fi
         echo "$_u" > "$_g/UDC" 2>/dev/null
+        sleep 1.5
         [ -n "$(cat "$_g/UDC" 2>/dev/null)" ] && return 0
-        sleep 1
     done
     return 1
 }
@@ -93,10 +111,23 @@ hold_marker(){
 # umtprd.service's ExecStopPost, and systemd kills whatever is left in the
 # service's cgroup when that returns - a background timer would die with it and
 # leave the marker in place, hiding every later real unplug from storaged.
+#
+# android-gadget-rebind (meta-android) stays away while the marker exists, so a
+# gadget that went down inside the window would stay down. That is not only our
+# own rebinds: libmtp resets the device when it cannot open a session, about
+# 5 s after the host enumerates it, which is inside the window. The reset makes
+# adbd close and reopen ep0, closing ep0 unbinds the whole gadget, and on the
+# Zinwa Q25 adb and MTP were gone until the cable was pulled. So once the marker
+# is ours to clear, run the rebind; it does nothing when the gadget is bound.
+REBIND=/usr/bin/android-gadget-rebind
 release_marker_later(){
     _tok=$(cat "$MARKER" 2>/dev/null)
-    _clear="[ \"\$(cat $MARKER 2>/dev/null)\" = \"$_tok\" ] && rm -f $MARKER; rmdir $STATE 2>/dev/null; true"
-    if ! systemd-run --quiet --on-active=5 /bin/sh -c "$_clear" 2>/dev/null; then
+    _clear="if [ \"\$(cat $MARKER 2>/dev/null)\" = \"$_tok\" ]; then rm -f $MARKER; [ -x $REBIND ] && $REBIND; fi; rmdir $STATE 2>/dev/null; true"
+    # AccuracySec: a timer may otherwise fire anywhere in the minute after its
+    # time (systemd's default accuracy). Measured on the Q25: 16 s after the
+    # bind instead of 5.
+    if ! systemd-run --quiet --on-active=5 --timer-property=AccuracySec=100ms \
+            /bin/sh -c "$_clear" 2>/dev/null; then
         ( sleep 5; /bin/sh -c "$_clear" ) >/dev/null 2>&1 &
     fi
 }
@@ -244,7 +275,7 @@ do_bind(){
     # expect Android's layout for 0x4ee2: MTP on interface 0, adb on 1 (on
     # Windows the Android driver claims MI_01 by ID, whatever it is). The adb
     # function was linked first at boot, so take it out, link MTP, and put adb
-    # back behind it. adbd keeps its FunctionFS open throughout.
+    # back behind it.
     adb_links=""
     for l in "$config"/ffs.adb*; do
         [ -L "$l" ] || continue
