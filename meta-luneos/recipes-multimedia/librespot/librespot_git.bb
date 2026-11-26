@@ -13,6 +13,10 @@ PV = "0.8.0+git"
 SRC_URI = "git://github.com/librespot-org/librespot.git;protocol=https;branch=dev;destsuffix=${BB_GIT_DEFAULT_DESTSUFFIX}"
 SRCREV = "99b6088bf3ea028f90192676ac1a337fa4b2ed12"
 
+# The daemon plays a track through the Web API ("uris": [...]); Connect then gets a
+# spotify:webapi: context that context-resolve answers with 400 Bad Request, and nothing plays.
+SRC_URI += "file://0001-connect-do-not-resolve-the-Web-API-s-spotify-webapi-contexts.patch"
+
 S = "${UNPACKDIR}/${BB_GIT_DEFAULT_DESTSUFFIX}"
 
 inherit cargo cargo-update-recipe-crates pkgconfig
