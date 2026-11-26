@@ -19,7 +19,7 @@ RCONFLICTS:${PN} += "imemanager"
 
 PACKAGECONFIG[libim] = "CONFIG+=enable-libim,CONFIG-=enable-libim,libim"
 
-SRCREV = "29b40e453b3bf76e46efad23742beb660266c1de"
+SRCREV = "a5a0a531482ee084009ce113085ae19ee68a19b3"
 
 PV = "0.99.0+20-1040"
 

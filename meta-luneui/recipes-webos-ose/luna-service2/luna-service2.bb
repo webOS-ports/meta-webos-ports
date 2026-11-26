@@ -15,7 +15,7 @@ VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 VIRTUAL-RUNTIME_bash ?= "bash"
 RDEPENDS:${PN} = "luna-service2-security-conf ${VIRTUAL-RUNTIME_cpushareholder} ${VIRTUAL-RUNTIME_bash}"
 
-SRCREV = "801e836ce0e849d2b00a3f306be14453bcb3a405"
+SRCREV = "e83cfebee5fd4b1a3a3d8e31dbbb673f38635c46"
 
 PV = "3.21.2-48"
 PR = "r4"

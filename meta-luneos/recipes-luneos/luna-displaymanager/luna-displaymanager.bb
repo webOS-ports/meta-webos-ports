@@ -11,7 +11,7 @@ PR = "r12"
 
 # master, which has pull request #14 (unlock over the bus only with
 # authmanager's token).
-SRCREV = "fec7d019b83905904b32955a5b26a63efc8410ad"
+SRCREV = "1f42a7fa25454ddbcad99bff84985cc1eb0d49af"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
