@@ -509,6 +509,12 @@ RDEPENDS:${PN}:append:rpi = " waydroid"
 # "wvbridgectl install && wvbridgectl enable".
 RDEPENDS:${PN}:append:halium = " luneos-widevine-bridge"
 
+# Google's software Widevine CDM, which Netflix and every unlisted site use (the
+# bridge handles only its own site list). LuneOS ships only the installer; the
+# CDM itself is fetched from Google on the device when the owner opts in at First
+# Use (the enableWidevineCdm preference), never redistributed in our images.
+RDEPENDS:${PN}:append:halium = " widevine-installer"
+
 # Waydroid needs a kernel of 3.18 or newer (binder, ashmem and the namespaces its
 # LineageOS container uses), and the four Halium machines on a 3.4 vendor kernel
 # (sm-t520 is the fourth, the Exynos 5420 tablet) have none of that. The ":halium" line above would otherwise pull waydroid and its

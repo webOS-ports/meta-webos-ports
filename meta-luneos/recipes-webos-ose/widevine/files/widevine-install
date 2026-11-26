@@ -1,0 +1,68 @@
+#!/bin/sh
+# widevine-install - fetch Google's Widevine CDM from Google and install it.
+#
+# LuneOS ships only this script (free software, part of luneos-widevine-bridge).
+# The proprietary Widevine CDM itself is NOT shipped or mirrored by LuneOS: it is
+# downloaded from Google's own servers, on this device, only when the owner opts
+# in (the First Use "streaming DRM" choice). Use of the CDM is subject to
+# Google's terms. This mirrors how Debian's widevine-installer works.
+#
+# Chromium (neva) loads the CDM from /var/lib/widevine/WidevineCdm; see
+# neva/app_runtime/common/library_widevine_cdm.cc. Only arm64 is installable
+# on-device: 32-bit arm has no Google Chrome Linux build and would need a
+# multi-GB ChromeOS recovery image.
+set -eu
+
+WV_DIR="${WIDEVINE_DIR:-/var/lib/widevine/WidevineCdm}"
+DEB_URL="https://dl.google.com/linux/direct/google-chrome-stable_current_arm64.deb"
+log() { echo "widevine-install: $*"; }
+
+case "$(uname -m)" in
+    aarch64|arm64) PLAT="linux_arm64" ;;
+    *) log "unsupported arch $(uname -m); only arm64 is installable on-device"; exit 0 ;;
+esac
+
+SO="$WV_DIR/_platform_specific/$PLAT/libwidevinecdm.so"
+if [ -s "$SO" ] && [ -s "$WV_DIR/manifest.json" ]; then
+    log "already installed at $WV_DIR"; exit 0
+fi
+
+command -v ar >/dev/null 2>&1 || { log "missing 'ar' (binutils)"; exit 1; }
+
+work="$(mktemp -d "${TMPDIR:-/var/tmp}/widevine-install.XXXXXX")"
+trap 'rm -rf "$work"' EXIT INT TERM
+cd "$work"
+
+log "downloading Google Chrome (arm64) from Google ..."
+if command -v curl >/dev/null 2>&1; then
+    curl -fL --retry 3 --connect-timeout 30 -o chrome.deb "$DEB_URL"
+else
+    wget -O chrome.deb "$DEB_URL"
+fi
+
+log "extracting Widevine CDM ..."
+ar x chrome.deb
+data="$(ls data.tar.* 2>/dev/null | head -n 1)"
+[ -n "$data" ] || { log "no data.tar.* member in the package"; exit 1; }
+mkdir x
+# Extract only the WidevineCdm subtree (a few MB), not all of Chrome (~350 MB).
+tar -C x -xf "$data" ./opt/google/chrome/WidevineCdm 2>/dev/null \
+    || tar -C x -xf "$data" opt/google/chrome/WidevineCdm 2>/dev/null || true
+
+SRC="x/opt/google/chrome/WidevineCdm"
+[ -f "$SRC/_platform_specific/$PLAT/libwidevinecdm.so" ] \
+    || { log "WidevineCdm not found in the package"; exit 1; }
+
+log "installing to $WV_DIR"
+# Busybox userland: no coreutils 'install', so mkdir/cp/chmod.
+mkdir -p "$WV_DIR/_platform_specific/$PLAT"
+cp "$SRC/_platform_specific/$PLAT/libwidevinecdm.so" "$SO.new"
+chmod 0644 "$SO.new"
+mv -f "$SO.new" "$SO"
+cp "$SRC/manifest.json" "$WV_DIR/manifest.json.new"
+chmod 0644 "$WV_DIR/manifest.json.new"
+mv -f "$WV_DIR/manifest.json.new" "$WV_DIR/manifest.json"
+if [ -f "$SRC/LICENSE" ]; then cp "$SRC/LICENSE" "$WV_DIR/LICENSE"; chmod 0644 "$WV_DIR/LICENSE"; fi
+
+ver="$(sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p' "$WV_DIR/manifest.json" 2>/dev/null | head -n 1)"
+log "done (CDM ${ver:-unknown}); restart the browser to load it"
