@@ -17,8 +17,9 @@ inherit webos_app
 PE = "4"
 PV = "0.1.1-0+git"
 
-# master, which has pull requests #91 (post-dial pause) and #92 (video calls).
-SRCREV = "5f4638465b683c7ebd789fbfbea4fcef607e8ecd"
+# master, which has pull requests #91 (post-dial pause), #92 (video calls) and
+# #106 (count a call's duration in seconds).
+SRCREV = "3a3bb39f8615fcc032dad505ef27669a5bb6d384"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 

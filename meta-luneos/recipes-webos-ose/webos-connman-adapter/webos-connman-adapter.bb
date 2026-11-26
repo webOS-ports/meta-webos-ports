@@ -13,7 +13,7 @@ SECTION = "webos/services"
 DEPENDS = "luna-service2 libpbnjson glib-2.0 luna-prefs openssl glib-2.0-native wca-support-api wca-support nyx-lib python3-packaging-native"
 RDEPENDS:${PN} = "connman connman-client"
 
-SRCREV = "a79381aa6b82d363f5bf7294a165f165de4ffee3"
+SRCREV = "48c301e4f16f5c43ef9d1af2ef0a4dfa1e4f6efc"
 
 PV = "1.1.0-51"
 
