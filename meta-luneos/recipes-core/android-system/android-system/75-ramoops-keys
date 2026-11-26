@@ -1,0 +1,38 @@
+#!/bin/sh
+
+# Google's Pixels encrypt the kernel's crash log. On every boot the vendor's
+# init.ramoops.sh decrypts the last boot's ramoops with a private key kept in
+# /data/vendor_ce/0/ramoops, then generates and loads the key for the next
+# crash ("ramoops -g -l -c"). The vendor creates that directory in
+# init-ramoops.rc, but only "on property:sys.user.0.ce_available=true", which
+# the Android framework sets once user 0's credential-encrypted storage is
+# unlocked. That never happens under Halium. So there was nowhere to keep the
+# key, decryption failed every boot (vendor.ramoops.decryption.error=1), and
+# /sys/fs/pstore came back empty after every crash: a sargo that the watchdog
+# reset left no trace of why (15 Nov 2026).
+#
+# With the directory in place the vendor flow works unchanged. Measured on
+# sargo after "echo c > /proc/sysrq-trigger": use_alt became 1 and pstore held
+# console-ramoops-0 and dmesg-ramoops-* with the crash and its backtrace.
+#
+# Only for a vendor that ships the decrypting script. On the host path, as
+# 70-fpdata-dirs does, because LXC binds /android/data onto the container's
+# /data only after the pre-start hooks have run.
+
+DATA=/android/data
+
+[ -e /android/vendor/bin/init.ramoops.sh ] || [ -e "$LXC_ROOTFS_PATH/vendor/bin/init.ramoops.sh" ] || exit 0
+
+if ! grep -q " ${DATA} " /proc/self/mounts; then
+    echo "$(basename "$0"): ${DATA} not mounted, skipping"
+    exit 0
+fi
+
+mkdir -p "${DATA}/vendor_ce/0/ramoops" || exit 0
+
+# 0771 root:root for the per-user directory, as vold makes it. The key
+# directory holds a private key and only init.ramoops.sh (root) reads it.
+chown 0:0 "${DATA}/vendor_ce/0"         && chmod 0771 "${DATA}/vendor_ce/0"
+chown 0:0 "${DATA}/vendor_ce/0/ramoops" && chmod 0700 "${DATA}/vendor_ce/0/ramoops"
+
+exit 0

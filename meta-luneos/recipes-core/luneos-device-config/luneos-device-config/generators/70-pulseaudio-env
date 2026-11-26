@@ -91,6 +91,48 @@ if [ "${deviceinfo_pulseaudio_stock_libcgrouprc:-0}" = "1" ]; then
     fi
 fi
 
+# The vendor's libtinyxml2.so, for pulseaudio alone.
+#
+# A vendor with no VNDK (Android 14 and later) ships its own copies of the
+# former VNDK libraries in /vendor/lib64, and libhybris, with one linker
+# namespace and no VNDK APEX to prefer, resolves those names from the GSI's
+# /system first. For libtinyxml2 that is not a missing symbol but a silent
+# layout mismatch. The Moto G06's MediaTek audio HAL (audio.primary.mt6768.so,
+# Android 15 vendor) puts a tinyxml2::XMLDocument on the stack in
+# AudioALSADeviceParser::getCardName(), sized for the vendor's tinyxml2 at
+# 0x308 bytes. The GSI's constructor writes out to 0x368, over getCardName()'s
+# saved registers, and the HAL dies on its next write through "this". Read
+# from pulseaudio's core dump (14 Nov 2026): SIGSEGV at 0x6a in
+# ParseCardIndex(), x19 = 0xa, /android/system/lib64/libtinyxml2.so mapped.
+#
+# Only the HAL imports libtinyxml2 in pulseaudio, and the vendor's copy needs
+# nothing beyond liblog, libc++ and bionic, so swapping it in for that one
+# unit is safe. Taking the whole of /vendor first is not: the GSI's
+# libbinder_ndk, which always comes from /system, loses eight symbols against
+# the vendor's libbinder.
+#
+#   deviceinfo_pulseaudio_vendor_libtinyxml2="1"
+#
+# copies it to $RUN/pulseaudio-vendor/libtinyxml2.so, which pulseaudio.service's
+# 50-luneos-vendor-libtinyxml2.conf drop-in binds over the GSI's for that unit.
+# Everything else, the Android container included, keeps the GSI's copy.
+VTX=$RUN/pulseaudio-vendor/libtinyxml2.so
+rm -f "$VTX"
+if [ "${deviceinfo_pulseaudio_vendor_libtinyxml2:-0}" = "1" ]; then
+    src=/android/vendor/lib64/libtinyxml2.so
+    if [ -s "$src" ]; then
+        mkdir -p "$(dirname "$VTX")"
+        if cp "$src" "$VTX.tmp" && chmod 0644 "$VTX.tmp" && mv "$VTX.tmp" "$VTX"; then
+            echo "luneos-device-config: pulseaudio gets the vendor's libtinyxml2.so"
+        else
+            rm -f "$VTX.tmp"
+            echo "luneos-device-config: WARNING: could not copy $src" >&2
+        fi
+    else
+        echo "luneos-device-config: WARNING: no $src" >&2
+    fi
+fi
+
 # The rate module-droid-card opens the HAL outputs at.
 #
 # Unset, pulseaudio picks its default (44100 Hz). The MP01's HAL accepts that
