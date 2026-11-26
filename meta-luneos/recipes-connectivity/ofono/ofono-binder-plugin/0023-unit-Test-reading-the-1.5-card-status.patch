@@ -1,0 +1,197 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [unit] Test reading the 1.5 card status
+
+Feeds getIccCardStatus_1_5 responses through the HIDL status parser: a
+card whose applications are only in the 1.5 list, as the q25's RIL sends
+it, one with them only in the 1.0 list, and one without any. Checks that
+the second 1.5 entry is read a whole AppStatus 1.5 further on and that
+the 1.5 persoSubstate is the one used.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ unit/unit_sim_card/unit_sim_card.c | 164 +++++++++++++++++++++++++++++
+ 1 file changed, 164 insertions(+)
+
+diff --git a/unit/unit_sim_card/unit_sim_card.c b/unit/unit_sim_card/unit_sim_card.c
+index e8d899d..3229159 100644
+--- a/unit/unit_sim_card/unit_sim_card.c
++++ b/unit/unit_sim_card/unit_sim_card.c
+@@ -887,6 +887,167 @@ test_power_api(
+     }
+ }
+ 
++/*==========================================================================*
++ * Card status 1.5: the applications in their own list
++ *==========================================================================*/
++
++/*
++ * The response parser reads the card status with
++ * gbinder_reader_read_hidl_struct(). This one hands out test_hidl_struct
++ * instead of reading a parcel, as long as the size asked for matches.
++ */
++static const void* test_hidl_struct;
++static gsize test_hidl_struct_size;
++
++const void*
++gbinder_reader_read_hidl_struct1(
++    GBinderReader* reader,
++    gsize size)
++{
++    if (test_hidl_struct && size == test_hidl_struct_size) {
++        const void* data = test_hidl_struct;
++
++        test_hidl_struct = NULL;
++        return data;
++    }
++    return NULL;
++}
++
++/* The card status as binder_sim_card_api_read_icc_card_status_hidl reads it */
++static
++BinderSimCardStatus*
++test_read_status_1_5(
++    const RadioCardStatus_1_5* radio_status)
++{
++    GBinderReader reader;
++
++    memset(&reader, 0, sizeof(reader));
++    test_hidl_struct = radio_status;
++    test_hidl_struct_size = sizeof(*radio_status);
++    return binder_sim_card_api_read_icc_card_status_hidl(&reader,
++        RADIO_RESP_GET_ICC_CARD_STATUS_1_5);
++}
++
++/* An app in the 1.0 shape */
++static
++void
++test_app_init(
++    RadioAppStatus* app,
++    RADIO_APP_TYPE type,
++    RADIO_PERSO_SUBSTATE perso,
++    const char* aid)
++{
++    memset(app, 0, sizeof(*app));
++    app->appType = type;
++    app->appState = RADIO_APP_STATE_READY;
++    app->persoSubstate = perso;
++    app->aid.data.str = aid;
++    app->aid.len = strlen(aid);
++    app->aid.owns_buffer = TRUE;
++    app->label.data.str = "";
++    app->pin1 = RADIO_PIN_STATE_ENABLED_VERIFIED;
++    app->pin2 = RADIO_PIN_STATE_UNKNOWN;
++}
++
++/* A 1.5 card status around base_apps (1.0 list) and apps (1.5 list) */
++static
++void
++test_status_1_5_init(
++    RadioCardStatus_1_5* status,
++    const RadioAppStatus* base_apps,
++    guint base_count,
++    const RadioAppStatus_1_5* apps,
++    guint count)
++{
++    RadioCardStatus* base = &status->base.base;
++
++    memset(status, 0, sizeof(*status));
++    base->cardState = RADIO_CARD_STATE_PRESENT;
++    base->universalPinState = RADIO_PIN_STATE_UNKNOWN;
++    base->gsmUmtsSubscriptionAppIndex = 0;
++    base->imsSubscriptionAppIndex = -1;
++    base->apps.data.ptr = base_apps;
++    base->apps.count = base_count;
++    status->applications.data.ptr = apps;
++    status->applications.count = count;
++}
++
++/* The RIL fills only the 1.5 list, as the q25's MediaTek RIL does */
++static
++void
++test_status_1_5_apps(
++    void)
++{
++    RadioAppStatus_1_5 apps[2];
++    RadioCardStatus_1_5 radio_status;
++    BinderSimCardStatus* status;
++
++    memset(apps, 0, sizeof(apps));
++    test_app_init(&apps[0].base, RADIO_APP_TYPE_USIM,
++        RADIO_PERSO_SUBSTATE_UNKNOWN, "a0000000871002");
++    apps[0].persoSubstate = RADIO_PERSO_SUBSTATE_READY;
++    test_app_init(&apps[1].base, RADIO_APP_TYPE_ISIM,
++        RADIO_PERSO_SUBSTATE_UNKNOWN, "a0000000871004");
++    apps[1].persoSubstate = RADIO_PERSO_SUBSTATE_SIM_NETWORK;
++    test_status_1_5_init(&radio_status, NULL, 0, apps, 2);
++
++    status = test_read_status_1_5(&radio_status);
++    g_assert_cmpuint(status->num_apps, ==, 2);
++    g_assert_cmpint(status->card_state, ==, RADIO_CARD_STATE_PRESENT);
++    g_assert_cmpint(status->gsm_umts_index, ==, 0);
++    g_assert_cmpint(status->apps[0].app_type, ==, RADIO_APP_TYPE_USIM);
++    g_assert_cmpint(status->apps[0].app_state, ==, RADIO_APP_STATE_READY);
++    g_assert_cmpstr(status->apps[0].aid, ==, "a0000000871002");
++    /* The 1.5 persoSubstate, not the one in the 1.0 part */
++    g_assert_cmpint(status->apps[0].perso_substate, ==,
++        RADIO_PERSO_SUBSTATE_READY);
++    g_assert_cmpint(status->apps[0].pin1_state, ==,
++        RADIO_PIN_STATE_ENABLED_VERIFIED);
++    /* The second entry is a whole RadioAppStatus_1_5 further on */
++    g_assert_cmpint(status->apps[1].app_type, ==, RADIO_APP_TYPE_ISIM);
++    g_assert_cmpstr(status->apps[1].aid, ==, "a0000000871004");
++    g_assert_cmpint(status->apps[1].perso_substate, ==,
++        RADIO_PERSO_SUBSTATE_SIM_NETWORK);
++    binder_sim_card_status_free(status);
++}
++
++/* A RIL that fills only the 1.0 list still works */
++static
++void
++test_status_1_5_base_apps(
++    void)
++{
++    RadioAppStatus base_apps[1];
++    RadioCardStatus_1_5 radio_status;
++    BinderSimCardStatus* status;
++
++    test_app_init(&base_apps[0], RADIO_APP_TYPE_USIM,
++        RADIO_PERSO_SUBSTATE_READY, "a0000000871002");
++    test_status_1_5_init(&radio_status, base_apps, 1, NULL, 0);
++
++    status = test_read_status_1_5(&radio_status);
++    g_assert_cmpuint(status->num_apps, ==, 1);
++    g_assert_cmpint(status->apps[0].app_type, ==, RADIO_APP_TYPE_USIM);
++    g_assert_cmpstr(status->apps[0].aid, ==, "a0000000871002");
++    binder_sim_card_status_free(status);
++}
++
++/* Both lists empty: a card without applications */
++static
++void
++test_status_1_5_no_apps(
++    void)
++{
++    RadioCardStatus_1_5 radio_status;
++    BinderSimCardStatus* status;
++
++    test_status_1_5_init(&radio_status, NULL, 0, NULL, 0);
++    status = test_read_status_1_5(&radio_status);
++    g_assert_cmpuint(status->num_apps, ==, 0);
++    g_assert(!status->apps);
++    binder_sim_card_status_free(status);
++}
++
+ int main(int argc, char* argv[])
+ {
+     g_test_init(&argc, &argv, NULL);
+@@ -907,6 +1068,9 @@ int main(int argc, char* argv[])
+     g_test_add_func(TEST_("power_cycle_cancel"), test_power_cycle_cancel);
+     g_test_add_func(TEST_("power_cycle_unref"), test_power_cycle_unref);
+     g_test_add_func(TEST_("power_api"), test_power_api);
++    g_test_add_func(TEST_("status_1_5_apps"), test_status_1_5_apps);
++    g_test_add_func(TEST_("status_1_5_base_apps"), test_status_1_5_base_apps);
++    g_test_add_func(TEST_("status_1_5_no_apps"), test_status_1_5_no_apps);
+     return g_test_run();
+ }
+ 

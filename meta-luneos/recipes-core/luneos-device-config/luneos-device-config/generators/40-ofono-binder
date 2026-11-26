@@ -179,6 +179,43 @@ else
     set_radio_capability=${deviceinfo_binder_set_radio_capability:-}
 fi
 
+# The MediaTek extension (ofono-binder-plugin-ext-mtk) adds VoLTE and SMS over
+# IMS through vendor.mediatek.hardware.mtkradioex. It is in every Halium image,
+# but it is used only where a device asks for it with
+# deviceinfo_binder_ext_plugin="mtk".
+#
+# It was switched on wherever the vendor registers the service it looks up,
+# vendor.mediatek.hardware.mtkradioex@3.0::IMtkRadioEx/imsSlotN on the
+# plugin's Device. On the q25 (MT6789) that registered IMS and sent an SMS, but
+# the modem's answer to sendImsSmsEx never reached the extension: after 60 s it
+# failed the send, ofono's SMS core retried it (up to TXQ_MAX_RETRIES), and
+# every retry went out again - the recipient got five copies of one message
+# (24 Nov 2026). Until a device's IMS send has been seen to complete, the
+# probe below only says that the service is there.
+ext_plugin=${deviceinfo_binder_ext_plugin:-}
+if [ -z "$ext_plugin" ]; then
+    mtk_dev=/dev/hwbinder
+    [ "$iface" = "aidl" ] && mtk_dev=/dev/binder
+    mtk_list=
+    if command -v binder-list >/dev/null 2>&1; then
+        mtk_list=$(binder-list -d "$mtk_dev" 2>/dev/null)
+    fi
+    # lshal lists /dev/hwbinder only, so it is no use for the AIDL device.
+    if [ -z "$mtk_list" ] && [ "$iface" = "hidl" ]; then
+        for c in lshal /android/system/bin/lshal /system/bin/lshal; do
+            if command -v "$c" >/dev/null 2>&1; then
+                mtk_list=$($c 2>/dev/null)
+                break
+            fi
+        done
+    fi
+    if echo "$mtk_list" | grep -qE 'vendor\.mediatek\.hardware\.mtkradioex@3\.0::IMtkRadioEx/imsSlot[0-9]+'; then
+        echo "luneos-device-config: mtkradioex@3.0 present; ofono extension not enabled (deviceinfo_binder_ext_plugin=\"mtk\" enables it)"
+    fi
+fi
+[ "$ext_plugin" = "none" ] && ext_plugin=
+[ -n "$ext_plugin" ] && echo "luneos-device-config: ofono extension plugin: $ext_plugin"
+
 mkdir -p "$GEN/files/etc/ofono"
 
 # ExpectSlots names only the first: boot should not wait on slots that are
@@ -200,6 +237,7 @@ mkdir -p "$GEN/files/etc/ofono"
         echo "ExpectSlots = slot1"
     fi
     [ -n "$set_radio_capability" ] && echo "SetRadioCapability = $set_radio_capability"
+    [ -n "$ext_plugin" ] && echo "extPlugin = $ext_plugin"
     for s in $slots; do
         n=${s#slot}
         echo

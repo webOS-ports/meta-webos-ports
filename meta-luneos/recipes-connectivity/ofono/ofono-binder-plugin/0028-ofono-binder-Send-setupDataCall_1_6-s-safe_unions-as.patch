@@ -1,0 +1,80 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [ofono-binder] Send setupDataCall_1_6's safe_unions as
+ buffers
+
+setupDataCall_1_6 takes an OptionalSliceInfo and an
+OptionalTrafficDescriptor, both safe_unions. Like any struct argument a
+safe_union goes over HIDL in a buffer object of its own, its
+discriminator followed by the union. They were written as two bare
+bytes instead, the RIL's stub could not read the request, and the
+transaction failed: on the q25 with radioInterface 1.6 every attempt to
+bring up mobile data ended in "setupDataCall tx failed".
+
+Write both as buffer objects with the noinit discriminator, which adds
+no embedded buffers.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/binder_data.c | 41 +++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 39 insertions(+), 2 deletions(-)
+
+diff --git a/src/binder_data.c b/src/binder_data.c
+index b381cf8..63ec322 100644
+--- a/src/binder_data.c
++++ b/src/binder_data.c
+@@ -2287,6 +2287,39 @@ binder_data_api_read_get_data_call_list_resp_hidl_1_6(
+     }
+ }
+ 
++/*
++ * The two safe_unions setupDataCall_1_6 takes. A safe_union goes over HIDL
++ * as a struct: its discriminator, then the union aligned for its largest
++ * member. Only "noinit" is sent, which leaves everything after the
++ * discriminator zero and adds no embedded buffers.
++ *
++ * safe_union OptionalSliceInfo { Monostate noinit; SliceInfo value; };
++ */
++typedef struct binder_data_optional_slice_info {
++    guint8 discriminator;
++    RadioSliceInfo value;     /* 4-aligned of its own */
++} BinderDataOptionalSliceInfo;
++G_STATIC_ASSERT(G_STRUCT_OFFSET(BinderDataOptionalSliceInfo, value) == 4);
++G_STATIC_ASSERT(sizeof(BinderDataOptionalSliceInfo) == 24);
++
++/*
++ * safe_union OptionalTrafficDescriptor {
++ *     Monostate noinit;
++ *     TrafficDescriptor value;  // OptionalDnn dnn, OptionalOsAppId osAppId
++ * };
++ *
++ * OptionalDnn (hidl_string) and OptionalOsAppId (vec<uint8_t>) are 24
++ * bytes each, 8-aligned.
++ */
++typedef struct binder_data_optional_traffic_descriptor {
++    guint8 discriminator;
++    guint8 padding[7];        /* The union is 8-aligned */
++    guint8 value[48];
++} BinderDataOptionalTrafficDescriptor;
++G_STATIC_ASSERT(G_STRUCT_OFFSET(BinderDataOptionalTrafficDescriptor,
++    value) == 8);
++G_STATIC_ASSERT(sizeof(BinderDataOptionalTrafficDescriptor) == 56);
++
+ static
+ void
+ binder_data_api_write_setup_data_call_args_hidl_1_6(
+@@ -2309,8 +2342,12 @@ binder_data_api_write_setup_data_call_args_hidl_1_6(
+     binder_data_api_write_setup_data_call_args_hidl_1_5(args, setup, config,
+         tech);
+     gbinder_writer_append_int32(args, 0);    /* pduSessionId */
+-    gbinder_writer_append_int8(args, 0);     /* sliceInfoAvailable */
+-    gbinder_writer_append_int8(args, 0);     /* trafficDescriptorAvailable */
++    gbinder_writer_append_buffer_object(args, /* sliceInfo, noinit */
++        gbinder_writer_new0(args, BinderDataOptionalSliceInfo),
++        sizeof(BinderDataOptionalSliceInfo));
++    gbinder_writer_append_buffer_object(args, /* trafficDescriptor, noinit */
++        gbinder_writer_new0(args, BinderDataOptionalTrafficDescriptor),
++        sizeof(BinderDataOptionalTrafficDescriptor));
+     gbinder_writer_append_bool(args, TRUE);  /* matchAllRuleAllowed */
+ }
+ 

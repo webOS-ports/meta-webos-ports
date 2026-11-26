@@ -1,0 +1,227 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] plugins: report SMS status reports on D-Bus
+ (org.ofono.SmsHistory)
+
+oFono asks for an SMS status report when UseDeliveryReports is on and
+matches the report to the message it sent, but then only tells its
+history drivers, and none is built. A client has no way to learn that
+a message was delivered.
+
+This is the sms_history plugin of Sailfish OS
+(ofono/plugins/smshistory.c in https://github.com/sailfishos/ofono:
+Martti Piirainen, 2013, 5589eb3308 and 41adfc3d49; Denis Grigorev,
+2020, 56e0923dc3 for every modem), with its copyright lines kept. It registers
+org.ofono.SmsHistory on each modem and sends
+
+  StatusReport(string message, dict info)
+
+for each report: message is the path the message had while it was
+sent, <modem>/message_<uuid>, as SendMessage returned it, and info
+holds "Delivered" (boolean). Submit results are left to the Message
+object's State, as before.
+
+Changed from Sailfish's version: the signal is declared with the
+signature it sends (a{sv}, Sailfish declares a{b}), the path is built
+with g_strconcat instead of a 160 byte buffer, the signal is sent from
+the modem path where the interface is registered (the same path as
+the SMS atom's), and declarations come first.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [Sailfish OS API, upstream oFono has no D-Bus interface for status reports]
+---
+ Makefile.am          |   3 +
+ plugins/smshistory.c | 171 +++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 174 insertions(+)
+ create mode 100644 plugins/smshistory.c
+
+diff --git a/Makefile.am b/Makefile.am
+index 55708a6..57bfed3 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -633,6 +633,9 @@ endif
+ builtin_modules += smart_messaging
+ builtin_sources += plugins/smart-messaging.c
+ 
++builtin_modules += sms_history
++builtin_sources += plugins/smshistory.c
++
+ builtin_modules += push_notification
+ builtin_sources += plugins/push-notification.c
+ 
+diff --git a/plugins/smshistory.c b/plugins/smshistory.c
+new file mode 100644
+index 0000000..b4a3571
+--- /dev/null
++++ b/plugins/smshistory.c
+@@ -0,0 +1,171 @@
++/*
++ *
++ *  oFono - Open Source Telephony
++ *
++ *  Copyright (C) 2008-2011  Intel Corporation. All rights reserved.
++ *  Copyright (C) 2013  Jolla Ltd. All rights reserved.
++ *  Copyright (C) 2020  Open Mobile Platform LLС. All rights reserved.
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU General Public License for more details.
++ *
++ *  You should have received a copy of the GNU General Public License
++ *  along with this program; if not, write to the Free Software
++ *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
++ *
++ */
++
++/*
++ * org.ofono.SmsHistory as Sailfish OS has it (plugins/smshistory.c in
++ * https://github.com/sailfishos/ofono): a StatusReport signal for each
++ * SMS status report, so that a client can tell the sender a message
++ * was delivered. Upstream oFono passes status reports only to its
++ * history drivers and has nothing on D-Bus for them.
++ *
++ * StatusReport(string message, dict info)
++ *   message: the path the message had while it was being sent,
++ *            <modem>/message_<uuid>
++ *   info:    { "Delivered": boolean }
++ *
++ * The signal comes from the modem path, where the interface is
++ * registered.
++ */
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#include <errno.h>
++#include <glib.h>
++#include <gdbus.h>
++
++#define OFONO_API_SUBJECT_TO_CHANGE
++#include <ofono/plugin.h>
++#include <ofono/log.h>
++#include <ofono/history.h>
++#include <ofono/types.h>
++
++#include "ofono.h"
++#include "common.h"
++
++#define SMS_HISTORY_INTERFACE "org.ofono.SmsHistory"
++
++static const GDBusSignalTable sms_history_signals[] = {
++	{ GDBUS_SIGNAL("StatusReport",
++		GDBUS_ARGS({ "message", "s" }, { "info", "a{sv}" })) },
++	{ }
++};
++
++static int sms_history_probe(struct ofono_history_context *context)
++{
++	DBusConnection *conn = ofono_dbus_get_connection();
++	struct ofono_modem *modem = context->modem;
++	const char *path = ofono_modem_get_path(modem);
++
++	DBG("%s", path);
++
++	if (!g_dbus_register_interface(conn, path, SMS_HISTORY_INTERFACE,
++					NULL, sms_history_signals, NULL,
++					NULL, NULL)) {
++		ofono_error("Could not create %s interface",
++				SMS_HISTORY_INTERFACE);
++		return -EIO;
++	}
++
++	ofono_modem_add_interface(modem, SMS_HISTORY_INTERFACE);
++
++	return 0;
++}
++
++static void sms_history_remove(struct ofono_history_context *context)
++{
++	DBusConnection *conn = ofono_dbus_get_connection();
++	struct ofono_modem *modem = context->modem;
++	const char *path = ofono_modem_get_path(modem);
++
++	DBG("%s", path);
++
++	ofono_modem_remove_interface(modem, SMS_HISTORY_INTERFACE);
++	g_dbus_unregister_interface(conn, path, SMS_HISTORY_INTERFACE);
++}
++
++static void sms_history_sms_send_status(struct ofono_history_context *context,
++					const struct ofono_uuid *uuid,
++					time_t when,
++					enum ofono_history_sms_status status)
++{
++	DBusConnection *conn = ofono_dbus_get_connection();
++	struct ofono_atom *atom;
++	const char *sms_path;
++	const char *modem_path;
++	char *message;
++	dbus_bool_t delivered;
++	DBusMessage *signal;
++	DBusMessageIter iter;
++	DBusMessageIter dict;
++
++	if (status != OFONO_HISTORY_SMS_STATUS_DELIVERED &&
++			status != OFONO_HISTORY_SMS_STATUS_DELIVER_FAILED)
++		return;
++
++	atom = __ofono_modem_find_atom(context->modem, OFONO_ATOM_TYPE_SMS);
++	if (atom == NULL)
++		return;
++
++	sms_path = __ofono_atom_get_path(atom);
++	modem_path = ofono_modem_get_path(context->modem);
++	if (sms_path == NULL || modem_path == NULL || conn == NULL)
++		return;
++
++	delivered = (status == OFONO_HISTORY_SMS_STATUS_DELIVERED);
++	message = g_strconcat(sms_path, "/message_", ofono_uuid_to_str(uuid),
++				NULL);
++
++	DBG("%s delivered: %d", message, delivered);
++
++	signal = dbus_message_new_signal(modem_path, SMS_HISTORY_INTERFACE,
++						"StatusReport");
++	if (signal == NULL) {
++		g_free(message);
++		return;
++	}
++
++	dbus_message_iter_init_append(signal, &iter);
++	dbus_message_iter_append_basic(&iter, DBUS_TYPE_STRING, &message);
++	dbus_message_iter_open_container(&iter, DBUS_TYPE_ARRAY,
++					OFONO_PROPERTIES_ARRAY_SIGNATURE,
++					&dict);
++	ofono_dbus_dict_append(&dict, "Delivered", DBUS_TYPE_BOOLEAN,
++				&delivered);
++	dbus_message_iter_close_container(&iter, &dict);
++
++	g_dbus_send_message(conn, signal);
++	g_free(message);
++}
++
++static struct ofono_history_driver smshistory_driver = {
++	.name = "SMS History",
++	.probe = sms_history_probe,
++	.remove = sms_history_remove,
++	.sms_send_status = sms_history_sms_send_status,
++};
++
++static int sms_history_init(void)
++{
++	return ofono_history_driver_register(&smshistory_driver);
++}
++
++static void sms_history_exit(void)
++{
++	ofono_history_driver_unregister(&smshistory_driver);
++}
++
++OFONO_PLUGIN_DEFINE(sms_history, "SMS History Plugin",
++			VERSION, OFONO_PLUGIN_PRIORITY_DEFAULT,
++			sms_history_init, sms_history_exit)

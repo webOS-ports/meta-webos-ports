@@ -1,0 +1,210 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] unit: test the card slots with no card present
+
+A modem mapped to its empty slot reports CardSlotCount and
+ActiveCardSlot, and setting ActiveCardSlot reaches the driver and is
+reported back afterwards.
+
+The scripted SIM driver gains a set_active_card_slot that succeeds at
+once and records the 0-based index it was given.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ unit/test-sim-euicc.c | 148 ++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 148 insertions(+)
+
+diff --git a/unit/test-sim-euicc.c b/unit/test-sim-euicc.c
+index b2947c6..e87dbf7 100644
+--- a/unit/test-sim-euicc.c
++++ b/unit/test-sim-euicc.c
+@@ -6,6 +6,10 @@
+  * NotImplemented for a driver without reset_card - including one that sets
+  * it but registered as SIM driver API version 2, which predates the member.
+  *
++ * Also SimManager's card slots with no card in the active slot, which is how
++ * an LPA finds and maps the slot the eUICC is in: CardSlotCount and
++ * ActiveCardSlot are reported, and ActiveCardSlot can be set.
++ *
+  * The real src/sim.c and the D-Bus helpers are built into this test, on a
+  * small model of src/modem.c and the driver registry, with a scripted SIM
+  * driver that finishes a reset when the test says so. Clients are a second
+@@ -384,6 +388,24 @@ static void sim_finish_reset(gboolean ok)
+ 	cb(&err, reset_data);
+ }
+ 
++static unsigned int slot_switches;
++static unsigned int slot_switched_to;
++
++/* Switches at once: the index is 0-based, as sim.c hands it down */
++static void sim_set_active_card_slot(struct ofono_sim *sim, unsigned int index,
++				ofono_sim_set_active_card_slot_cb_t cb,
++				void *data)
++{
++	struct ofono_error err = {
++		.type = OFONO_ERROR_TYPE_NO_ERROR,
++		.error = 0,
++	};
++
++	slot_switches++;
++	slot_switched_to = index;
++	cb(&err, data);
++}
++
+ /* EuiccManager needs logical channels; reset_card is what is under test */
+ static const struct ofono_sim_driver test_sim_driver = {
+ 	.name		= "test",
+@@ -392,6 +414,7 @@ static const struct ofono_sim_driver test_sim_driver = {
+ 	.open_channel2	= sim_open_channel2,
+ 	.close_channel	= sim_close_channel,
+ 	.logical_access	= sim_logical_access,
++	.set_active_card_slot = sim_set_active_card_slot,
+ 	.reset_card	= sim_reset_card,
+ };
+ 
+@@ -491,6 +514,8 @@ static void test_begin(const struct ofono_sim_driver *driver, int version)
+ 	memset(&dbus, 0, sizeof(dbus));
+ 	memset(&modem, 0, sizeof(modem));
+ 	stray_replies = 0;
++	slot_switches = 0;
++	slot_switched_to = 0;
+ 	resets_started = 0;
+ 	reset_cb = NULL;
+ 	reset_data = NULL;
+@@ -652,6 +677,127 @@ static void test_reset_version_2(void)
+ 	call_done(&a);
+ }
+ 
++/* ---- the card slots, with no card in the active one --------------------- */
++
++#define SIM_IFACE "org.ofono.SimManager"
++
++static void get_sim_properties(struct call *call)
++{
++	test_dbus_send(&dbus, test_dbus_new_call(&dbus, MODEM_PATH,
++				SIM_IFACE, "GetProperties"), on_reply, call);
++}
++
++static void set_active_card_slot(struct call *call, dbus_uint32_t slot)
++{
++	DBusMessage *msg = test_dbus_new_call(&dbus, MODEM_PATH, SIM_IFACE,
++						"SetProperty");
++	const char *name = "ActiveCardSlot";
++	DBusMessageIter iter, var;
++
++	dbus_message_iter_init_append(msg, &iter);
++	dbus_message_iter_append_basic(&iter, DBUS_TYPE_STRING, &name);
++	dbus_message_iter_open_container(&iter, DBUS_TYPE_VARIANT,
++					DBUS_TYPE_UINT32_AS_STRING, &var);
++	dbus_message_iter_append_basic(&var, DBUS_TYPE_UINT32, &slot);
++	dbus_message_iter_close_container(&iter, &var);
++
++	test_dbus_send(&dbus, msg, on_reply, call);
++}
++
++/* Looks a property up in a GetProperties reply; FALSE when it is absent */
++static gboolean reply_property(DBusMessage *reply, const char *name,
++				int type, void *value)
++{
++	DBusMessageIter iter, dict;
++
++	g_assert(dbus_message_iter_init(reply, &iter));
++	g_assert_cmpint(dbus_message_iter_get_arg_type(&iter), ==,
++							DBUS_TYPE_ARRAY);
++	dbus_message_iter_recurse(&iter, &dict);
++
++	while (dbus_message_iter_get_arg_type(&dict) == DBUS_TYPE_DICT_ENTRY) {
++		DBusMessageIter entry, var;
++		const char *key;
++
++		dbus_message_iter_recurse(&dict, &entry);
++		dbus_message_iter_get_basic(&entry, &key);
++		dbus_message_iter_next(&entry);
++		dbus_message_iter_recurse(&entry, &var);
++
++		if (!strcmp(key, name)) {
++			g_assert_cmpint(dbus_message_iter_get_arg_type(&var),
++								==, type);
++			dbus_message_iter_get_basic(&var, value);
++			return TRUE;
++		}
++
++		dbus_message_iter_next(&dict);
++	}
++
++	return FALSE;
++}
++
++/*
++ * A single-modem phone with a nano-SIM slot and an eUICC, mapped to the
++ * empty one. The slots must still be visible: they are what a client needs
++ * to map the modem to the card that is there.
++ */
++static void test_slots_without_card(void)
++{
++	struct call a = { 0 };
++	dbus_bool_t present = TRUE;
++	dbus_uint32_t count = 0, active = 0;
++
++	test_begin(&test_sim_driver, OFONO_SIM_DRIVER_API_VERSION);
++	ofono_sim_set_card_slot_count(sim, 2);
++	ofono_sim_set_active_card_slot(sim, 1);
++
++	get_sim_properties(&a);
++	flush();
++	assert_ok(&a);
++
++	g_assert(reply_property(a.reply, "Present", DBUS_TYPE_BOOLEAN,
++								&present));
++	g_assert(!present);
++	g_assert(reply_property(a.reply, "CardSlotCount", DBUS_TYPE_UINT32,
++								&count));
++	g_assert_cmpuint(count, ==, 2);
++	g_assert(reply_property(a.reply, "ActiveCardSlot", DBUS_TYPE_UINT32,
++								&active));
++	g_assert_cmpuint(active, ==, 1);
++
++	test_end();
++	call_done(&a);
++}
++
++/* ...and moving to the other slot needs no card in the current one */
++static void test_switch_slot_without_card(void)
++{
++	struct call a = { 0 }, b = { 0 };
++	dbus_uint32_t active = 0;
++
++	test_begin(&test_sim_driver, OFONO_SIM_DRIVER_API_VERSION);
++	ofono_sim_set_card_slot_count(sim, 2);
++	ofono_sim_set_active_card_slot(sim, 1);
++
++	set_active_card_slot(&a, 2);
++	flush();
++	assert_ok(&a);
++	g_assert_cmpuint(slot_switches, ==, 1);
++	g_assert_cmpuint(slot_switched_to, ==, 1);
++
++	get_sim_properties(&b);
++	flush();
++	assert_ok(&b);
++	g_assert(reply_property(b.reply, "ActiveCardSlot", DBUS_TYPE_UINT32,
++								&active));
++	g_assert_cmpuint(active, ==, 2);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++}
++
+ /* The newest version that exists is the one the header asks for */
+ static void test_api_version(void)
+ {
+@@ -671,6 +817,8 @@ int main(int argc, char **argv)
+ 	T(reset_again);
+ 	T(reset_not_implemented);
+ 	T(reset_version_2);
++	T(slots_without_card);
++	T(switch_slot_without_card);
+ #undef T
+ 
+ 	return g_test_run();
