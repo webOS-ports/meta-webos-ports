@@ -7,7 +7,7 @@ DEPENDS = "glib-2.0 luna-service2 json-c qtbase libxcrypt"
 
 PE = "1"
 PV = "1.0.0+git"
-SRCREV = "11c5470b9a17819696883263d73b76e0352a772e"
+SRCREV = "e630ad4ff1c9e025de18b4279196cb3b8772ac02"
 
 WEBOS_SYSTEM_BUS_SKIP_DO_TASKS = ""
 
