@@ -18,11 +18,11 @@ RDEPENDS:${PN} += "util-linux"
 VIRTUAL-RUNTIME_cpushareholder ?= "cpushareholder-stub"
 RDEPENDS:${PN} += "${VIRTUAL-RUNTIME_cpushareholder}"
 
-SRCREV = "be46ccd0fbc967a4f0007c6b6c776dcaff51d2b6"
+SRCREV = "b419056037f7c31bd8848dcc86d3861bb86a36b6"
 
 PV = "1.0.2-100"
 
-INC_PR = "r100"
+INC_PR = "r101"
 
 WAM_BUILD_SYSTEM ?= "webos_cmake"
 WAM_BUILD_DEFAULT_PLUGIN ?= "1"
@@ -181,7 +181,11 @@ FILES:${PN} += " \
 
 # LuneOS added here to work around outdated group.master from OSE
 # Needed for the users & groups
-DEPENDS += "webos-users-groups"
+# USERADD_DEPENDS (not a plain DEPENDS) so webos-users-groups, which creates the
+# "graphics" user referenced in GROUPMEMS_PARAM below, is also staged into the
+# do_package_setscene sysroot; otherwise an sstate restore runs groupmems before
+# "graphics" exists and fails with "groupmems command did not succeed".
+USERADD_DEPENDS = "webos-users-groups"
 
 # Let WAM create it's user & compositor and se group. "se" is used for DRM keys on some webOS distros
 

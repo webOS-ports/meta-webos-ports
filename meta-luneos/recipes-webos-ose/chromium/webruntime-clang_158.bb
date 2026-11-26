@@ -1,0 +1,199 @@
+# Copyright (c) 2024-2026 LG Electronics, Inc.
+
+require webruntime_158.bb
+require chromium-host-llvm.inc
+
+PROVIDES = "virtual/webruntime"
+
+PR = "r0"
+
+# Restated here as well as in webruntime_158.bb: this file is reached through
+
+inherit clang_libc
+
+GCC_CROSS_VER = "11.3.0"
+DEPEXT = "${@bb.utils.contains('WEBRUNTIME_CLANG_STDLIB', '1', '', '-clang', d)}"
+
+PACKAGECONFIG += "${@bb.utils.contains('USE_WEBRUNTIME_LIBCXX', '1', '', 'system-libcxx', d)}"
+PACKAGECONFIG[system-libcxx] = ",,libcxx"
+
+GN_ARGS_CLANG = "is_clang=true"
+
+# Toolchain
+# ---------
+# Same reasoning as the 120 recipe: build against the wrynose system clang
+# (LLVM 22) rather than the clang bundled in third_party/llvm-build, because
+# LuneOS links webruntime against the shared system libc++ and compiler and
+# standard library have to be the same vintage. clang_use_chrome_plugins goes
+# off with it - the plugins are ABI-tied to the bundled clang.
+#
+# Unlike 120, the flags that upstream clang does not understand are not gated
+# locally: meta-browser's 0004-Delete-compiler-options-not-available-in-release-ver
+# patch removes them, and that patch is maintained against each Chromium
+# release by the layer that cares about OE builds. See webruntime-repo_151.inc.
+
+# compiler-rt
+# -----------
+# Chromium links libclang_rt.builtins.a explicitly. With clang_base_path
+# pointing at the native sysroot, that archive has to be present there for the
+# target architecture, and it comes from compiler-rt rather than from clang
+# itself. libcxx-native is needed by the native tooling built during the
+# Chromium build (the host-side binaries), not by the target.
+DEPENDS:append = " compiler-rt compiler-rt-native libcxx-native"
+
+# Chromium looks for the runtime under lib/clang/${clang_version}. Pinning
+# clang_version to "latest" and materialising that directory decouples the
+# recipe from whichever LLVM version the distro happens to ship, which is the
+# whole point of meta-browser doing it this way.
+
+# do_add_clang_latest and the clang_* GN args live in chromium-host-llvm.inc,
+# shared with mksnapshot-cross_151.bb.
+
+# Rust
+# ----
+# Rust comes from Chromium's pinned toolchain, see webruntime-repo_158.inc.
+GN_ARGS += "toolchain_supports_rust_thin_lto=false"
+
+# Don't use gold even when selected by default with ld-is-gold in DISTRO_FEATURES
+EXTRA_OEGN_GOLD = ""
+
+GN_ARGS += "target_sysroot=\"${STAGING_DIR_TARGET}\""
+
+INCLUDE_PATH_STDLIB = " \
+    -I../../${MLPREFIX}recipe-sysroot${includedir}/c++/${GCC_CROSS_VER} \
+    -I../../${MLPREFIX}recipe-sysroot${includedir}/c++/${GCC_CROSS_VER}/${TARGET_SYS} \
+"
+
+INCLUDE_PATH_LIBCXX_EXT = " \
+    -I../../${MLPREFIX}recipe-sysroot${includedir}/c++/v1 \
+"
+
+INCLUDE_PATH_LIBCXX = "${@bb.utils.contains('USE_WEBRUNTIME_LIBCXX', '1', '', '${INCLUDE_PATH_LIBCXX_EXT}', d)}"
+INCLUDE_PATH_LIBCXX += " \
+    -I../../${MLPREFIX}recipe-sysroot${includedir}/cbe \
+    -I../../${MLPREFIX}recipe-sysroot${includedir}/cbe/gmp \
+    -I../../${MLPREFIX}recipe-sysroot${includedir}/media-resource-calculator-clang \
+"
+
+# tcmalloc build is broken with clang++ and -mthumb
+ARM_INSTRUCTION_SET = "arm"
+
+# M151 turns -Wunsafe-buffer-usage on in places and is generally stricter than
+# 120. treat_warnings_as_errors is already false in webruntime-common.inc; keep
+# the narrowing demotion from the 120 recipe until a build shows it is
+# unnecessary, since it costs nothing and covers third_party code we do not
+# maintain.
+CLANG_CXXFLAGS = "-Wno-error=c++11-narrowing-const-reference"
+
+# clang_extra_cxxflags is appended AFTER each target's own cflags, so anything
+# in it overrides per-target settings. TARGET_CC_ARCH carries -march=nehalem,
+# which resets the whole ISA baseline and silently demotes targets that ask for
+# a higher one. Skia's AVX-512 colour transform is the case that breaks:
+#
+#   -msse3 -march=x86-64-v4 -march=nehalem -msse4.2
+#           ^ skia's ml4 opts   ^ ours, last, wins
+#
+#   error: always_inline function '_mm512_cvtph_ps' requires target feature
+#   'avx512f', but would be inlined into function 'F_from_H'
+#
+# That code is runtime-dispatched behind a CPU feature check, so building it
+# with AVX-512 enabled is intended and does not raise the baseline for anything
+# else. Drop only -march from the flags we inject and keep the rest
+# (-m64/-mtune/-mfpmath/-msse4.2), which leaves an effective baseline of
+# SSE4.2 - what nehalem means in practice - while letting per-target -march
+# work again.
+#
+# NOTE: this changes codegen slightly versus the 120 recipe, which injects
+# -march=nehalem unfiltered. 120 never noticed because its Skia had no
+# x86-64-v4 target.
+WEBRUNTIME_TARGET_CC_ARCH = "${@' '.join(f for f in d.getVar('TARGET_CC_ARCH').split() if not f.startswith('-march='))}"
+
+# Cross builds must be told the target triple explicitly.
+# ------------------------------------------------------
+# The oe layer's 0001-Drop-GN-compiler-settings-conflicting-with-OE.patch
+# deletes Chromium's own "--target=aarch64-linux-gnu" injection, on the grounds
+# that OE already feeds arch flags via the compiler cmdline. That holds for
+# meta-browser, where CC is OE's cross wrapper and knows its own target. It does
+# NOT hold here: clang_toolchain() invokes recipe-sysroot-native/usr/bin/clang++
+# directly, so nothing supplies a triple and clang defaults to the build host.
+# On qemux86-64 that was invisible because host == target; on aarch64 the first
+# target compile dies with
+#   clang++: error: unsupported option '-mbranch-protection=' for target
+#   'x86_64-unknown-linux-gnu'
+# because it got the target's arch flags but the host's triple.
+#
+# Only inject when actually cross-compiling, so the proven x86-64 build is
+# untouched. Both C and C++ need it - extra_cxxflags alone leaves .c files
+# compiling for the wrong architecture, which would fail later at link instead.
+# The cross target triple is NOT injected from here. It is restored in
+# build/config/compiler_cpu_abi.gn (bringup/0006), because bindgen derives its
+# clang arguments from the target config and never sees toolchain extra_cflags.
+# See that file for the full reasoning.
+
+GN_ARGS += "${@bb.utils.contains('WEBRUNTIME_CLANG_STDLIB', '1', 'clang_use_stdlib=true clang_extra_cxxflags=\\\"${INCLUDE_PATH_STDLIB} ${WEBRUNTIME_TARGET_CC_ARCH} ${CLANG_CXXFLAGS}\\\"', 'clang_use_stdlib=false clang_extra_cxxflags=\\\"${INCLUDE_PATH_LIBCXX} ${WEBRUNTIME_TARGET_CC_ARCH} ${CLANG_CXXFLAGS}\\\"', d)}"
+
+GN_ARGS += "webos_rpath=\"${libdir}/cbe\""
+
+# V8 requires mksnapshot to have the same pointer width as the target, so for a
+# 32-bit target build/toolchain/cros builds the snapshot toolchain as 32-bit x86
+# (see the current_cpu selection in its BUILD.gn). That toolchain then wants Rust
+# std for i686-unknown-linux-gnu, and OE's rust-native only ships std for the
+# build host (x86_64) plus libstd-rs for the target -- so find_std_rlibs.py dies:
+#     FileNotFoundError: .../rustlib/i686-unknown-linux-gnu/lib
+# aarch64 never hits this because its snapshot toolchain is x64, which host Rust
+# already covers.
+#
+# The entire Rust graph in that toolchain is //third_party/rust/temporal_capi and
+# its ICU4X/serde dependencies (plus build/rust/allocator, which only exists
+# because Rust is in use), all gated behind v8_enable_temporal_support. Turning it
+# off removes the need for i686 Rust std outright. enable_rust=false is not an
+# alternative: rust_target.gni asserts on it while temporal_capi is still declared.
+#
+# This has to be a whole-build setting, not just a snapshot-toolchain one --
+# "temporal=$v8_enable_temporal_support" is part of V8's build-config list
+# (v8/BUILD.gn), so mksnapshot and the runtime V8 must agree or the snapshot is
+# rejected. The cost is that 32-bit targets ship without the Temporal JS API.
+# The alternative is building a real i686 Rust std in OE.
+#
+# 158 no longer uses OE's Rust, so this reason may not hold any more, but the
+# 32-bit build has only been done with Temporal off.
+GN_ARGS += "${@'v8_enable_temporal_support=false' if d.getVar('TARGET_CPU') in ('arm', 'x86', 'mipsel') else ''}"
+
+GN_ARGS += "${@'cc_wrapper=\\\"ccache \\\"' if bb.data.inherits_class('ccache', d) else ''}"
+
+PACKAGECONFIG[umediaserver] = ",,umediaserver${DEPEXT}"
+PACKAGECONFIG[gstreamer] = "use_gst_media=true enable_webm_video_codecs=true,use_gst_media=false,g-media-pipeline${DEPEXT}"
+PACKAGECONFIG[webos-codec] = "use_webos_codec=true,use_webos_codec=false,media-codec-interface${DEPEXT}"
+PACKAGECONFIG[webos-camera] = "use_webos_camera=true,use_webos_camera=false, cambufferlib${DEPEXT}"
+
+do_configure:prepend() {
+    ln -snf umedia_api_clang.pc ${STAGING_DATADIR}/pkgconfig/umedia_api.pc
+
+    [ -f ${STAGING_DATADIR}/pkgconfig/gmp-player-client-clang.pc ] && \
+        ln -snf gmp-player-client-clang.pc ${STAGING_DATADIR}/pkgconfig/gmp-player-client.pc
+}
+
+# Parallelism for do_compile.
+# ---------------------------------------------------------------------------
+# webruntime-common.inc feeds PARALLEL_MAKE straight into NINJA_OPTS, so this
+# is the per-recipe override of the global value.
+#
+# It used to be a fixed "-j 64", tuned for a Threadripper 2990WX (32 cores /
+# 64 threads, 125 GB) and lowered by hand to about 24 whenever the BlueStacks
+# guest held its 64 GB hugepage pool. On the 16-core, 30 GB OSL arm64 builder
+# the same -j 64 started 64 jobs and had to be stopped. webruntime_ninja_jobs()
+# (webruntime-common.inc) now takes the smaller of the CPU count and
+# MemAvailable / 2 GiB. The 2 GiB comes from the OSL arm64 build of 2026-11-10:
+# at -j 12 it never had less than 12 GB of its 30 GB free, i.e. at most
+# 1.5 GB per job, link included. On the workstation that gives about 54 jobs
+# with the guest down and about 22 with its hugepages reserved - the same
+# numbers that used to be set by hand.
+#
+# To pin a value anyway, set PARALLEL_MAKE:pn-webruntime-clang in local.conf.
+#
+# concurrent_links stays at 1 regardless: Chromium sizes it from MemTotal at
+# 30-50 GB per link, and the libcbe.so lld invocation is the single biggest
+# allocation in the build. Running several of those at once is what pushed the
+# box to 3 GB free on 2026-08-20.
+GN_ARGS += "concurrent_links=1"
+PARALLEL_MAKE = "-j ${@webruntime_ninja_jobs(d, 2)}"
