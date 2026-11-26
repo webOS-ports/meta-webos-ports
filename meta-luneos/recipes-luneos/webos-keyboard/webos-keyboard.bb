@@ -38,7 +38,7 @@ RRECOMMENDS:${PN} += "qtbase-plugins qtimageformats-plugins"
 RRECOMMENDS:${PN} += "vosk"
 
 
-SRCREV = "40dfa476ad012267d82fe7908fa66fac0f6d56ca"
+SRCREV = "55119f648f28068349b3c050e9e44bb15a424cc5"
 PE = "2"
 PV = "0.99.2+git"
 PR = "r34"
