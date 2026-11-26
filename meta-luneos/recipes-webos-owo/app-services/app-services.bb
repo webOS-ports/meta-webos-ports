@@ -42,6 +42,7 @@ do_install() {
     install -d ${D}${webos_sysbus_rolesdir}
     install -d ${D}${webos_sysbus_servicedir}
     install -d ${D}${webos_sysbus_groupsdir}
+    install -d ${D}${webos_sysconfdir}/backup
 
     for SERVICE in `ls -d1 ${S}/com.palm.service.*` ; do
         SERVICE_DIR=`basename $SERVICE`
@@ -52,6 +53,10 @@ do_install() {
         cp -vrf $SERVICE/db/permissions/* ${D}${webos_sysconfdir}/db/permissions/ 2> /dev/null || true
         cp -vrf $SERVICE/activities/* ${D}${webos_sysconfdir}/activities/ 2> /dev/null || true
         cp -vrf $SERVICE/filecache_types/* ${D}${webos_sysconfdir}/filecache_types/ 2> /dev/null || true
+        # The backup service calls only the services registered in /etc/palm/backup: without
+        # it, the accounts service's accountsChanged never ran after a restore, so the restored
+        # accounts' transports were never set up and Messaging saw none of them signed in.
+        cp -vrf $SERVICE/backup/* ${D}${webos_sysconfdir}/backup/ 2> /dev/null || true
         # Copy services and roles files
         cp -vrf $SERVICE/files/sysbus/*.api.json ${D}${webos_sysbus_apipermissionsdir} 2> /dev/null || true
         cp -vrf $SERVICE/files/sysbus/*.perm.json ${D}${webos_sysbus_permissionsdir} 2> /dev/null || true

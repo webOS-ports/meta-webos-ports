@@ -10,7 +10,7 @@ inherit webos_filesystem_paths
 
 PE = "4"
 PV = "0.1.0+git"
-SRCREV = "997bd45f99fdc550ec15be93fb43b0de70cb094a"
+SRCREV = "28730510f33fb61f165abcc3f08fdc64cfb058c3"
 
 WEBOS_REPO_NAME = "org.webosports.messaging"
 
@@ -33,6 +33,11 @@ do_install() {
 
     install -d ${D}${webos_sysconfdir}/activities
     cp -rv ${S}/configuration/activities/org.webosports.service.messaging ${D}${webos_sysconfdir}/activities/
+
+    # Registered with the backup service, which calls restoreFinished after a restore only
+    # for the services in /etc/palm/backup
+    install -d ${D}${webos_sysconfdir}/backup
+    install -m 0644 ${S}/configuration/backup/*.json ${D}${webos_sysconfdir}/backup/
 
     # Install the ACG configuration
     install -d ${D}${webos_sysbus_servicedir}
