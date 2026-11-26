@@ -110,6 +110,14 @@ SRC_URI += " \
 # connman off those two interfaces.
 SRC_URI += "file://0025-technology-leaving-offline-mode-must-not-depend-on-e.patch"
 
+# IPv6 hung on MediaTek phones: router advertisements on a data connection
+# oFono does not own (the VoLTE stack's IMS one, or a deactivated context's
+# interface left up) made it the IPv6 default route. connman-conf keeps
+# ccmni interfaces from taking default routes that way; this turns it on
+# for the active context's interface and off again when it disconnects.
+# With its unit tests, in unit/test-ofono.
+SRC_URI += "file://0026-ofono-take-IPv6-default-routes-only-on-an-active-con.patch"
+
 # See connman-vpn.service.d/luneos-caps.conf for why: upstream's
 # CapabilityBoundingSet on connman-vpn.service is missing CAP_SYS_ADMIN and
 # CAP_DAC_OVERRIDE, which the l2tp plugin's client-side pppd needs to open

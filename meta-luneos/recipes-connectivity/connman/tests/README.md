@@ -4,7 +4,7 @@ connman is upstream code with our patches on top, so the tests live in two
 places:
 
 - **Unit tests** are in connman itself, in `unit/`, added by patches
-  0021-0023 and 0025 next to upstream's `test-ippool` and `test-iptables`.
+  0021-0026 next to upstream's `test-ippool` and `test-iptables`.
   Each one covers one of our fixes and fails without it. They are
   `noinst_PROGRAMS`, so every bitbake build compiles and links them for
   the target.

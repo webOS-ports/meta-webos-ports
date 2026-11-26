@@ -1,0 +1,338 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 26 Nov 2026 18:26:57 +0100
+Subject: [PATCH] ofono: take IPv6 default routes only on an active context's
+ interface
+
+IPv6 connections hung on two MediaTek phones while IPv4 worked, so
+anything trying IPv6 first (libpurple's IRC, for one) never connected.
+The IPv6 default route pointed into a data connection oFono does not
+own, which carries no internet traffic:
+
+- Q25 (Vodafone NL): MediaTek's VoLTE stack had its IMS
+  connection on ccmni0, with the internet context on ccmni1 and
+  IPv4 only. ccmni0 took the network's router advertisements and with
+  them the only IPv6 default route.
+- Radon (MT6877, Lebara NL): the internet context had moved from ccmni1 to
+  ccmni0, and ccmni1 stayed up with its address and default route,
+  hours of lifetime left.
+
+The kernel takes default routes from router advertisements on every
+interface (accept_ra_defrtr), and nothing on LuneOS keeps them off the
+interfaces that are not the internet. Android's netd does.
+connman-conf now turns accept_ra_defrtr off for ccmni*; here set it on
+for the interface of a context that is connected, and off again once
+it is disconnected. A default route the interface already has would
+stay until its lifetime ran out, so a disconnected context's interface
+also drops its IPv6 state; its addresses come back from the next
+router advertisement, the default route does not.
+
+unit/test-ofono checks the order and values written on connect and on
+disconnect, that nothing is written without an interface, and writes
+the setting to a file the way the kernel's is written.
+
+Seen on the Q25 and the Radon, IPv6 to irc.libera.chat, Google and
+Cloudflare hanging in SYN-SENT; with the radon's stale default route
+removed, IPv6 connections fail at once and fall back to IPv4.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ plugins/ofono.c   |  85 +++++++++++++++++++++++++++++
+ unit/test-ofono.c | 132 ++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 217 insertions(+)
+
+diff --git a/plugins/ofono.c b/plugins/ofono.c
+index 7320241..1affbf6 100644
+--- a/plugins/ofono.c
++++ b/plugins/ofono.c
+@@ -26,6 +26,7 @@
+ #endif
+ 
+ #include <errno.h>
++#include <stdio.h>
+ #include <stdlib.h>
+ 
+ #include <gdbus.h>
+@@ -286,6 +287,86 @@ static void network_context_unref(struct network_context *context)
+ 	g_free(context);
+ }
+ 
++/*
++ * A MediaTek modem has data connections up that oFono does not own: the IMS
++ * one MediaTek's VoLTE stack sets up, and the interface of a context that
++ * was deactivated but left up. The kernel takes router advertisements on
++ * every interface, so their default routes made the IPv6 default point into
++ * connections that carry no internet traffic, and IPv6 connections hung
++ * there instead of failing over to IPv4. connman-conf turns default routes
++ * from router advertisements off for these interfaces; take them on the
++ * interface of an active context only.
++ */
++static const char *ipv6_conf_dir = "/proc/sys/net/ipv6/conf";
++
++static int write_ipv6_conf_file(const char *ifname, const char *key,
++				const char *value)
++{
++	char *path;
++	FILE *f;
++	int err = 0;
++
++	path = g_strdup_printf("%s/%s/%s", ipv6_conf_dir, ifname, key);
++
++	f = fopen(path, "r+");
++	if (!f) {
++		err = -errno;
++		goto out;
++	}
++
++	if (fprintf(f, "%s", value) < 0)
++		err = -EIO;
++
++	if (fclose(f) != 0 && !err)
++		err = -errno;
++
++out:
++	g_free(path);
++	return err;
++}
++
++static int (*write_ipv6_conf)(const char *ifname, const char *key,
++				const char *value) = write_ipv6_conf_file;
++
++static void set_ipv6_conf(const char *ifname, const char *key,
++				const char *value)
++{
++	int err;
++
++	err = write_ipv6_conf(ifname, key, value);
++	if (err < 0)
++		DBG("%s %s=%s: %s", ifname, key, value, strerror(-err));
++}
++
++static void accept_ra_default_route(int index, bool accept)
++{
++	char *ifname;
++
++	if (index < 0)
++		return;
++
++	ifname = connman_inet_ifname(index);
++	if (!ifname)
++		return;
++
++	DBG("%s %s", ifname, accept ? "accept" : "ignore");
++
++	set_ipv6_conf(ifname, "accept_ra_defrtr", accept ? "1" : "0");
++
++	/*
++	 * A default route the interface already has stays until its
++	 * lifetime runs out, hours on a mobile network. Dropping the
++	 * interface's IPv6 state removes it; addresses come back from the
++	 * next router advertisement, without the default route.
++	 */
++	if (!accept) {
++		set_ipv6_conf(ifname, "disable_ipv6", "1");
++		set_ipv6_conf(ifname, "disable_ipv6", "0");
++	}
++
++	g_free(ifname);
++}
++
+ static void set_connected(struct modem_data *modem,
+ 			struct network_context *context)
+ {
+@@ -320,6 +401,8 @@ static void set_connected(struct modem_data *modem,
+ 	 */
+ 	connman_inet_ifup(index);
+ 
++	accept_ra_default_route(index, true);
++
+ 	service = connman_service_lookup_from_network(context->network);
+ 	if (!service)
+ 		return;
+@@ -376,6 +459,8 @@ static void set_disconnected(struct network_context *context)
+ 	if (context->network)
+ 		connman_network_set_connected(context->network, false);
+ 
++	accept_ra_default_route(context->index, false);
++
+ 	g_free(context->ipv4_nameservers);
+ 	context->ipv4_nameservers = NULL;
+ 	if (context->ipv4_method != CONNMAN_IPCONFIG_METHOD_OFF)
+diff --git a/unit/test-ofono.c b/unit/test-ofono.c
+index f2ea163..e00b20e 100644
+--- a/unit/test-ofono.c
++++ b/unit/test-ofono.c
+@@ -37,6 +37,8 @@
+ #include <config.h>
+ #endif
+ 
++#include <glib/gstdio.h>
++
+ #include "../plugins/ofono.c"
+ 
+ /* What the stubs saw, in call order */
+@@ -49,6 +51,20 @@ static int connected_order;
+ static bool connected_value;
+ static bool have_service;
+ 
++/* The IPv6 settings written, as "ifname key=value", in order */
++static GPtrArray *conf_writes;
++static int conf_order;
++
++static int record_ipv6_conf(const char *ifname, const char *key,
++				const char *value)
++{
++	g_ptr_array_add(conf_writes,
++			g_strdup_printf("%s %s=%s", ifname, key, value));
++	if (!conf_order)
++		conf_order = ++calls;
++	return 0;
++}
++
+ static void reset(void)
+ {
+ 	calls = 0;
+@@ -58,6 +74,22 @@ static void reset(void)
+ 	connected_order = 0;
+ 	connected_value = false;
+ 	have_service = true;
++
++	if (conf_writes)
++		g_ptr_array_free(conf_writes, TRUE);
++	conf_writes = g_ptr_array_new_with_free_func(g_free);
++	conf_order = 0;
++	write_ipv6_conf = record_ipv6_conf;
++}
++
++static void assert_writes(const char *const *expected, unsigned int n)
++{
++	unsigned int i;
++
++	g_assert_cmpuint(conf_writes->len, ==, n);
++	for (i = 0; i < n; i++)
++		g_assert_cmpstr(g_ptr_array_index(conf_writes, i), ==,
++				expected[i]);
+ }
+ 
+ /* Stand-ins for the core */
+@@ -76,6 +108,11 @@ int connman_inet_ifup(int index)
+ int connman_inet_ifdown(int index) { return 0; }
+ int connman_inet_ifindex(const char *name) { return -1; }
+ 
++char *connman_inet_ifname(int index)
++{
++	return index < 0 ? NULL : g_strdup_printf("ccmni%d", index);
++}
++
+ struct connman_service *connman_service_lookup_from_network(
+ 				struct connman_network *network)
+ {
+@@ -272,6 +309,92 @@ static void test_no_interface(void)
+ 	free_context(context);
+ }
+ 
++/* An active context takes default routes from router advertisements */
++static void test_connected_accepts_ra_default_route(void)
++{
++	struct network_context *context = active_context(15);
++	const char *const expected[] = {
++		"ccmni15 accept_ra_defrtr=1"
++	};
++
++	reset();
++	set_connected(&modem, context);
++
++	assert_writes(expected, G_N_ELEMENTS(expected));
++	g_assert_cmpint(conf_order, <, connected_order);
++
++	free_context(context);
++}
++
++/*
++ * A deactivated context's interface no longer takes them, and drops the
++ * default route it has, once connman let go of the network
++ */
++static void test_disconnected_drops_ra_default_route(void)
++{
++	struct network_context *context = active_context(14);
++	const char *const expected[] = {
++		"ccmni14 accept_ra_defrtr=0",
++		"ccmni14 disable_ipv6=1",
++		"ccmni14 disable_ipv6=0"
++	};
++
++	reset();
++	set_disconnected(context);
++
++	assert_writes(expected, G_N_ELEMENTS(expected));
++	g_assert_false(connected_value);
++	g_assert_cmpint(connected_order, <, conf_order);
++
++	free_context(context);
++}
++
++/* Without an interface there is no setting to write */
++static void test_no_interface_no_ipv6_conf(void)
++{
++	struct network_context *context = active_context(-1);
++
++	reset();
++	set_connected(&modem, context);
++	set_disconnected(context);
++
++	assert_writes(NULL, 0);
++
++	free_context(context);
++}
++
++/* The setting goes to <dir>/<ifname>/<key>, an existing file */
++static void test_write_ipv6_conf_file(void)
++{
++	char *dir, *ifdir, *path, *contents = NULL;
++
++	dir = g_dir_make_tmp("test-ofono-XXXXXX", NULL);
++	g_assert_nonnull(dir);
++	ifdir = g_build_filename(dir, "ccmni1", NULL);
++	g_assert_cmpint(g_mkdir(ifdir, 0700), ==, 0);
++	path = g_build_filename(ifdir, "accept_ra_defrtr", NULL);
++	g_assert_true(g_file_set_contents(path, "1\n", -1, NULL));
++
++	ipv6_conf_dir = dir;
++	g_assert_cmpint(write_ipv6_conf_file("ccmni1", "accept_ra_defrtr",
++						"0"), ==, 0);
++	g_assert_true(g_file_get_contents(path, &contents, NULL, NULL));
++	g_assert_cmpstr(contents, ==, "0\n");
++
++	/* An interface without IPv6 settings is an error, not a new file */
++	g_assert_cmpint(write_ipv6_conf_file("ccmni9", "accept_ra_defrtr",
++						"0"), ==, -ENOENT);
++	ipv6_conf_dir = "/proc/sys/net/ipv6/conf";
++
++	g_unlink(path);
++	g_rmdir(ifdir);
++	g_rmdir(dir);
++	g_free(contents);
++	g_free(path);
++	g_free(ifdir);
++	g_free(dir);
++}
++
+ int main(int argc, char *argv[])
+ {
+ 	g_test_init(&argc, &argv, NULL);
+@@ -283,5 +406,14 @@ int main(int argc, char *argv[])
+ 	g_test_add_func("/ofono/set-connected/no-interface",
+ 				test_no_interface);
+ 
++	g_test_add_func("/ofono/ipv6/connected-accepts-ra-default-route",
++				test_connected_accepts_ra_default_route);
++	g_test_add_func("/ofono/ipv6/disconnected-drops-ra-default-route",
++				test_disconnected_drops_ra_default_route);
++	g_test_add_func("/ofono/ipv6/no-interface",
++				test_no_interface_no_ipv6_conf);
++	g_test_add_func("/ofono/ipv6/write-conf-file",
++				test_write_ipv6_conf_file);
++
+ 	return g_test_run();
+ }
