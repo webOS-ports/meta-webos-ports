@@ -1,0 +1,226 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [sensord] Handle local socket errors with Qt 5.15 and Qt 6
+
+SocketHandler connected each client socket's error signal by name, as
+error(QLocalSocket::LocalSocketError). Qt 5.15 renamed that signal to
+errorOccurred() and Qt 6 removed the old name, so built against Qt 6 the
+connect only printed
+
+  QObject::connect: No such signal QLocalSocket::error(QLocalSocket::LocalSocketError)
+
+on every new client and socket errors never reached socketError().
+
+Connect to errorOccurred() by pointer from Qt 5.15 on, so a missing signal
+is a build error rather than a runtime warning, and keep the connect by
+name for older Qt, where it still works and nothing changes.
+
+Add a test that registers a session over a local socket the way the
+client library does, drops the client and checks that the error reaches
+socketError(). Without this change it fails on Qt 6.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/sailfishos/sensorfw/pull/38]
+---
+ core/sockethandler.cpp                    | 12 ++++
+ rpm/sensorfw-qt5.spec                     |  1 +
+ tests/sockethandler/sockethandler.pro     | 21 ++++++
+ tests/sockethandler/sockethandlertest.cpp | 86 +++++++++++++++++++++++
+ tests/tests.pro                           |  3 +-
+ tests/tests.xml.in                        |  3 +
+ 6 files changed, 125 insertions(+), 1 deletion(-)
+ create mode 100644 tests/sockethandler/sockethandler.pro
+ create mode 100644 tests/sockethandler/sockethandlertest.cpp
+
+diff --git a/core/sockethandler.cpp b/core/sockethandler.cpp
+index 96c841a..7bc65aa 100644
+--- a/core/sockethandler.cpp
++++ b/core/sockethandler.cpp
+@@ -259,8 +259,12 @@ bool SocketHandler::removeSession(int sessionId)
+     if (socket) {
+         disconnect(socket, SIGNAL(readyRead()), this, SLOT(socketReadable()));
+         disconnect(socket, SIGNAL(disconnected()), this, SLOT(socketDisconnected()));
++#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
++        disconnect(socket, &QLocalSocket::errorOccurred, this, &SocketHandler::socketError);
++#else
+         disconnect(socket, SIGNAL(error(QLocalSocket::LocalSocketError)),
+                    this, SLOT(socketError(QLocalSocket::LocalSocketError)));
++#endif
+         socket->deleteLater();
+     }
+ 
+@@ -287,8 +291,16 @@ void SocketHandler::newConnection()
+         QLocalSocket* socket = m_server->nextPendingConnection();
+         connect(socket, SIGNAL(readyRead()), this, SLOT(socketReadable()));
+         connect(socket, SIGNAL(disconnected()), this, SLOT(socketDisconnected()));
++        // QLocalSocket::error(LocalSocketError) became errorOccurred() in
++        // Qt 5.15 and is gone in Qt 6, where connecting to it by name only
++        // printed a warning and socket errors went unhandled. Connect by
++        // pointer there, so a missing signal fails the build instead.
++#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
++        connect(socket, &QLocalSocket::errorOccurred, this, &SocketHandler::socketError);
++#else
+         connect(socket, SIGNAL(error(QLocalSocket::LocalSocketError)),
+                 this, SLOT(socketError(QLocalSocket::LocalSocketError)));
++#endif
+ 
+         // Initialize socket
+         socket->write("\n", 1);
+diff --git a/rpm/sensorfw-qt5.spec b/rpm/sensorfw-qt5.spec
+index 4904269..aec9afc 100644
+--- a/rpm/sensorfw-qt5.spec
++++ b/rpm/sensorfw-qt5.spec
+@@ -169,6 +169,7 @@ systemctl daemon-reload || :
+ %attr(755,root,root)%{_bindir}/sensorfilters-test
+ %attr(755,root,root)%{_bindir}/sensormetadata-test
+ %attr(755,root,root)%{_bindir}/sensorpowermanagement-test
++%attr(755,root,root)%{_bindir}/sensorsockethandler-test
+ %attr(755,root,root)%{_bindir}/sensorstandbyoverride-test
+ %attr(755,root,root)%{_bindir}/sensortestapp
+ 
+diff --git a/tests/sockethandler/sockethandler.pro b/tests/sockethandler/sockethandler.pro
+new file mode 100644
+index 0000000..ef789f3
+--- /dev/null
++++ b/tests/sockethandler/sockethandler.pro
+@@ -0,0 +1,21 @@
++QT += network
++QT -= gui
++
++include(../common-install.pri)
++
++TEMPLATE = app
++TARGET = sensorsockethandler-test
++
++CONFIG += testcase
++
++SOURCES += sockethandlertest.cpp
++
++INCLUDEPATH += ../../include \
++    ../../core \
++    ../../datatypes \
++    ../..
++
++QMAKE_LIBDIR_FLAGS += -L../../builddir/datatypes -L../../datatypes/
++QMAKE_LIBDIR_FLAGS += -L../../builddir/core -L../../core/
++
++include(../../common.pri)
+diff --git a/tests/sockethandler/sockethandlertest.cpp b/tests/sockethandler/sockethandlertest.cpp
+new file mode 100644
+index 0000000..8bd2f19
+--- /dev/null
++++ b/tests/sockethandler/sockethandlertest.cpp
+@@ -0,0 +1,86 @@
++/**
++   @file sockethandlertest.cpp
++   @brief Automatic tests for SocketHandler
++   <p>
++   Copyright (C) 2026 Herman van Hazendonk
++
++   This file is part of Sensord.
++
++   Sensord is free software; you can redistribute it and/or modify
++   it under the terms of the GNU Lesser General Public License
++   version 2.1 as published by the Free Software Foundation.
++
++   Sensord is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++   Lesser General Public License for more details.
++
++   You should have received a copy of the GNU Lesser General Public
++   License along with Sensord.  If not, see <http://www.gnu.org/licenses/>.
++   </p>
++*/
++
++#include <QtTest>
++#include <QLocalSocket>
++#include <QRegularExpression>
++#include <QSignalSpy>
++#include <QTemporaryDir>
++
++#include "sockethandler.h"
++
++class SocketHandlerTest : public QObject
++{
++    Q_OBJECT
++
++private slots:
++    void socketErrorIsHandled();
++};
++
++/*
++ * A client that goes away must reach SocketHandler::socketError() through
++ * the local socket's error signal, on every Qt version. The signal was
++ * renamed to errorOccurred() in Qt 5.15 and the old name is gone in Qt 6,
++ * where a connect by name only printed a warning and the error was never
++ * handled.
++ */
++void SocketHandlerTest::socketErrorIsHandled()
++{
++    const QTemporaryDir dir;
++    QVERIFY(dir.isValid());
++    const QString name = dir.path() + QStringLiteral("/sensord.sock");
++
++    SocketHandler handler;
++    QVERIFY(handler.listen(name));
++    QSignalSpy lost(&handler, SIGNAL(lostSession(int)));
++    // As SensorManager does: a lost session is released, which removes it
++    // from the handler and disconnects its socket.
++    connect(&handler, &SocketHandler::lostSession,
++            &handler, [&handler](int id) { handler.removeSession(id); });
++
++    // The handshake the sensorfw client library does: the server greets the
++    // new connection with a newline, the client answers with its session id.
++    const int sessionId = 7;
++    QLocalSocket client;
++    client.connectToServer(name);
++    QVERIFY(client.waitForConnected(5000));
++    QTRY_VERIFY_WITH_TIMEOUT(client.bytesAvailable() > 0, 5000);
++    QCOMPARE(client.read(1), QByteArray("\n"));
++    QCOMPARE(client.write(reinterpret_cast<const char *>(&sessionId), sizeof(sessionId)),
++             qint64(sizeof(sessionId)));
++    QVERIFY(client.waitForBytesWritten(5000));
++    QTRY_VERIFY_WITH_TIMEOUT(handler.getSocketFd(sessionId) != 0, 5000);
++
++    // Only socketError() logs this; the server end of the connection reports
++    // QLocalSocket::PeerClosedError once the client has gone.
++    QTest::ignoreMessage(QtWarningMsg,
++                         QRegularExpression(QStringLiteral("^\\[SocketHandler\\]: Socket error: ")));
++    client.close();
++
++    QTRY_VERIFY_WITH_TIMEOUT(lost.count() > 0, 5000);
++    QCOMPARE(lost.first().first().toInt(), sessionId);
++    QTRY_COMPARE_WITH_TIMEOUT(handler.getSocketFd(sessionId), 0, 5000);
++    QCOMPARE(lost.count(), 1);
++}
++
++QTEST_MAIN(SocketHandlerTest)
++#include "sockethandlertest.moc"
+diff --git a/tests/tests.pro b/tests/tests.pro
+index 1690f5b..3544e9d 100644
+--- a/tests/tests.pro
++++ b/tests/tests.pro
+@@ -10,7 +10,8 @@ SUBDIRS = filters\
+           benchmark \
+           testutils \
+           deadclient \
+-          metadata 
++          metadata \
++          sockethandler
+ 
+ #disabled tests due to requirement of mcetool
+ contains(CONFIG,mce) {
+diff --git a/tests/tests.xml.in b/tests/tests.xml.in
+index 2c391a6..8fc7df7 100644
+--- a/tests/tests.xml.in
++++ b/tests/tests.xml.in
+@@ -10,6 +10,9 @@
+       <case name="Sensord_Dataflow" level="Component" type="Functional" description="Sensord dataflow test" timeout="15" subfeature="Sensor Framework">
+         <step expected_result="0">/usr/bin/sensordataflow-test</step>
+       </case>
++      <case name="Sensord_SocketHandler" level="Component" type="Functional" description="Sensord socket handler test" timeout="15" subfeature="Sensor Framework">
++        <step expected_result="0">/usr/bin/sensorsockethandler-test</step>
++      </case>
+       <case name="Sensord_Adaptors" level="Component" type="Functional" description="Unit test cases for sensor adaptors" timeout="15" subfeature="Sensor Framework">
+         <step expected_result="0">/usr/bin/sensoradaptors-test</step>
+       </case>
