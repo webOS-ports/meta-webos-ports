@@ -10,6 +10,7 @@ SRC_URI += " \
     file://0005-Add-dbus-policy-for-Bluez4.patch \
     file://0006-alsa-ucm-Check-UCM-verb.patch \
     file://0007-alsa-ucm-Replace-port-device-UCM-context-assertion.patch \
+    file://0008-database-simple-do-not-abort-on-a-corrupt-database-file.patch \
 "
 
 do_install:append() {
@@ -57,7 +58,7 @@ do_install:append() {
 # superseded component and collides on the next restage, taking out every
 # pulsecore consumer with the FileExistsError described above. Bumping PR gives
 # those trees a clean re-stage; it is a no-op for a fresh build.
-PR = "r1"
+PR = "r3"
 
 inherit systemd
 
@@ -119,6 +120,11 @@ GROUPMEMS_PARAM:pulseaudio-server = " \
 # switches; without the group it logs "Permission denied" for every node and never sees a
 # headphone plugged in. The droid module recipes asked for this with "-G input", which groupmems
 # does not know, and they do not inherit useradd, so it never took effect.
+#
+# The MediaTek audio HAL runs inside PulseAudio here and hands the modem its speech parameters
+# through /dev/usip, which ueventd gives to media. Without the group a call has no speech
+# parameters ("open USIP Fail").
 GROUPMEMS_PARAM:pulseaudio-server:append:halium = " \
     -a pulse -g input; \
+    -a pulse -g media; \
 "

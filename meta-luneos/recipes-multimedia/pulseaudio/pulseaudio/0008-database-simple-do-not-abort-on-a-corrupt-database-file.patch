@@ -1,0 +1,123 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] database-simple: do not abort on a corrupt database file
+
+read_data() took each record's 32-bit length from the file and passed it
+straight to pa_xmalloc0(), which asserts on anything over 96 MiB. A
+damaged or foreign file therefore aborted the whole daemon while a
+module (module-stream-restore, module-device-restore, module-card-restore)
+opened its database, and it aborted again on every restart, because the
+file never changes:
+
+  Assertion 'size < (1024*1024*96)' failed at pulse/xmalloc.c:72,
+  function pa_xmalloc0(). Aborting.
+
+Seen on a LuneOS phone whose stream-volumes.simple held an ini-style text
+file. "[Set" read as a length of 0x7465535b, and pulseaudio crashed on
+every start until the file was removed by hand.
+
+Check the length against what is left of the file (from fstat()) before
+allocating. A record that does not fit means the file is corrupt: log
+it, keep the complete entries read before it, and stop. The database
+then opens, and the next sync replaces the bad file.
+
+Also free the key of an entry whose data never came. read_data() has
+already reset d on failure, so the old "field == FIELD_DATA && d" check
+never freed anything and the key leaked.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/pulsecore/database-simple.c | 36 +++++++++++++++++++++++++++++----
+ 1 file changed, 32 insertions(+), 4 deletions(-)
+
+diff --git a/src/pulsecore/database-simple.c b/src/pulsecore/database-simple.c
+index 96af8e0..4687b60 100644
+--- a/src/pulsecore/database-simple.c
++++ b/src/pulsecore/database-simple.c
+@@ -24,6 +24,7 @@
+ 
+ #include <errno.h>
+ #include <sys/types.h>
++#include <sys/stat.h>
+ #include <unistd.h>
+ #include <stdio.h>
+ 
+@@ -131,9 +132,15 @@ static int read_uint(FILE *f, uint32_t *res) {
+     return items;
+ }
+ 
+-static int read_data(FILE *f, void **data, ssize_t *length) {
++/* Returns 0 for a record, -1 at the end of the file or on a read error, and
++ * -2 when the record claims more bytes than the file has left (file_size is
++ * the size of the file, from fstat()). The length is not trusted before that
++ * check: in a damaged file it can be anything up to 4 GiB, and pa_xmalloc0()
++ * aborts the whole daemon on anything above MAX_ALLOC_SIZE. */
++static int read_data(FILE *f, off_t file_size, void **data, ssize_t *length) {
+     size_t items = 0;
+     uint32_t data_len = 0;
++    off_t pos;
+ 
+     pa_assert(f);
+ 
+@@ -144,6 +151,13 @@ static int read_data(FILE *f, void **data, ssize_t *length) {
+         return -1;
+ 
+     if (data_len > 0) {
++        pos = ftello(f);
++        if (pos < 0)
++            return -1;
++
++        if (pos > file_size || (uint64_t) data_len > (uint64_t) (file_size - pos))
++            return -2;
++
+         *data = pa_xmalloc0(data_len);
+         items = fread(*data, data_len, 1, f);
+ 
+@@ -175,16 +189,23 @@ static int fill_data(simple_data *db, FILE *f) {
+     ssize_t l = 0;
+     bool append = false;
+     enum { FIELD_KEY = 0, FIELD_DATA } field = FIELD_KEY;
++    struct stat st;
++    int r;
+ 
+     pa_assert(db);
+     pa_assert(db->map);
+ 
++    if (fstat(fileno(f), &st) < 0) {
++        pa_log_warn("cannot stat %s: %s", db->filename, pa_cstrerror(errno));
++        return 0;
++    }
++
+     errno = 0;
+ 
+     key.size = 0;
+     key.data = NULL;
+ 
+-    while (!read_data(f, &d, &l)) {
++    while (!(r = read_data(f, st.st_size, &d, &l))) {
+ 
+         switch (field) {
+             case FIELD_KEY:
+@@ -211,13 +232,20 @@ static int fill_data(simple_data *db, FILE *f) {
+         }
+     }
+ 
++    /* The entries read so far are complete; keep them. The next sync writes
++     * a good file over this one. */
++    if (r == -2)
++        pa_log_warn("%s is corrupt: a record is longer than the rest of the file. Keeping the %u entries before it.",
++                    db->filename, pa_hashmap_size(db->map));
++
+     if (ferror(f)) {
+         pa_log_warn("read error. %s", pa_cstrerror(errno));
+         pa_database_clear((pa_database*)db);
+     }
+ 
+-    if (field == FIELD_DATA && d)
+-        pa_xfree(d);
++    /* A key whose data never came. read_data() has already reset d. */
++    if (field == FIELD_DATA)
++        pa_xfree(key.data);
+ 
+     return pa_hashmap_size(db->map);
+ }

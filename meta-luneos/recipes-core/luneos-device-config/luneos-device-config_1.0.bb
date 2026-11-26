@@ -1,5 +1,5 @@
 DESCRIPTION = "Derive device configuration at runtime so one rootfs boots on any device"
-PR = "r24"
+PR = "r30"
 
 LICENSE = "Apache-2.0"
 LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7cacdbeed46a0096b10"
@@ -36,6 +36,7 @@ SRC_URI = " \
     file://hardware-keys.json \
     file://elf-weaken-imports \
     file://pulseaudio-stock-libcgrouprc.conf \
+    file://pulseaudio-vendor-libtinyxml2.conf \
 "
 
 # Everything in SRC_URI is a local file, so nothing lands in the default
@@ -54,6 +55,8 @@ do_install() {
     install -d ${D}${systemd_unitdir}/system/pulseaudio.service.d
     install -m 0644 ${UNPACKDIR}/pulseaudio-stock-libcgrouprc.conf \
         ${D}${systemd_unitdir}/system/pulseaudio.service.d/50-luneos-stock-libcgrouprc.conf
+    install -m 0644 ${UNPACKDIR}/pulseaudio-vendor-libtinyxml2.conf \
+        ${D}${systemd_unitdir}/system/pulseaudio.service.d/50-luneos-vendor-libtinyxml2.conf
 
     install -d ${D}${datadir}/luneos/adaptations
     cp -r ${UNPACKDIR}/adaptations/* ${D}${datadir}/luneos/adaptations/

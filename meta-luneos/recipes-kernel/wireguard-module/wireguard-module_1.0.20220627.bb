@@ -20,6 +20,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 SRC_URI = "git://github.com/WireGuard/wireguard-linux-compat.git;branch=master;protocol=https;destsuffix=${BP} \
            file://0001-compat-let-the-build-say-the-kernel-already-has-skb_m.patch \
            file://0002-compat-let-the-build-say-the-kernel-already-has-tota.patch \
+           file://0003-compat-skip-__kernel_timespec-when-the-kernel-already.patch \
 "
 SRCREV = "18fbcd68a35a892527345dc5679d0b2d860ee004"
 
