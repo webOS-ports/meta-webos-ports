@@ -59,18 +59,18 @@ Upstream-Status: Inappropriate [webOS specific]
  5 files changed, 578 insertions(+), 62 deletions(-)
 
 diff --git a/libteams.c b/libteams.c
-index 73613e7..e022cf4 100644
+index ef8d407..14f34bb 100644
 --- a/libteams.c
 +++ b/libteams.c
-@@ -492,6 +492,7 @@ static gulong conversation_updated_signal = 0;
- static gulong conversation_updated_title_signal = 0;
+@@ -494,6 +494,7 @@ static gulong conversation_updated_title_signal = 0;
  static gulong chat_conversation_typing_signal = 0;
  static gulong im_conversation_created_signal = 0;
+ static gulong im_conversation_deleting_signal = 0;
 +static gulong send_reaction_signal = 0;
  
  static void
  teams_conversation_updated_title(PurpleConversation *conv, PurpleConversationUpdateType type)
-@@ -669,6 +670,7 @@ teams_login(PurpleAccount *account)
+@@ -719,6 +720,7 @@ teams_login(PurpleAccount *account)
  	sa->cookie_jar = purple_http_cookie_jar_new();
  	sa->sent_messages_hash = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
  	sa->received_messages_hash = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
@@ -78,9 +78,9 @@ index 73613e7..e022cf4 100644
  	sa->buddy_to_chat_lookup = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
  	sa->chat_to_buddy_lookup = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
  	sa->calendar_reminder_timeouts = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
-@@ -743,6 +745,17 @@ teams_login(PurpleAccount *account)
- 	if (!im_conversation_created_signal) {
- 		im_conversation_created_signal = purple_signal_connect(purple_conversations_get_handle(), "conversation-created", purple_connection_get_protocol(pc), PURPLE_CALLBACK(teams_im_conversation_created), NULL);
+@@ -788,6 +790,17 @@ teams_login(PurpleAccount *account)
+ 	if (!im_conversation_deleting_signal) {
+ 		im_conversation_deleting_signal = purple_signal_connect(purple_conversations_get_handle(), "deleting-conversation", purple_connection_get_protocol(pc), PURPLE_CALLBACK(teams_im_conversation_deleting), NULL);
  	}
 +	// webOS reactions (SEND): connect once, process-wide, to the transport's send-reaction
 +	// signal. It fires for every account; teams_send_reaction_signal_cb filters to ours. The
@@ -96,7 +96,7 @@ index 73613e7..e022cf4 100644
  	// Setup callbacks for the preferences.
  	// handle = purple_proxy_get_handle();
  	// purple_prefs_connect_callback(handle, "/purple/proxy/type", proxy_pref_cb, NULL);
-@@ -836,6 +849,7 @@ teams_close(PurpleConnection *pc)
+@@ -881,6 +894,7 @@ teams_close(PurpleConnection *pc)
  	
  	g_hash_table_destroy(sa->sent_messages_hash);
  	g_hash_table_destroy(sa->received_messages_hash);
@@ -105,7 +105,7 @@ index 73613e7..e022cf4 100644
  	g_hash_table_destroy(sa->chat_to_buddy_lookup);
  	g_hash_table_destroy(sa->calendar_reminder_timeouts);
 diff --git a/libteams.h b/libteams.h
-index fe64956..de675fe 100644
+index f436d06..0e714ab 100644
 --- a/libteams.h
 +++ b/libteams.h
 @@ -142,6 +142,15 @@
@@ -150,7 +150,7 @@ index 7be6ab3..5379260 100644
  			purple_http_request_header_set(request, "Content-Type", "application/json"); // hax
  		} else {
 diff --git a/teams_messages.c b/teams_messages.c
-index e1a9e89..f1e8236 100644
+index ddb4eaf..d7bcfc5 100644
 --- a/teams_messages.c
 +++ b/teams_messages.c
 @@ -463,6 +463,314 @@ teams_parse_media_call_recording_content(const gchar *content)
@@ -468,9 +468,33 @@ index e1a9e89..f1e8236 100644
  static void
  process_message_resource(TeamsAccount *sa, JsonObject *resource)
  {
-@@ -494,7 +802,24 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
- 		clientmessageid = json_object_get_string_member(resource, "clientmessageid");
- 	
+@@ -500,6 +808,7 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+ 	}
+ 	if (json_object_has_member(resource, "properties")) {
+ 		properties = json_object_get_object_member(resource, "properties");
++
+ 		if (properties != NULL && json_object_has_member(properties, "edittime")) {
+ 			skypeeditedid = json_object_get_string_member(properties, "edittime");
+ 		}
+@@ -573,10 +882,40 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+ 		}
+ 	}
+ 
++	/* webOS reactions (trouter real-time): a live reaction arrives as a "reactionInChat"
++	 * activity on the notifications stream, with an EMPTY content body. Emit it as a reaction
++	 * and STOP - otherwise it falls through as a blank Text message (all we did before was
++	 * stash its msg-id). The offline-history poll separately carries properties.emotions[]. */
++	if (properties != NULL && json_object_has_member(properties, "activity")) {
++		JsonObject *activity = json_object_get_object_member(properties, "activity");
++		if (purple_strequal(json_object_get_string_member(activity, "activityType"), "reactionInChat")) {
++			teams_process_reaction_activity(sa, activity);
++			g_strfreev(messagetype_parts);
++			return;
++		}
++	}
++
+ 	/* After the dedup above, so the echo of a message we sent has its key recorded too and a
+ 	 * later poll that fetches it again drops it there. */
  	if (clientmessageid && *clientmessageid && g_hash_table_remove(sa->sent_messages_hash, clientmessageid)) {
 -		// We sent this message from here already
 +		// We sent this message from here already.
@@ -494,28 +518,7 @@ index e1a9e89..f1e8236 100644
  		g_strfreev(messagetype_parts);
  		return;
  	}
-@@ -547,6 +872,20 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
- 	}
- 	if (json_object_has_member(resource, "properties")) {
- 		properties = json_object_get_object_member(resource, "properties");
-+
-+		/* webOS reactions (trouter real-time): a live reaction arrives as a "reactionInChat"
-+		 * activity on the notifications stream, with an EMPTY content body. Emit it as a reaction
-+		 * and STOP - otherwise it falls through as a blank Text message (all we did before was
-+		 * stash its msg-id). The offline-history poll separately carries properties.emotions[]. */
-+		if (json_object_has_member(properties, "activity")) {
-+			JsonObject *activity = json_object_get_object_member(properties, "activity");
-+			if (purple_strequal(json_object_get_string_member(activity, "activityType"), "reactionInChat")) {
-+				teams_process_reaction_activity(sa, activity);
-+				g_strfreev(messagetype_parts);
-+				return;
-+			}
-+		}
-+
- 		if (json_object_has_member(properties, "edittime")) {
- 			skypeeditedid = json_object_get_string_member(properties, "edittime");
- 		}
-@@ -684,9 +1023,14 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+@@ -718,9 +1057,14 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
  		GString *chat_last_timestamp = make_last_timestamp_setting(convname);
  		purple_account_set_int(sa->account, chat_last_timestamp->str, composetimestamp);
  		g_string_free(chat_last_timestamp, TRUE);
@@ -532,7 +535,7 @@ index e1a9e89..f1e8236 100644
  		if (g_str_equal(messagetype_parts[0], "Control") && (g_str_equal(messagetype_parts[1], "ClearTyping") || g_str_equal(messagetype_parts[1], "Typing"))) {
  			PurpleChatUserFlags cbflags;
  			PurpleChatUser *cb;
-@@ -833,29 +1177,16 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+@@ -867,29 +1211,16 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
  				}
  				
  				if (json_object_has_member(properties, "emotions")) {
@@ -570,7 +573,7 @@ index e1a9e89..f1e8236 100644
  				} else {
  					html = teams_process_files_in_properties(properties, &html);
  					html = teams_process_cards_in_properties(properties, &html);
-@@ -865,7 +1196,10 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+@@ -899,7 +1230,10 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
  			
  			if (html != NULL && *html) {
  				teams_find_incoming_img(sa, conv, composetimestamp, from, &html);
@@ -582,7 +585,7 @@ index e1a9e89..f1e8236 100644
  				purple_serv_got_chat_in(sa->pc, g_str_hash(chatname), from, (teams_is_user_self(sa, from) ? PURPLE_MESSAGE_SEND : PURPLE_MESSAGE_RECV) | (is_whisper ? PURPLE_MESSAGE_WHISPER : 0), html, composetimestamp);
  				
  				g_free(html);
-@@ -1180,36 +1514,16 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+@@ -1214,36 +1548,16 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
  				}
  				
  				if (json_object_has_member(properties, "emotions")) {
@@ -627,7 +630,7 @@ index e1a9e89..f1e8236 100644
  				} else {
  					html = teams_process_files_in_properties(properties, &html);
  					html = teams_process_cards_in_properties(properties, &html);
-@@ -1264,20 +1578,43 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
+@@ -1298,20 +1612,43 @@ process_message_resource(TeamsAccount *sa, JsonObject *resource)
  					imconv = purple_im_conversation_new(sa->account, modified_convbuddyname);
  				}
  				conv = PURPLE_CONVERSATION(imconv);
@@ -674,7 +677,7 @@ index e1a9e89..f1e8236 100644
  					purple_serv_got_im(sa->pc, from, html, PURPLE_MESSAGE_RECV | (is_whisper ? PURPLE_MESSAGE_WHISPER : 0), composetimestamp);
  				}
  				g_free(html);
-@@ -3079,8 +3416,112 @@ teams_send_message(TeamsAccount *sa, const gchar *convname, const gchar *message
+@@ -3129,8 +3466,112 @@ teams_send_message(TeamsAccount *sa, const gchar *convname, const gchar *message
  }
  
  
@@ -788,7 +791,7 @@ index e1a9e89..f1e8236 100644
  #if PURPLE_VERSION_CHECK(3, 0, 0)
  PurpleMessage *msg)
  {
-@@ -3104,8 +3545,26 @@ const gchar *message, PurpleMessageFlags flags)
+@@ -3154,8 +3595,26 @@ const gchar *message, PurpleMessageFlags flags)
  			return -1;
  		}
  
@@ -816,7 +819,7 @@ index e1a9e89..f1e8236 100644
  	purple_serv_got_chat_in(pc, id, sa->username, PURPLE_MESSAGE_SEND, message, time(NULL));
  
  	return 1;
-@@ -3126,6 +3585,18 @@ const gchar *who, const gchar *message, PurpleMessageFlags flags)
+@@ -3176,6 +3635,18 @@ const gchar *who, const gchar *message, PurpleMessageFlags flags)
  	TeamsAccount *sa = purple_connection_get_protocol_data(pc);
  	const gchar *convname;
  
@@ -835,7 +838,7 @@ index e1a9e89..f1e8236 100644
  	if (teams_is_user_self(sa, who)) {
  		// Fake internal app for self-messages
  		who = "48:notes";
-@@ -3147,11 +3618,23 @@ const gchar *who, const gchar *message, PurpleMessageFlags flags)
+@@ -3197,11 +3668,23 @@ const gchar *who, const gchar *message, PurpleMessageFlags flags)
  
  	if (!convname) {
  		teams_initiate_chat(sa, who, TRUE, message);

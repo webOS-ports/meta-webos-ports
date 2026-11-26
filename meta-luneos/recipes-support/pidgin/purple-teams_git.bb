@@ -4,18 +4,16 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=30441c91ba0022ea994b5dae832bd063"
 
 require purple-connectors.inc
 
-# The source is the fork branch behind upstream PR #99 (https://github.com/EionRobb/purple-teams/pull/99):
-# #99's head (3905f49: #85 personal/consumer accounts, the fix PRs #92-#97 and the opt-in calling
-# framework, TEAMS_CALLING, with its PurpleMedia engine) with EionRobb's master (76d8b3a, which
-# has #98's bodyless-response fix as #101) merged in. Go back to EionRobb's master once those are
-# merged. One feature per patch: 0001 is the history dedup meant for upstream; 0002-0005 adapt the
-# plug-in to imlibpurpletransport, the webOS Messaging app and, through #99's
-# teams_calling_set_*_cb hooks, the webOS Phone app; 0006 keeps the picture we send in a video call
-# upright as the phone turns (TURN to the media engine, teams-media from luneos-synergy-connectors).
-# Upstream's .c files and Makefile have CRLF line endings and so do the patches against them: keep
-# the .patch files byte-exact.
+# EionRobb's master as of 8673465, which merged #99: the opt-in calling framework, TEAMS_CALLING,
+# with its PurpleMedia engine, on #85's personal/consumer accounts and the fix PRs #92-#98; and #104,
+# which lets the Teams Android app see the video of a call we place. One feature per patch: 0001 is
+# the history dedup meant for upstream; 0002-0005 adapt the plug-in to imlibpurpletransport, the
+# webOS Messaging app and, through #99's teams_calling_set_*_cb hooks, the webOS Phone app; 0006
+# keeps the picture we send in a video call upright as the phone turns (TURN to the media engine,
+# teams-media from luneos-synergy-connectors). Upstream's .c files and Makefile have CRLF line
+# endings and so do the patches against them: keep the .patch files byte-exact.
 SRC_URI += " \
-    git://github.com/Herrie82/purple-teams.git;branch=herrie/teams-calling;protocol=https;name=upstream;destsuffix=purple-teams \
+    git://github.com/EionRobb/purple-teams.git;branch=master;protocol=https;name=upstream;destsuffix=purple-teams \
     file://0001-Drop-history-re-delivered-across-logins-behind-TEAMS.patch \
     file://0002-webOS-reactions-and-replies-through-the-transport.patch \
     file://0003-webOS-Show-received-media-inline-and-send-voice-note.patch \
@@ -23,8 +21,8 @@ SRC_URI += " \
     file://0005-webOS-Ring-and-drive-Teams-calls-from-the-webOS-Phon.patch \
     file://0006-webOS-Keep-the-picture-we-send-upright-as-the-phone-.patch \
 "
-PE = "3"
-SRCREV_upstream = "6948ed6842457a441a516e0a1d3754ee2b8acea0"
+PE = "4"
+SRCREV_upstream = "867346535ffb98d82249bb7f0bc287472a09f286"
 
 DEPENDS = "pidgin json-glib glib-2.0 zlib luna-service2"
 
@@ -47,9 +45,9 @@ CFLAGS:append = " -fvisibility=hidden"
 # teams_media (teams-media_git.bb), which the plug-in spawns from TEAMS_MEDIA_BIN.
 #
 # TEAMS_PURPLEMEDIA=0 leaves out the in-process engine on libpurple's PurpleMedia (Farstream),
-# which the fork branch's Makefile builds by default from 7dee381 on: in-process, a stuck camera or
-# a crashing codec would take imlibpurpleservice, and every IM account with it, down. teams_media
-# keeps that in its own process. pidgin is built with --disable-vv here anyway.
+# which upstream's Makefile builds by default: in-process, a stuck camera or a crashing codec would
+# take imlibpurpleservice, and every IM account with it, down. teams_media keeps that in its own
+# process. pidgin is built with --disable-vv here anyway.
 EXTRA_OEMAKE = " \
     CC='${CC}' \
     PKG_CONFIG='${STAGING_BINDIR_NATIVE}/pkg-config' \

@@ -1,0 +1,363 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] webOS: connect the account-removed handler once libpurple has
+ registered it
+
+The handler that removes a deleted WhatsApp, Facebook or Matrix account's
+store (and unlinks the device or ends the session on the server) was
+connected from plugin_init. purple_core_init probes plug-ins, which runs
+plugin_init, before purple_accounts_init registers the accounts' signals
+(core.c, libpurple 2.14.14). libpurple refused the connection
+("Something tried to register a callback for the 'account-removed'
+signal, but we do not have any signals registered with the given
+handle"), so the handler never ran: a deleted account's store and its
+server-side device or session stayed.
+
+It is now connected from an idle callback of high priority, which runs
+once purple_core_init has returned and before the main loop does anything
+else, and is cancelled if the plug-in is unloaded first.
+
+glue/tests/init_account_removed_test runs init.c against a libpurple
+fake that refuses a signal not yet registered, as libpurple does: the
+handler is connected once the main loop runs, not if the plug-in is
+unloaded first, and a removed WhatsApp, Facebook or Matrix account
+reaches its Go half.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ glue/init.c                              |  33 +++--
+ glue/tests/Makefile                      |  15 +-
+ glue/tests/init_account_removed_expose.c |   6 +
+ glue/tests/init_account_removed_stubs.c  |  34 +++++
+ glue/tests/init_account_removed_test.cpp | 166 +++++++++++++++++++++++
+ 5 files changed, 243 insertions(+), 11 deletions(-)
+ create mode 100644 glue/tests/init_account_removed_expose.c
+ create mode 100644 glue/tests/init_account_removed_stubs.c
+ create mode 100644 glue/tests/init_account_removed_test.cpp
+
+diff --git a/glue/init.c b/glue/init.c
+index afec413..9464d61 100644
+--- a/glue/init.c
++++ b/glue/init.c
+@@ -114,9 +114,17 @@ libpurple2_plugin_load(PurplePlugin *plugin)
+     return TRUE;
+ }
+ 
++// The idle callback that is to connect the "account-removed" handler, while it has not run (see
++// webos_connect_account_removed)
++static guint webos_account_removed_source = 0;
++
+ static gboolean
+ libpurple2_plugin_unload(PurplePlugin *plugin)
+ {
++    if (webos_account_removed_source) {
++        g_source_remove(webos_account_removed_source);
++        webos_account_removed_source = 0;
++    }
+     purple_signals_disconnect_by_handle(plugin);
+     return TRUE;
+ }
+@@ -186,15 +194,20 @@ webos_account_removed_cb(PurpleAccount *account, gpointer data)
+ }
+ 
+ // Connect the "account-removed" handler once, using `plugin` as the signal handle so
+-// libpurple2_plugin_unload's purple_signals_disconnect_by_handle(plugin) cleans it up. Called from
+-// plugin_init (the module is pinned resident, so the callback can never be unmapped). The accounts
+-// subsystem and its "account-removed" signal are registered by purple_core_init well before any
+-// plugin is probed, so the handle is always valid here.
+-static void
+-webos_connect_account_removed(PurplePlugin *plugin)
++// libpurple2_plugin_unload's purple_signals_disconnect_by_handle(plugin) cleans it up (the module
++// is pinned resident, so the callback can never be unmapped). Run from an idle callback of high
++// priority: purple_core_init probes plug-ins, running plugin_init, before purple_accounts_init
++// registers the accounts' signals, so a connection made in plugin_init is refused. The callback
++// runs once purple_core_init has returned, before the main loop does anything else.
++static gboolean
++webos_connect_account_removed(gpointer plugin)
+ {
+-    purple_signal_connect(purple_accounts_get_handle(), "account-removed",
+-                          plugin, PURPLE_CALLBACK(webos_account_removed_cb), NULL);
++    webos_account_removed_source = 0;
++    if (!purple_signal_connect(purple_accounts_get_handle(), "account-removed",
++                               plugin, PURPLE_CALLBACK(webos_account_removed_cb), NULL)) {
++        purple_debug_error(GOWHATSAPP_NAME, "account-removed: not connected, a removed account's store will be left\n");
++    }
++    return G_SOURCE_REMOVE;
+ }
+ 
+ static void plugin_init(PurplePlugin *plugin) {
+@@ -207,7 +220,9 @@ static void plugin_init(PurplePlugin *plugin) {
+     matrix_register_prpl();
+     // Clean up per-account backend stores when an account is deleted (WhatsApp: per-JID device row
+     // from the shared whatsmeow.db). Covers every prpl in this .so via one handler.
+-    webos_connect_account_removed(plugin);
++    if (!webos_account_removed_source) {
++        webos_account_removed_source = g_idle_add_full(G_PRIORITY_HIGH, webos_connect_account_removed, plugin, NULL);
++    }
+ }
+ 
+ static PurplePluginInfo info = {
+diff --git a/glue/tests/Makefile b/glue/tests/Makefile
+index dc5d4f4..0a9589d 100644
+--- a/glue/tests/Makefile
++++ b/glue/tests/Makefile
+@@ -22,7 +22,7 @@ SAN ?=
+ INC := -I$(GLUE) -I. -Ifakes
+ LIBS := -lgtest -lgtest_main -lglib-2.0 -lpthread -lm
+ 
+-all: playout_test call_playback_test call_video_test voipkit_rtcengine_test display_message_test
++all: playout_test call_playback_test call_video_test voipkit_rtcengine_test display_message_test init_account_removed_test
+ 
+ playout_test: playout_test.cpp $(GLUE)/playout.c $(GLUE)/playout.h
+ 	$(CC) $(CPPFLAGS) $(CFLAGS) $(SAN) $(INC) -c $(GLUE)/playout.c -o playout.o
+@@ -56,14 +56,25 @@ display_message_test: display_message_test.cpp $(GLUE)/display_message.c $(GLUE)
+ 	$(CXX) $(CPPFLAGS) $(PURPLE_CPPFLAGS) -I$(GLUE)/.. -I$(GOHDR) -DPURPLE_PLUGINS -D_DEFAULT_SOURCE $(CXXFLAGS) $(SAN) $(INC) display_message_test.cpp display_message.o constants.o \
+ 		-o $@ $(LDFLAGS) $(LIBS)
+ 
++# init_account_removed_test: when glue/init.c connects its "account-removed" handler, and where a
++# removed account goes, against fakes of libpurple (with its refusal of a signal not yet registered)
++# and the Go exports (in the test), and aborting stubs of what init.c only names
++# (init_account_removed_stubs.c). Needs the libpurple headers and GOHDR.
++init_account_removed_test: init_account_removed_test.cpp init_account_removed_expose.c init_account_removed_stubs.c $(GLUE)/init.c
++	$(CC) $(CPPFLAGS) $(PURPLE_CPPFLAGS) -I$(GLUE)/.. -I$(GOHDR) -DPURPLE_PLUGINS -D_DEFAULT_SOURCE $(CFLAGS) $(SAN) $(INC) -c init_account_removed_expose.c -o init_account_removed_expose.o
++	$(CC) $(CFLAGS) $(SAN) -c init_account_removed_stubs.c -o init_account_removed_stubs.o
++	$(CXX) $(CPPFLAGS) $(PURPLE_CPPFLAGS) -I$(GLUE)/.. -DPURPLE_PLUGINS -D_DEFAULT_SOURCE $(CXXFLAGS) $(SAN) $(INC) init_account_removed_test.cpp init_account_removed_expose.o init_account_removed_stubs.o \
++		-o $@ $(LDFLAGS) $(LIBS)
++
+ check: all
+ 	./playout_test
+ 	./call_playback_test
+ 	./call_video_test
+ 	./voipkit_rtcengine_test
+ 	./display_message_test
++	./init_account_removed_test
+ 
+ clean:
+-	rm -f *.o playout_test call_playback_test call_video_test voipkit_rtcengine_test display_message_test
++	rm -f *.o playout_test call_playback_test call_video_test voipkit_rtcengine_test display_message_test init_account_removed_test
+ 
+ .PHONY: all check clean
+diff --git a/glue/tests/init_account_removed_expose.c b/glue/tests/init_account_removed_expose.c
+new file mode 100644
+index 0000000..a13ea20
+--- /dev/null
++++ b/glue/tests/init_account_removed_expose.c
+@@ -0,0 +1,6 @@
++// glue/init.c as one translation unit with the test, so that purple_init_plugin (which
++// PURPLE_INIT_PLUGIN defines) and the plug-in's load and unload can be run against the fakes in
++// init_account_removed_test.cpp. What init.c only names (its prpl callbacks) is
++// init_account_removed_stubs.c.
++#define PLUGIN_VERSION test
++#include "init.c" // found in GLUE (-I$(GLUE))
+diff --git a/glue/tests/init_account_removed_stubs.c b/glue/tests/init_account_removed_stubs.c
+new file mode 100644
+index 0000000..d28b223
+--- /dev/null
++++ b/glue/tests/init_account_removed_stubs.c
+@@ -0,0 +1,34 @@
++// What glue/init.c names but init_account_removed_test does not run: its prpl callbacks and
++// actions call these. Each aborts, so a test that reaches one fails loudly instead of using a
++// made-up answer. No libpurple header here: only the names matter to the linker.
++#include <stdlib.h>
++
++#define STUB(name) void name(void); void name(void) { abort(); }
++STUB(g_module_make_resident)
++STUB(gowhatsapp_add_buddy)
++STUB(gowhatsapp_chat_info)
++STUB(gowhatsapp_chat_info_defaults)
++STUB(gowhatsapp_chat_send_file)
++STUB(gowhatsapp_close)
++STUB(gowhatsapp_find_blist_chat)
++STUB(gowhatsapp_get_cb_alias)
++STUB(gowhatsapp_get_chat_name)
++STUB(gowhatsapp_go_get_contacts)
++STUB(gowhatsapp_go_logout)
++STUB(gowhatsapp_join_chat)
++STUB(gowhatsapp_login)
++STUB(gowhatsapp_new_xfer)
++STUB(gowhatsapp_roomlist_get_list)
++STUB(gowhatsapp_send_chat)
++STUB(gowhatsapp_send_file)
++STUB(gowhatsapp_send_im)
++STUB(gowhatsapp_send_typing)
++STUB(gowhatsapp_set_chat_topic)
++STUB(gowhatsapp_set_presence)
++STUB(gowhatsapp_tooltip_text)
++STUB(purple_connection_get_account)
++STUB(purple_plugin_action_new)
++STUB(purple_status_type_new_full)
++
++// The setting init.c reads a removed WhatsApp account's device from (constants.h)
++const char *GOWHATSAPP_CREDENTIALS_KEY = "credentials";
+diff --git a/glue/tests/init_account_removed_test.cpp b/glue/tests/init_account_removed_test.cpp
+new file mode 100644
+index 0000000..e910b3c
+--- /dev/null
++++ b/glue/tests/init_account_removed_test.cpp
+@@ -0,0 +1,166 @@
++// Tests when glue/init.c connects its "account-removed" handler. libpurple's purple_core_init
++// probes the plug-ins, which runs plugin_init, before purple_accounts_init registers the accounts'
++// signals, and refuses a connection to a signal that is not registered yet. The handler is to be
++// connected once the main loop runs, and a removed account of each prpl in this .so is to reach
++// its Go half. libpurple and the Go exports are faked below, with libpurple's refusal.
++#include <gtest/gtest.h>
++#include <glib.h>
++#include <string>
++#include <vector>
++
++extern "C" {
++#include <purple.h>
++#include "gometabridge.h"
++#include "matrixbridge.h"
++
++gboolean purple_init_plugin(PurplePlugin *plugin);
++}
++
++namespace {
++
++int accounts_handle;
++bool account_signals_registered = false; // purple_accounts_init has run
++PurpleCallback removed_cb = nullptr;      // what is connected to "account-removed"
++void *removed_handle = nullptr;
++int refused = 0;
++std::vector<std::string> removed; // "<Go export> <username> <credentials>", in order
++
++struct Account {
++	PurpleAccount account;
++	const char *protocol;
++	const char *username;
++	const char *credentials;
++};
++
++Account *account_of(const PurpleAccount *a) { return reinterpret_cast<Account *>(const_cast<PurpleAccount *>(a)); }
++
++void run_main_loop() {
++	while (g_main_context_iteration(NULL, FALSE)) {
++	}
++}
++
++class AccountRemoved : public ::testing::Test {
++protected:
++	PurplePlugin plugin{};
++
++	void SetUp() override {
++		account_signals_registered = false;
++		removed_cb = nullptr;
++		removed_handle = nullptr;
++		refused = 0;
++		removed.clear();
++	}
++	void TearDown() override {
++		plugin.info->unload(&plugin);
++		run_main_loop();
++	}
++	// What purple_core_init does: probe the plug-ins, then initialise the accounts
++	void core_init() {
++		ASSERT_TRUE(purple_init_plugin(&plugin));
++		account_signals_registered = true;
++	}
++	void remove(Account &account) {
++		ASSERT_NE(nullptr, removed_cb);
++		reinterpret_cast<void (*)(PurpleAccount *, gpointer)>(removed_cb)(&account.account, NULL);
++	}
++};
++
++} // namespace
++
++extern "C" {
++
++void *purple_accounts_get_handle(void) { return &accounts_handle; }
++
++gulong purple_signal_connect(void *instance, const char *signal, void *handle, PurpleCallback func, void *data) {
++	(void)data;
++	if (instance != &accounts_handle || !account_signals_registered) {
++		refused++; // libpurple: "Something tried to register a callback for the '%s' signal, ..."
++		return 0;
++	}
++	if (std::string(signal) != "account-removed")
++		return 0;
++	removed_cb = func;
++	removed_handle = handle;
++	return 1;
++}
++
++void purple_signals_disconnect_by_handle(void *handle) {
++	if (handle == removed_handle) {
++		removed_cb = nullptr;
++		removed_handle = nullptr;
++	}
++}
++
++gboolean purple_plugin_register(PurplePlugin *plugin) { return plugin->info != NULL; }
++void purple_debug_error(const char *category, const char *format, ...) { (void)category, (void)format; }
++
++GList *gowhatsapp_add_account_options(GList *options) { return options; }
++void gometa_register_second_prpl(void) {}
++void matrix_register_prpl(void) {}
++void whatsapp_call_luna_init(void) {}
++
++const char *purple_account_get_protocol_id(const PurpleAccount *account) { return account_of(account)->protocol; }
++const char *purple_account_get_username(const PurpleAccount *account) { return account_of(account)->username; }
++const char *purple_user_dir(void) { return "/home/root/.purple"; }
++const char *purple_account_get_string(const PurpleAccount *account, const char *name, const char *default_value) {
++	(void)name;
++	return account_of(account)->credentials ? account_of(account)->credentials : default_value;
++}
++const char *purple_account_get_password(const PurpleAccount *account) { (void)account; return NULL; }
++
++void gowhatsapp_go_account_removed(PurpleAccount *account, char *dir, char *username, char *credentials) {
++	(void)account, (void)dir;
++	removed.push_back(std::string("whatsapp ") + username + " " + credentials);
++}
++void gometa_go_account_removed(PurpleAccount *account, char *dir, char *username) {
++	(void)account, (void)dir;
++	removed.push_back(std::string("gometa ") + username);
++}
++void matrix_go_account_removed(PurpleAccount *account, char *dir, char *username) {
++	(void)account, (void)dir;
++	removed.push_back(std::string("matrix ") + username);
++}
++
++} // extern "C"
++
++TEST_F(AccountRemoved, ConnectedOnceTheMainLoopRuns) {
++	core_init();
++	EXPECT_EQ(0, refused);
++	EXPECT_EQ(nullptr, removed_cb);
++	run_main_loop();
++	EXPECT_EQ(0, refused);
++	EXPECT_NE(nullptr, removed_cb);
++	EXPECT_EQ(&plugin, removed_handle);
++}
++
++TEST_F(AccountRemoved, EachPrplReachesItsGoHalf) {
++	core_init();
++	run_main_loop();
++	Account whatsapp{{}, "prpl-hehoe-whatsmeow", "31600000000", "31600000000.0:12@s.whatsapp.net|1234"};
++	Account facebook{{}, GOMETA_PLUGIN_ID, "fb-user", nullptr};
++	Account matrix{{}, MATRIX_PLUGIN_ID, "@me:example.org", nullptr};
++	Account other{{}, "prpl-hehoe-presage", "+31600000000", nullptr};
++	remove(whatsapp);
++	remove(facebook);
++	remove(matrix);
++	remove(other);
++	EXPECT_EQ((std::vector<std::string>{"whatsapp 31600000000 31600000000.0:12@s.whatsapp.net|1234", "gometa fb-user",
++	                                    "matrix @me:example.org"}),
++	          removed);
++}
++
++TEST_F(AccountRemoved, NotConnectedWhenUnloadedFirst) {
++	core_init();
++	plugin.info->unload(&plugin);
++	run_main_loop();
++	EXPECT_EQ(nullptr, removed_cb);
++	EXPECT_EQ(0, refused);
++}
++
++TEST_F(AccountRemoved, DisconnectedOnUnload) {
++	core_init();
++	run_main_loop();
++	ASSERT_NE(nullptr, removed_cb);
++	plugin.info->unload(&plugin);
++	EXPECT_EQ(nullptr, removed_cb);
++}

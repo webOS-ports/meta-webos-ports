@@ -1,6 +1,4 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Herman van Hazendonk <github.com@herrie.org>
-Date: Sun, 8 Nov 2026 19:47:42 +0100
 Subject: [PATCH] webOS: show a poll's votes in the Messaging app, and a
  received mention in bold
 
@@ -71,7 +69,7 @@ Upstream-Status: Inappropriate [webOS specific]
 ---
  account-data.cpp             |  45 +++++++
  account-data.h               |  20 +++
- receiving.cpp                | 110 ++++++++++++---
+ receiving.cpp                | 109 ++++++++++++---
  receiving.h                  |   8 +-
  td-client.cpp                |  16 ++-
  tdlib-purple.cpp             |   2 +
@@ -81,15 +79,15 @@ Upstream-Status: Inappropriate [webOS specific]
  test/webos-receive-test.cpp  |  17 +++
  webos-receive.cpp            |  11 +-
  webos-receive.h              |   6 +-
- 12 files changed, 569 insertions(+), 26 deletions(-)
+ 12 files changed, 571 insertions(+), 23 deletions(-)
  create mode 100644 test/webos-mention-test.cpp
 
 diff --git a/account-data.cpp b/account-data.cpp
-index 4b671c1..e35d79f 100644
+index 7be916c..aa7800c 100644
 --- a/account-data.cpp
 +++ b/account-data.cpp
-@@ -1228,6 +1228,51 @@ void TdAccountData::renameShownMessage(ChatId chatId, MessageId oldId, MessageId
-     }
+@@ -1212,6 +1212,51 @@ bool TdAccountData::extractUnloggedSent(ChatId chatId, MessageId messageId, Unlo
+     return true;
  }
  
 +// As many as the shown messages, the polls among which are fewer
@@ -141,13 +139,13 @@ index 4b671c1..e35d79f 100644
  {
      auto it = std::find_if(m_pendingEdits.begin(), m_pendingEdits.end(), [&edit](const PendingEdit &other) {
 diff --git a/account-data.h b/account-data.h
-index 6c2d223..cac7950 100644
+index 6c1aa92..311a05f 100644
 --- a/account-data.h
 +++ b/account-data.h
-@@ -561,6 +561,18 @@ public:
-     MessageId                  getSentMessageId(ChatId chatId, MessageId messageId) const;
-     void                       addPendingEdit(const PendingEdit &edit);
+@@ -575,6 +575,18 @@ public:
      bool                       extractPendingEdit(ChatId chatId, MessageId messageId, PendingEdit &edit);
+     void                       addUnloggedSent(ChatId chatId, MessageId messageId, UnloggedSent &&sent);
+     bool                       extractUnloggedSent(ChatId chatId, MessageId messageId, UnloggedSent &sent);
 +
 +    // webOS: a poll message as given to the app - which poll it carries, by TDLib's id of it, and
 +    // the text it was given - so that a change to the poll rewrites the message once, as it was
@@ -163,10 +161,10 @@ index 6c2d223..cac7950 100644
  private:
      TdAccountData(const TdAccountData &other) = delete;
      TdAccountData &operator=(const TdAccountData &other) = delete;
-@@ -652,6 +664,14 @@ private:
-     std::map<ShownMessageKey, MessageId>    m_sentMessageIds;
+@@ -667,6 +679,14 @@ private:
      std::deque<ShownMessageKey>             m_shownMessageOrder;
      std::vector<PendingEdit>                m_pendingEdits;
+     std::map<ShownMessageKey, UnloggedSent> m_unloggedSent;
 +
 +    struct PollMessage {
 +        int64_t     pollId = 0;
@@ -179,7 +177,7 @@ index 6c2d223..cac7950 100644
  
  #endif
 diff --git a/receiving.cpp b/receiving.cpp
-index 93e6222..989bb21 100644
+index 11bbd72..656d37f 100644
 --- a/receiving.cpp
 +++ b/receiving.cpp
 @@ -410,6 +410,16 @@ static bool getEntityMarkup(const td::td_api::TextEntityType &type, TextMarkup &
@@ -199,7 +197,7 @@ index 93e6222..989bb21 100644
      default:
          return false;
      }
-@@ -868,6 +878,15 @@ PurpleConversation *getMessageConversation(TdAccountData &account, const td::td_
+@@ -870,6 +880,15 @@ PurpleConversation *getMessageConversation(TdAccountData &account, const td::td_
      return NULL;
  }
  
@@ -215,24 +213,23 @@ index 93e6222..989bb21 100644
  void showMessageText(TdAccountData &account, const td::td_api::chat &chat, const TgMessageInfo &message,
                       const char *text, const char *notification, uint32_t extraFlags)
  {
-@@ -913,15 +932,9 @@ void showMessageText(TdAccountData &account, const td::td_api::chat &chat, const
+@@ -925,12 +944,11 @@ void showMessageText(TdAccountData &account, const td::td_api::chat &chat, const
          }
      }
      if (text) {
 -        if (!message.forwardedFrom.empty()) {
--            if (!newText.empty())
--                newText += "\n";
++        std::string header = getForwardHeader(message);
++        if (!header.empty()) {
+             if (!newText.empty())
+                 newText += "\n";
 -            // TRANSLATOR: In-chat notification of forward. Argument will be a username. Please preserve the HTML.
 -            newText += formatMessage(_("<b>Forwarded from {}:</b>"),
 -                                     escapeForDisplay(message.forwardedFrom));
--        }
-         if (!newText.empty())
-             newText += "\n";
-+        newText += getForwardHeader(message);
-         newText += text;
-     }
-     if (!newText.empty())
-@@ -1728,15 +1741,30 @@ static std::string makeGroupEventNotice(const td::td_api::chat &chat, const TgMe
++            newText.append(header, 0, header.size() - 1);
+         }
+         // A picture begins a line of its own already
+         if (!newText.empty() && (*text != '\n'))
+@@ -1790,15 +1808,30 @@ static std::string makeGroupEventNotice(const td::td_api::chat &chat, const TgMe
      return std::string();
  }
  
@@ -269,7 +266,7 @@ index 93e6222..989bb21 100644
      showMessageText(account, chat, messageInfo, token.c_str(), NULL);
  }
  
-@@ -2931,23 +2959,58 @@ std::string webosServiceMessageId(int64_t chatId, int64_t messageId)
+@@ -2998,23 +3031,58 @@ std::string webosServiceMessageId(int64_t chatId, int64_t messageId)
      return std::to_string(chatId) + ":" + std::to_string(messageId);
  }
  
@@ -334,7 +331,7 @@ index 93e6222..989bb21 100644
  void updateMessageContent(TdAccountData &account, ChatId chatId, MessageId messageId,
                            td::td_api::object_ptr<td::td_api::MessageContent> content)
  {
-@@ -2955,6 +3018,15 @@ void updateMessageContent(TdAccountData &account, ChatId chatId, MessageId messa
+@@ -3022,6 +3090,15 @@ void updateMessageContent(TdAccountData &account, ChatId chatId, MessageId messa
          return;
      // The Messaging app changes a message where it is; other front-ends are told with a notice
      bool inPlace = isWebosUi() && emitWebosEdit(account, chatId, messageId, *content);
@@ -351,7 +348,7 @@ index 93e6222..989bb21 100644
      ShownMessage *shownMessage = account.findShownMessage(chatId, messageId);
      if (!shownMessage)
 diff --git a/receiving.h b/receiving.h
-index a1cdfd8..421a6e0 100644
+index 0ead1b9..44232bb 100644
 --- a/receiving.h
 +++ b/receiving.h
 @@ -7,8 +7,9 @@
@@ -366,7 +363,7 @@ index a1cdfd8..421a6e0 100644
  std::string getMessageText(const td::td_api::formattedText &text,
                             const std::map<int64_t, std::string> *smileys = nullptr, bool sendable = false);
  // Into the image store, which takes the data, under the file's name, for Pidgin to offer when saving it
-@@ -111,6 +112,9 @@ const td::td_api::chat *findConversationChat(TdAccountData &account, PurpleConve
+@@ -117,6 +118,9 @@ const td::td_api::chat *findConversationChat(TdAccountData &account, PurpleConve
  void updateMessageContent(TdAccountData &account, ChatId chatId, MessageId messageId,
                            td::td_api::object_ptr<td::td_api::MessageContent> content);
  void deleteMessages(TdAccountData &account, const td::td_api::updateDeleteMessages &update);
@@ -377,10 +374,10 @@ index a1cdfd8..421a6e0 100644
                              const td::td_api::messageInteractionInfo *info);
  void updateUnreadReactions(TdAccountData &account, td::td_api::updateMessageUnreadReactions &update);
 diff --git a/td-client.cpp b/td-client.cpp
-index b1356c8..3556e3b 100644
+index 9455646..966e986 100644
 --- a/td-client.cpp
 +++ b/td-client.cpp
-@@ -246,6 +246,14 @@ void PurpleTdClient::processUpdate(td::td_api::Object &update)
+@@ -252,6 +252,14 @@ void PurpleTdClient::processUpdate(td::td_api::Object &update)
          break;
      }
  
@@ -395,7 +392,7 @@ index b1356c8..3556e3b 100644
      case td::td_api::updateDeleteMessages::ID: {
          auto &deleteUpdate = static_cast<const td::td_api::updateDeleteMessages &>(update);
          purple_debug_misc(config::pluginId, "Incoming update: %zu messages deleted\n",
-@@ -2583,10 +2591,14 @@ bool PurpleTdClient::votePoll(int64_t tdlibChatId, int64_t messageId,
+@@ -3388,10 +3396,14 @@ bool PurpleTdClient::votePoll(int64_t tdlibChatId, int64_t messageId,
                                       ": an option is not in it\n", messageId);
                  return;
              }
@@ -413,7 +410,7 @@ index b1356c8..3556e3b 100644
                  commandResponse(chatId, _("Failed to vote: {}"), std::move(result));
              });
 diff --git a/tdlib-purple.cpp b/tdlib-purple.cpp
-index 0bf0615..c59626a 100644
+index 073d0b8..8b6f293 100644
 --- a/tdlib-purple.cpp
 +++ b/tdlib-purple.cpp
 @@ -626,6 +626,8 @@ static void tgprpl_send_poll_vote_cb(PurpleAccount *account, const char * /*peer
@@ -438,10 +435,10 @@ index 225c806..aedacd2 100644
      libpurple-mock.cpp
      printout.cpp
 diff --git a/test/webos-commands-test.cpp b/test/webos-commands-test.cpp
-index 849e4b4..644f12e 100644
+index fb3984c..0a2151c 100644
 --- a/test/webos-commands-test.cpp
 +++ b/test/webos-commands-test.cpp
-@@ -1236,6 +1236,34 @@ TEST_F(WebosCommandTest, VotePollNotSent)
+@@ -1237,6 +1237,34 @@ TEST_F(WebosCommandTest, VotePollNotSent)
      );
  }
  
@@ -476,7 +473,7 @@ index 849e4b4..644f12e 100644
  // What we sent to a group from another client is shown with its id, as a received message is, so
  // that the app can react to it, edit it or vote in it. libpurple writes it as received, our name
  // being no member's of the chat, and the transport stores it so.
-@@ -1269,5 +1297,227 @@ TEST_F(WebosCommandTest, OwnMessageFromElsewhereInGroup)
+@@ -1270,5 +1298,227 @@ TEST_F(WebosCommandTest, OwnMessageFromElsewhereInGroup)
      ASSERT_STREQ(serviceMessageId(groupChatId, 2).c_str(), stashed);
      g_free(stashed);
      purple_conversation_set_data(conv, "webos-msg-id", nullptr);

@@ -6,30 +6,28 @@ require purple-connectors.inc
 
 # Built from luneos-synergy-connectors, the version ended in its commit alone (1.0+git0+d22c6be58f).
 # With the upstream commit now in front it can sort lower, so bump the epoch to keep package feeds
-# moving forward.
-PE = "5"
+# moving forward (again at 2b85bbf, which sorts below d1a7f60).
+PE = "6"
 
 # One feature per patch. 0001 is LuneOS-only: it lets the plugin id be set at build time, which
-# upstream declined (EionRobb/purple-discord#498). 0002 and 0003 are generic fixes submitted
-# upstream (#503 and #504); the rest adapt the plug-in to imlibpurpletransport and the webOS
-# Messaging app.
+# upstream declined (EionRobb/purple-discord#498). The rest adapt the plug-in to
+# imlibpurpletransport and the webOS Messaging app. The Ogg Opus voice messages are upstream
+# now (#504).
 SRC_URI += " \
     git://github.com/EionRobb/purple-discord.git;branch=master;protocol=https;name=upstream;destsuffix=purple-discord \
     file://0001-Allow-the-plugin-id-to-be-set-at-build-time.patch \
-    file://0002-Make-file-uploads-survive-a-briefly-unavailable-conn.patch \
-    file://0003-Send-Ogg-Opus-uploads-as-voice-messages.patch \
-    file://0004-webOS-deduplicate-messages-and-bridge-message-ids-re.patch \
-    file://0005-webOS-add-DM-partners-to-the-buddy-list-and-backfill.patch \
-    file://0006-webOS-sign-in-with-a-token-password-or-QR-code-and-r.patch \
-    file://0007-webOS-Add-gateway-and-channel-list-diagnostics.patch \
-    file://0008-webOS-edit-and-delete-sent-messages-from-the-Messagi.patch \
-    file://0009-webOS-create-add-to-and-leave-group-DMs-from-the-Mes.patch \
-    file://0010-webOS-Send-the-mentions-the-Messaging-app-picked.patch \
-    file://0011-webOS-Edit-and-delete-received-messages-in-place.patch \
-    file://0012-webOS-rename-group-DMs-and-take-people-out-of-them-a.patch \
-    file://0013-webOS-Say-who-pinned-a-message-not-the-message-again.patch \
+    file://0002-webOS-deduplicate-messages-and-bridge-message-ids-re.patch \
+    file://0003-webOS-add-DM-partners-to-the-buddy-list-and-backfill.patch \
+    file://0004-webOS-sign-in-with-a-token-password-or-QR-code-and-r.patch \
+    file://0005-webOS-Add-gateway-and-channel-list-diagnostics.patch \
+    file://0006-webOS-edit-and-delete-sent-messages-from-the-Messagi.patch \
+    file://0007-webOS-create-add-to-and-leave-group-DMs-from-the-Mes.patch \
+    file://0008-webOS-Send-the-mentions-the-Messaging-app-picked.patch \
+    file://0009-webOS-Edit-and-delete-received-messages-in-place.patch \
+    file://0010-webOS-rename-group-DMs-and-take-people-out-of-them-a.patch \
+    file://0011-webOS-Say-who-pinned-a-message-not-the-message-again.patch \
 "
-SRCREV_upstream = "33f21e5af74c1489f6c6e2db0b84b30d15783596"
+SRCREV_upstream = "2b85bbfad5e915f60f2c4ca30c1e7d720762c148"
 
 DEPENDS = "pidgin json-glib glib-2.0 zlib qrencode openssl"
 

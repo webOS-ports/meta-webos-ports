@@ -1,0 +1,124 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] webOS: keep a received WhatsApp sticker as WebP
+
+A sticker received on WhatsApp could not be sent back as a sticker.
+The plugin turned it into a PNG on download, because the old WebKit
+could not draw WebP, and the Messaging app offers only a .webp as a
+sticker; a PNG would go out as a picture. It also kept only the first
+frame of an animated sticker.
+
+Keep the sticker as it came, as <hash>.webp with image/webp: WAM's
+Chromium draws WebP, animated too. It is now streamed into its file
+like other WhatsApp media rather than fetched into memory, which was
+only needed for the transcoding. A Lottie sticker, which is no WebP,
+keeps the type it came with.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Inappropriate [webOS specific]
+---
+ handle_attachment.go | 19 +++++++++++++++--
+ sticker_test.go      | 50 ++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 67 insertions(+), 2 deletions(-)
+ create mode 100644 sticker_test.go
+
+diff --git a/handle_attachment.go b/handle_attachment.go
+index 528b635..b0d50b5 100644
+--- a/handle_attachment.go
++++ b/handle_attachment.go
+@@ -9,6 +9,7 @@ import (
+ 	"context"
+ 	"encoding/hex"
+ 	"errors"
++	"fmt"
+ 	"mime"
+ 	"os"
+ 	"path/filepath"
+@@ -43,6 +44,21 @@ func extension_from_mimetype(mimeType *string) string {
+ 	return extension
+ }
+ 
++// sticker_file_type is the extension and mime type a received sticker is kept under. webOS: a
++// sticker is WhatsApp's own WebP, still or animated, and is kept as it came, as a .webp: WAM's
++// Chromium draws WebP, animated too, and the Messaging app offers a .webp to send back as a
++// sticker (send_file.go sends WebP bytes as a StickerMessage). It used to be turned into a PNG
++// for the old WebKit, which could not draw WebP; that PNG went back out as a picture, and kept
++// only the first frame of an animated sticker. A Lottie sticker is no WebP (an animation in a
++// zip archive), so it keeps the type it came with.
++func sticker_file_type(sm *waE2E.StickerMessage) (extension string, mimetype string) {
++	mimetype = sm.GetMimetype()
++	if sm.GetIsLottie() || (mimetype != "" && mimetype != "image/webp") {
++		return extension_from_mimetype(&mimetype), mimetype
++	}
++	return ".webp", "image/webp"
++}
++
+ /*
+  * The file name of a document is chosen by the sender.
+  * Make it a single path component so it cannot point outside the attachment directory
+@@ -127,9 +143,8 @@ func (handler *Handler) handle_attachment(message *waE2E.Message, id string, sou
+ 		if sm != nil {
+ 			downloadable = sm
+ 			hash = hex.EncodeToString(sm.GetFileSHA256())
+-			extension = extension_from_mimetype(sm.Mimetype)
++			extension, mimetype = sticker_file_type(sm)
+ 			data_type = C.gowhatsapp_attachment_type_sticker
+-			mimetype = sm.GetMimetype()
+ 			length = sm.GetFileLength()
+ 		}
+ 	}
+diff --git a/sticker_test.go b/sticker_test.go
+new file mode 100644
+index 0000000..ca68793
+--- /dev/null
++++ b/sticker_test.go
+@@ -0,0 +1,50 @@
++package main
++
++import (
++	"testing"
++
++	"go.mau.fi/whatsmeow/proto/waE2E"
++	"google.golang.org/protobuf/proto"
++)
++
++// A sticker, still or animated, is kept as the WebP it is, so the Messaging app can send it back
++// as a sticker.
++func TestAStickerIsKeptAsWebP(t *testing.T) {
++	for name, sm := range map[string]*waE2E.StickerMessage{
++		"still":       {Mimetype: proto.String("image/webp")},
++		"animated":    {Mimetype: proto.String("image/webp"), IsAnimated: proto.Bool(true)},
++		"no mimetype": {},
++	} {
++		extension, mimetype := sticker_file_type(sm)
++		if extension != ".webp" || mimetype != "image/webp" {
++			t.Errorf("%s: got %q %q, want .webp image/webp", name, extension, mimetype)
++		}
++	}
++}
++
++// A Lottie sticker is no WebP, so it is not named as one.
++func TestALottieStickerIsNoWebP(t *testing.T) {
++	sm := &waE2E.StickerMessage{Mimetype: proto.String("application/was"), IsLottie: proto.Bool(true)}
++	extension, mimetype := sticker_file_type(sm)
++	if extension == ".webp" || mimetype != "application/was" {
++		t.Errorf("got %q %q, want its own type", extension, mimetype)
++	}
++	sm = &waE2E.StickerMessage{IsLottie: proto.Bool(true)}
++	if extension, _ := sticker_file_type(sm); extension == ".webp" {
++		t.Errorf("a Lottie sticker without a mimetype: got %q", extension)
++	}
++}
++
++// A sticker is written as it came, streamed like other WhatsApp media: only Facebook media is
++// fetched into memory first.
++func TestAStickerIsStreamedAsItCame(t *testing.T) {
++	if fetched_into_memory(&waE2E.StickerMessage{}) {
++		t.Errorf("a sticker is fetched into memory")
++	}
++	if fetched_into_memory(&waE2E.ImageMessage{}) {
++		t.Errorf("a picture is fetched into memory")
++	}
++	if !fetched_into_memory(&fbDownloadable{}) {
++		t.Errorf("Facebook media is not fetched into memory")
++	}
++}

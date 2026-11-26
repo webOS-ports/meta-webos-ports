@@ -47,6 +47,7 @@ SRC_URI += " \
     file://0010-webOS-edit-and-delete-Signal-messages-sent-and-recei.patch \
     file://0011-webOS-send-voice-notes-mentions-and-contact-cards-as.patch \
     file://0012-webOS-Pass-how-the-phone-is-held-on-to-the-call-engi.patch \
+    file://0013-Connect-the-account-removed-hook-once-libpurple-has-.patch \
     file://presage/0001-store-build-without-if-let-guards-for-Rust-1.94.patch;patchdir=${UNPACKDIR}/git-deps/presage \
 "
 SRCREV_upstream = "235edc846d4f28f306ddfe40dc187ef42face79f"
