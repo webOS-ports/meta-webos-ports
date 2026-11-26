@@ -1,0 +1,161 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Mon, 16 Nov 2026 06:57:10 +0100
+Subject: [PATCH] droidcamsrc: let the environment say there are no cameras
+
+class_init counts the cameras to bound the camera-device property, and
+the count goes to Android's camera service: libcamera_client waits for
+media.camera without a limit. class_init runs in gst-plugin-scanner
+whenever the registry is built, so on a container where media.camera
+never registers the scan hangs, and every GStreamer client waits on it.
+
+That happens on a device without a camera whose Android side keeps the
+camera HAL down: minimediaservice, which hosts media.camera, then fails
+to start. On the MindPhone, surface-manager never got past loading its
+QML and the phone stayed on the boot logo after a reflash.
+
+Only the process that starts GStreamer clients can know whether the
+service will come, so let it say so: with GST_DROID_NO_CAMERA set (to
+anything but "0") droidcamsrc reports no cameras without asking, the
+same as a device that has none. camera-device is then not installed,
+as before for zero cameras, and the consumers that size their camera
+list from its range keep working unchanged.
+
+With no cameras the camera table is NULL, but camera-device still
+defaults to 0, and the sensor-direction and sensor-orientation getters
+read info[0] from it. Bound them, and find_camera_device, by the size
+of the table get_hw allocated rather than by a fresh count.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ gst/droidcamsrc/gstdroidcamsrc.c | 46 ++++++++++++++++++++++++++------
+ gst/droidcamsrc/gstdroidcamsrc.h |  1 +
+ 2 files changed, 39 insertions(+), 8 deletions(-)
+
+diff --git a/gst/droidcamsrc/gstdroidcamsrc.c b/gst/droidcamsrc/gstdroidcamsrc.c
+index e3b60b3..db1b6a9 100644
+--- a/gst/droidcamsrc/gstdroidcamsrc.c
++++ b/gst/droidcamsrc/gstdroidcamsrc.c
+@@ -183,6 +183,7 @@ gst_droidcamsrc_init (GstDroidCamSrc * src)
+   g_rec_mutex_init (&src->dev_lock);
+   src->dev = NULL;
+   src->info = NULL;
++  src->n_info = 0;
+   src->camera_device = DEFAULT_CAMERA_DEVICE;
+   src->mode = DEFAULT_MODE;
+   src->captures = 0;
+@@ -290,7 +291,8 @@ gst_droidcamsrc_get_property (GObject * object, guint prop_id, GValue * value,
+       break;
+ 
+     case PROP_SENSOR_DIRECTION:
+-      if (!gst_droidcamsrc_get_hw (src)) {
++      if (!gst_droidcamsrc_get_hw (src) || src->camera_device < 0
++          || src->camera_device >= src->n_info) {
+         g_value_set_int (value, 0);
+       } else {
+         g_value_set_int (value, src->info[src->camera_device].direction);
+@@ -299,7 +301,8 @@ gst_droidcamsrc_get_property (GObject * object, guint prop_id, GValue * value,
+ 
+     case PROP_SENSOR_MOUNT_ANGLE:
+     case PROP_SENSOR_ORIENTATION:
+-      if (!gst_droidcamsrc_get_hw (src)) {
++      if (!gst_droidcamsrc_get_hw (src) || src->camera_device < 0
++          || src->camera_device >= src->n_info) {
+         g_value_set_int (value, 0);
+       } else {
+         g_value_set_int (value, src->info[src->camera_device].orientation * 90);
+@@ -578,6 +581,28 @@ gst_droidcamsrc_fill_info (GstDroidCamSrc * src, GstDroidCamSrcCamInfo * target,
+   return TRUE;
+ }
+ 
++/* Whether to leave Android's camera service alone and act as if there were
++ * no cameras. Counting them asks media.camera, and libcamera_client waits for
++ * that service without a limit, so on a container where it never registers
++ * the count never returns. Whoever starts GStreamer clients knows whether it
++ * will (LuneOS: gst-droid-gate.sh) and says so here. */
++static gboolean
++gst_droidcamsrc_cameras_disabled (void)
++{
++  const gchar *v = g_getenv ("GST_DROID_NO_CAMERA");
++
++  return v != NULL && v[0] != '\0' && g_strcmp0 (v, "0") != 0;
++}
++
++static gint
++gst_droidcamsrc_count_cameras (void)
++{
++  if (gst_droidcamsrc_cameras_disabled ())
++    return 0;
++
++  return droid_media_camera_get_number_of_cameras ();
++}
++
+ static gboolean
+ gst_droidcamsrc_get_hw (GstDroidCamSrc * src)
+ {
+@@ -590,7 +615,7 @@ gst_droidcamsrc_get_hw (GstDroidCamSrc * src)
+     return TRUE;
+   }
+ 
+-  num = droid_media_camera_get_number_of_cameras ();
++  num = gst_droidcamsrc_count_cameras ();
+   GST_INFO_OBJECT (src, "Found %d cameras", num);
+ 
+   if (num < 0) {
+@@ -599,6 +624,7 @@ gst_droidcamsrc_get_hw (GstDroidCamSrc * src)
+   }
+ 
+   src->info = g_malloc0 (num * sizeof (GstDroidCamSrcCamInfo));
++  src->n_info = num;
+ 
+   for (x = 0; x < num; x++) {
+     gboolean found;
+@@ -615,9 +641,9 @@ gst_droidcamsrc_get_hw (GstDroidCamSrc * src)
+ static GstDroidCamSrcCamInfo *
+ gst_droidcamsrc_find_camera_device (GstDroidCamSrc * src)
+ {
+-  int num = droid_media_camera_get_number_of_cameras ();
+-
+-  if (src->camera_device < num) {
++  /* The table get_hw filled in, not a fresh count: the two can differ, and
++   * only the first says how many entries src->info really has. */
++  if (src->camera_device >= 0 && src->camera_device < src->n_info) {
+     return &src->info[src->camera_device];
+   } else {
+     GST_ERROR_OBJECT (src, "cannot find camera %d", src->camera_device);
+@@ -825,6 +851,7 @@ gst_droidcamsrc_change_state (GstElement * element, GstStateChange transition)
+ 
+       g_free (src->info);
+       src->info = NULL;
++      src->n_info = 0;
+ 
+       gst_element_set_state (src->preview_pipeline->pipeline, GST_STATE_NULL);
+       break;
+@@ -1116,9 +1143,12 @@ gst_droidcamsrc_class_init (GstDroidCamSrcClass * klass)
+       GST_DEBUG_FUNCPTR (gst_droidcamsrc_change_state);
+   gstelement_class->send_event = GST_DEBUG_FUNCPTR (gst_droidcamsrc_send_event);
+ 
+-  /* Add camera-device property only if cameras have been found */
++  /* Add camera-device property only if cameras have been found. class_init
++   * runs in gst-plugin-scanner whenever the registry is built, and every
++   * GStreamer client waits for that scan, so a count that never returns hangs
++   * them all - see gst_droidcamsrc_cameras_disabled(). */
+   CAMERA_STARTUP_CREATE ("camera count begin");
+-  gint camera_count = droid_media_camera_get_number_of_cameras ();
++  gint camera_count = gst_droidcamsrc_count_cameras ();
+   CAMERA_STARTUP_CREATE ("camera count done count=%d", camera_count);
+   if (camera_count > 0) {
+     g_object_class_install_property (gobject_class, PROP_CAMERA_DEVICE,
+diff --git a/gst/droidcamsrc/gstdroidcamsrc.h b/gst/droidcamsrc/gstdroidcamsrc.h
+index c1c0901..f7a2f09 100644
+--- a/gst/droidcamsrc/gstdroidcamsrc.h
++++ b/gst/droidcamsrc/gstdroidcamsrc.h
+@@ -95,6 +95,7 @@ struct _GstDroidCamSrc
+   GstDroidCamSrcDev *dev;
+   GRecMutex dev_lock;
+   GstDroidCamSrcCamInfo *info;
++  int n_info;
+ 
+   GstDroidCamSrcPad *vfsrc;
+   GstDroidCamSrcPad *imgsrc;

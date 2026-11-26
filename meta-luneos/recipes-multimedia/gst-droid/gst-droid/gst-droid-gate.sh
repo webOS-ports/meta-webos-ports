@@ -19,8 +19,16 @@
 # The environment is set on the systemd manager, so it reaches units started
 # after this one - hence the ordering in gst-droid-gate.service. Anything
 # already running keeps the environment it was started with.
+#
+# ls-hubd is one of those: it starts before this unit, and the bus services it
+# launches on demand (Type=dynamic) inherit its environment, not the manager's.
+# org.webosports.rtcengine therefore never saw droidcamsrc, counted no cameras,
+# and the Phone app hid the camera button on every video call. The same
+# variables go to ENVFILE as well, for gst-droid-env, which such a service's
+# Exec= line runs it through.
 
 PLUGINDIR="@GST_DROID_PLUGINDIR@"
+ENVFILE="@GST_DROID_ENVFILE@"
 SERVICE="android.hardware.media.omx@1.0::IOmxStore/default"
 
 if [ ! -e "${PLUGINDIR}/libgstdroid.so" ]; then
@@ -35,11 +43,17 @@ omx_up() {
     binder-ping -d /dev/hwbinder "${SERVICE}" >/dev/null 2>&1
 }
 
+# One budget for both waits (this one and the camera service's below), so the two together stay
+# inside the unit's TimeoutStartSec.
+WAIT="${GST_DROID_GATE_WAIT:-30}"
+START=$(date +%s)
+waited() {
+    [ $(( $(date +%s) - START )) -ge "${WAIT}" ]
+}
+
 if ! omx_up && getprop 2>/dev/null | grep -qiE '^\[init\.svc\.[^]]*(omx|mediacodec|media\.codec)'; then
-    i=0
-    while [ "$i" -lt "${GST_DROID_GATE_WAIT:-30}" ] && ! omx_up; do
+    while ! waited && ! omx_up; do
         sleep 1
-        i=$((i + 1))
     done
 fi
 
@@ -106,9 +120,59 @@ if [ -n "${REASON}" ]; then
         ,,) GST_PLUGIN_FEATURE_RANK="${RANKS}" ;;
         *)  GST_PLUGIN_FEATURE_RANK="${GST_PLUGIN_FEATURE_RANK},${RANKS}" ;;
     esac
+    # The same trap as the OMX one, through droidcamsrc: its class_init counts the cameras, the
+    # count asks Android's media.camera, and libcamera_client waits for that service without a
+    # limit. class_init runs in gst-plugin-scanner, so where media.camera never registers the
+    # scan hangs and surface-manager with it. It never registers on a device whose adaptation
+    # says it has no camera (deviceinfo_has_camera="false"): start-android-hals.sh keeps the
+    # camera HAL down there, and minimediaservice, which hosts media.camera, then fails to
+    # start. The MindPhone sat on its boot logo for that after a reflash. GST_DROID_NO_CAMERA
+    # (0030) makes droidcamsrc report no cameras without asking; for its consumers that is
+    # the same as a device without any.
+    NO_CAMERA_MARKER=/run/luneos-device/no-camera
+    camera_up() {
+        binder-ping -d /dev/binder media.camera >/dev/null 2>&1
+    }
+    NO_CAMERA=""
+    if [ -e "${NO_CAMERA_MARKER}" ]; then
+        NO_CAMERA="the device has no camera (${NO_CAMERA_MARKER})"
+    else
+        while ! waited && ! camera_up; do
+            sleep 1
+        done
+        camera_up || NO_CAMERA="media.camera did not register within ${WAIT}s"
+    fi
+    CAMERA_ENV=""
+    if [ -n "${NO_CAMERA}" ]; then
+        CAMERA_ENV="GST_DROID_NO_CAMERA=1"
+        echo "gst-droid-gate: ${NO_CAMERA}; droidcamsrc will report no cameras"
+    else
+        systemctl unset-environment GST_DROID_NO_CAMERA
+    fi
+    # How droidvenc lays out raw frames for the hardware encoder (0031). Its default, rows of a
+    # multiple of 128 bytes and a luma plane of a multiple of 32 rows, is what Qualcomm's encoder
+    # reads. MediaTek's (the q25's c2.mtk.avc.encoder, alignment 16x8) keeps to the stride it is
+    # told and its input buffers are no larger, so a padded frame is refused: only 640x480, which
+    # needs no padding, encoded there, and a video call sent no picture at any other size.
+    ALIGN_ENV=""
+    case "$(getprop ro.soc.manufacturer 2>/dev/null)" in
+        [Mm][Ee][Dd][Ii][Aa][Tt][Ee][Kk]) ALIGN_ENV="GST_DROID_VENC_RAW_ALIGN=16x16" ;;
+    esac
+    if [ -z "${ALIGN_ENV}" ]; then
+        systemctl unset-environment GST_DROID_VENC_RAW_ALIGN
+    fi
     systemctl set-environment "GST_PLUGIN_PATH=${NEW}" \
         "GST_REGISTRY=${CACHE}/gstreamer-1.0/registry-droid.bin" \
-        "GST_PLUGIN_FEATURE_RANK=${GST_PLUGIN_FEATURE_RANK}"
+        "GST_PLUGIN_FEATURE_RANK=${GST_PLUGIN_FEATURE_RANK}" ${CAMERA_ENV} ${ALIGN_ENV}
+    # Written aside and moved in place, so gst-droid-env never reads half a file.
+    mkdir -p "$(dirname "${ENVFILE}")"
+    {
+        echo "GST_PLUGIN_PATH='${NEW}'"
+        echo "GST_REGISTRY='${CACHE}/gstreamer-1.0/registry-droid.bin'"
+        echo "GST_PLUGIN_FEATURE_RANK='${GST_PLUGIN_FEATURE_RANK}'"
+        if [ -n "${CAMERA_ENV}" ]; then echo "GST_DROID_NO_CAMERA='1'"; fi
+        if [ -n "${ALIGN_ENV}" ]; then echo "GST_DROID_VENC_RAW_ALIGN='${ALIGN_ENV#*=}'"; fi
+    } > "${ENVFILE}.new" && mv -f "${ENVFILE}.new" "${ENVFILE}"
     # GStreamer writes its registry 0600, and XDG_CACHE_HOME is the same root-owned directory for
     # every user, so the media services (umediaserver, mediaindexer, mediacontroller and each
     # g-media-pipeline, all running as "media") could neither read it nor write their own: every
@@ -117,6 +181,7 @@ if [ -n "${REASON}" ]; then
     chmod 0644 "${CACHE}"/gstreamer-1.0/registry*.bin 2>/dev/null
     echo "gst-droid-gate: ${REASON}, added ${PLUGINDIR} to GST_PLUGIN_PATH"
 else
+    rm -f "${ENVFILE}"
     echo "gst-droid-gate: ${SERVICE} is not registered; leaving gst-droid out of the"
     echo "gst-droid-gate: plugin path. Hardware codecs and droidcamsrc are unavailable,"
     echo "gst-droid-gate: but GStreamer clients will not hang scanning for them."
