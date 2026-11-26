@@ -66,6 +66,21 @@ SRC_URI += "file://0015-technology-do-not-free-the-regulatory-domain-it-is-s.pat
 # table it is given, and connman handed it its static one.
 SRC_URI += "file://0016-iptables-do-not-let-libxtables-free-the-static-optio.patch"
 
+# The Wi-Fi hotspot itself (tested on a Q25 with a PC, a FLX1s and a TouchPad
+# as clients):
+#  - 0017: the AP offered SAE and PSK-SHA256 next to WPA2-PSK, which MediaTek's
+#    AP firmware cannot do, so stations picking them were refused (status 43).
+#  - 0018: the DHCP server broadcast every OFFER/ACK; RFC 2131 wants unicast
+#    unless the client asks, and a MediaTek station on a MediaTek hotspot gets
+#    no broadcasts, so it never got a lease.
+#  - 0019: start the AP on a dedicated interface (WiFiTetheringInterfaces in
+#    connman-conf's main.conf, ap0 on MediaTek) so wlan0 stays connected.
+SRC_URI += " \
+    file://0017-gsupplicant-offer-plain-WPA2-PSK-on-an-access-point.patch \
+    file://0018-gdhcp-unicast-OFFER-and-ACK-as-RFC-2131-asks.patch \
+    file://0019-wifi-tether-on-a-dedicated-access-point-interface.patch \
+"
+
 # See connman-vpn.service.d/luneos-caps.conf for why: upstream's
 # CapabilityBoundingSet on connman-vpn.service is missing CAP_SYS_ADMIN and
 # CAP_DAC_OVERRIDE, which the l2tp plugin's client-side pppd needs to open

@@ -1,0 +1,68 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 26 Nov 2026 05:24:27 +0100
+Subject: [PATCH 18/19] gdhcp: unicast OFFER and ACK as RFC 2131 asks
+
+send_packet_to_client() broadcast every OFFER and ACK to a client that
+had no address yet (ciaddr 0), whether or not the client set the
+broadcast bit. RFC 2131 4.1 says the server unicasts those to the
+client's hardware address and yiaddr unless the broadcast bit is set,
+and broadcasts only then.
+
+The difference matters on a hotspot whose stations do not get group
+addressed frames from the access point: a FuriPhone FLX1s (MediaTek) on
+a Q25's hotspot (MediaTek) receives unicast fine but never a broadcast,
+so it never saw an OFFER and fell back to a link-local address, while
+other clients worked.
+
+Broadcast when the client asks for it, unicast to ciaddr when it has
+one, otherwise unicast to the client's MAC and yiaddr, and broadcast
+only as the last resort.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ gdhcp/server.c | 24 +++++++++++++++++++++---
+ 1 file changed, 21 insertions(+), 3 deletions(-)
+
+diff --git a/gdhcp/server.c b/gdhcp/server.c
+index 52ea2a5..acc5f65 100644
+--- a/gdhcp/server.c
++++ b/gdhcp/server.c
+@@ -516,15 +516,33 @@ static void send_packet_to_client(GDHCPServer *dhcp_server,
+ 	const uint8_t *chaddr;
+ 	uint32_t ciaddr;
+ 
+-	if ((dhcp_pkt->flags & htons(BROADCAST_FLAG))
+-				|| dhcp_pkt->ciaddr == 0) {
++	/*
++	 * RFC 2131 4.1: broadcast only when the client asks for it with the
++	 * broadcast bit. A client that already has an address (ciaddr) gets
++	 * it there; one that has none yet gets the OFFER or ACK unicast to
++	 * its hardware address and the offered address (yiaddr).
++	 *
++	 * Broadcasting regardless cost clients that do not receive group
++	 * addressed frames from the access point - a MediaTek station on a
++	 * MediaTek hotspot, for one - their lease, while unicast reached
++	 * them fine.
++	 */
++	if (dhcp_pkt->flags & htons(BROADCAST_FLAG)) {
+ 		debug(dhcp_server, "Broadcasting packet to client");
+ 		ciaddr = INADDR_BROADCAST;
+ 		chaddr = MAC_BCAST_ADDR;
+-	} else {
++	} else if (dhcp_pkt->ciaddr) {
+ 		debug(dhcp_server, "Unicasting packet to client ciaddr");
+ 		ciaddr = dhcp_pkt->ciaddr;
+ 		chaddr = dhcp_pkt->chaddr;
++	} else if (dhcp_pkt->yiaddr) {
++		debug(dhcp_server, "Unicasting packet to client yiaddr");
++		ciaddr = dhcp_pkt->yiaddr;
++		chaddr = dhcp_pkt->chaddr;
++	} else {
++		debug(dhcp_server, "Broadcasting packet to client");
++		ciaddr = INADDR_BROADCAST;
++		chaddr = MAC_BCAST_ADDR;
+ 	}
+ 
+ 	dhcp_send_raw_packet(dhcp_pkt,
