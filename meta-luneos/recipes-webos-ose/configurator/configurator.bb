@@ -12,12 +12,12 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "luna-service2 db8 glib-2.0 pmloglib"
 
-WEBOS_VERSION = "3.0.0-15_d3788f2dacab7f7576cd2c2d44c2b6e13eb8f712"
-PR = "r11"
+SRCREV = "33abef4f4e72436374750f1652c8a7caf2ad577c"
+PV = "3.0.0-15"
+PR = "r12"
 
 inherit webos_component
-inherit webos_public_repo
-inherit webos_enhanced_submissions
+inherit webos_ports_ose_repo
 inherit webos_cmake
 inherit webos_system_bus
 inherit webos_daemon
@@ -25,11 +25,7 @@ inherit webos_machine_impl_dep
 
 EXTRA_OECMAKE_DISTRO = "-DWEBOS_TARGET_DISTRO:STRING='luneos'"
 
-SRC_URI = "${WEBOSOSE_GIT_REPO_COMPLETE} \
-    file://0001-com.palm.configurator.role.json.in-Add-fixes-for-var.patch \
-    file://0002-configurator-Fix-permission-issue-for-com.palm.filec.patch \
-    file://0003-com.webos.service.configurator.perm.json-Update-the-.patch \
-"
+SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 FILES:${PN} += "${webos_sysbus_datadir}"
 
 inherit webos_systemd
@@ -47,7 +43,6 @@ do_install:append() {
 }
 
 PACKAGECONFIG ??= ""
-PACKAGECONFIG[extension-starfish] = "-DEXTENSION_STARFISH:BOOL=True,-DEXTENSION_STARFISH:BOOL=False,"
 
 #LuneOS does use FirstUse, so let's not disable it.
 PACKAGECONFIG[no-first-use] = "-DNO_FIRST_USE:BOOL=True,-DNO_FIRST_USE:BOOL=False,"
