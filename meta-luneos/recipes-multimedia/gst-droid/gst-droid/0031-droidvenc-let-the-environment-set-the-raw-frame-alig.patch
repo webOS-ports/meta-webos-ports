@@ -1,0 +1,99 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 25 Nov 2026 05:17:20 +0100
+Subject: [PATCH] droidvenc: let the environment set the raw frame alignment
+
+Raw NV12 frames are copied into rows of a multiple of 128 bytes and a
+luma plane of a multiple of 32 rows, the layout sargo's
+c2.qti.avc.encoder reads whatever stride it is told. The q25's
+c2.mtk.avc.encoder (MT6789) keeps to the stride and plane height it is
+given, and its input buffers are only that large: a 480x640 frame
+padded to 512 bytes a row is 491488 bytes against its 460800, and is
+refused. Only 640x480, where nothing was padded, encoded there; 480x640,
+320x240, 352x288 and every other size stalled without an error.
+
+Which encoder a device has is only known on the device, so let the
+process environment say: GST_DROID_VENC_RAW_ALIGN="<row>x<plane>", each
+a power of two up to 4096. Without it the alignment stays 128x32, so
+nothing changes where the variable is not set.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ gst/droidcodec/gstdroidvenc.c | 49 ++++++++++++++++++++++++++++++++---
+ 1 file changed, 46 insertions(+), 3 deletions(-)
+
+diff --git a/gst/droidcodec/gstdroidvenc.c b/gst/droidcodec/gstdroidvenc.c
+index caa4d95..7c0c347 100644
+--- a/gst/droidcodec/gstdroidvenc.c
++++ b/gst/droidcodec/gstdroidvenc.c
+@@ -89,6 +89,46 @@ gst_droidvenc_release_input_frame (void *data)
+   g_slice_free (GstDroidVEncFrameReleaseData, release_data);
+ }
+ 
++/* The row and plane alignment raw frames are copied to: 128 bytes and 32 rows,
++ * what sargo's c2.qti.avc.encoder reads whatever stride it is told, unless
++ * GST_DROID_VENC_RAW_ALIGN says otherwise as "<row bytes>x<plane rows>", each a
++ * power of two from 1 to 4096. An encoder that keeps to the stride and plane
++ * height it is told and has input buffers only that large refuses a frame
++ * padded further: the q25's c2.mtk.avc.encoder (MT6789, alignment 16x8) took
++ * only 640x480, where no padding was added, and every other size stalled. Only
++ * the device can know which encoder it has, so the process environment says. */
++static void
++gst_droidvenc_raw_alignment (gsize * row_align, gsize * plane_align)
++{
++  const gchar *env = g_getenv ("GST_DROID_VENC_RAW_ALIGN");
++  guint64 row, plane;
++  gchar *end;
++
++  *row_align = 128;
++  *plane_align = 32;
++  if (!env || !*env)
++    return;
++
++  row = g_ascii_strtoull (env, &end, 10);
++  if (end == env || *end != 'x')
++    goto bad;
++  env = end + 1;
++  plane = g_ascii_strtoull (env, &end, 10);
++  if (end == env || *end != '\0')
++    goto bad;
++  if (row == 0 || row > 4096 || (row & (row - 1)) != 0 || plane == 0
++      || plane > 4096 || (plane & (plane - 1)) != 0)
++    goto bad;
++
++  *row_align = (gsize) row;
++  *plane_align = (gsize) plane;
++  return;
++
++bad:
++  GST_WARNING ("GST_DROID_VENC_RAW_ALIGN is not <row>x<plane> in powers of "
++      "two up to 4096, using 128x32");
++}
++
+ /* The bytes of a raw frame in that layout, up to the end of its last chroma
+  * row: the codec's input buffers end there (sargo, 480x640: 491488 bytes, 32
+  * less than the padded planes), and a frame any longer is refused. */
+@@ -210,6 +250,7 @@ gst_droidvenc_create_codec (GstDroidVEnc * enc)
+     if (!features || !gst_caps_features_contains (features,
+             GST_CAPS_FEATURE_MEMORY_DROID_VIDEO_META_DATA)) {
+       DroidMediaColourFormatConstants constants;
++      gsize row_align, plane_align;
+ 
+       droid_media_colour_format_constants_init (&constants);
+       md.meta_data = false;
+@@ -218,9 +259,11 @@ gst_droidvenc_create_codec (GstDroidVEnc * enc)
+        * the chroma after a luma plane of a multiple of 32 rows, whatever stride
+        * it is given (sargo's c2.qti.avc.encoder: 512 and 384 wide encode, 480,
+        * 448, 416 and 496 come out green and striped): frames are copied into
+-       * that layout, and the stride and plane height are passed on as well. */
+-      enc->raw_stride = GST_ROUND_UP_N ((gsize) enc->in_state->info.width, 128);
+-      enc->raw_slice_height = GST_ROUND_UP_N ((gsize) enc->in_state->info.height, 32);
++       * that layout, and the stride and plane height are passed on as well.
++       * Not every encoder reads it so: see gst_droidvenc_raw_alignment (). */
++      gst_droidvenc_raw_alignment (&row_align, &plane_align);
++      enc->raw_stride = GST_ROUND_UP_N ((gsize) enc->in_state->info.width, row_align);
++      enc->raw_slice_height = GST_ROUND_UP_N ((gsize) enc->in_state->info.height, plane_align);
+       md.stride = (int32_t) enc->raw_stride;
+       md.slice_height = (int32_t) enc->raw_slice_height;
+       GST_INFO_OBJECT (enc, "raw NV12 input, colour format 0x%x, stride %d, plane height %d",
