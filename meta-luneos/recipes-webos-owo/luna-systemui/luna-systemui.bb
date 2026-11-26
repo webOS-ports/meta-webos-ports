@@ -7,7 +7,7 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 PE = "3"
 PV = "2.0.1-2+git"
-SRCREV = "bc286c1a82e0daf9bb3ad9e7983cbc720f521ec6"
+SRCREV = "99b8a028f55c94e457d96fb2edc87d8d407cd4f3"
 PR = "r2"
 
 inherit allarch
