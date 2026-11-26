@@ -81,6 +81,11 @@ SRC_URI += " \
     file://0019-wifi-tether-on-a-dedicated-access-point-interface.patch \
 "
 
+# Switching the hotspot off with a client on it removed clients from the
+# client table while walking it: GLib warned "version == hash_table->version"
+# and could skip clients, which then stayed in TetheringClients.
+SRC_URI += "file://0020-tethering-do-not-remove-clients-while-walking-the-cl.patch"
+
 # See connman-vpn.service.d/luneos-caps.conf for why: upstream's
 # CapabilityBoundingSet on connman-vpn.service is missing CAP_SYS_ADMIN and
 # CAP_DAC_OVERRIDE, which the l2tp plugin's client-side pppd needs to open
