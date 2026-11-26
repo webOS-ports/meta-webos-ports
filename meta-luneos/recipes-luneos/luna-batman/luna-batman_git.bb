@@ -13,9 +13,9 @@ LIC_FILES_CHKSUM = "file://LICENSE;md5=b234ee4d69f5fce4486a80fdaf4a4263"
 DEPENDS = "glib-2.0 batman luna-service2 libpbnjson"
 
 PV = "1.0+git"
-PR = "r0"
+PR = "r1"
 
-SRCREV = "6f0d05ce7d6b796a752a7b1565c61367e1777a4a"
+SRCREV = "f829d91bc30608386b32c1ccd982bd767d885b1e"
 
 inherit webos_ports_repo
 WEBOS_GIT_PARAM_BRANCH = "master"
