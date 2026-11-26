@@ -86,6 +86,12 @@ SRC_URI += " \
 # and could skip clients, which then stayed in TetheringClients.
 SRC_URI += "file://0020-tethering-do-not-remove-clients-while-walking-the-cl.patch"
 
+# Restarting connmand with mobile data up left the context's interface down:
+# connmand takes running interfaces down at startup and nothing brought the
+# cellular one up again, so the service stayed "ready" with no routes. With
+# its unit test, unit/test-ofono.
+SRC_URI += "file://0024-ofono-bring-the-interface-of-an-active-context-up.patch"
+
 # Unit tests for 0016, 0018 and 0020, each failing without its fix. They
 # are noinst programs, so every build compiles and links them for the
 # target; tests/host-check.sh runs them on the build host, under the
