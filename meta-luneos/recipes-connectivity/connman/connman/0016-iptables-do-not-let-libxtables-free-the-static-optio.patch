@@ -1,0 +1,190 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Wed, 25 Nov 2026 21:36:48 +0100
+Subject: [PATCH] iptables: do not let libxtables free the static option table
+
+Enabling Wi-Fi tethering aborted connmand with "free(): invalid
+pointer" as soon as it added the NAT rule:
+
+  xtables_free_opts <- xtables_merge_options <- xtables_options_xfrm
+  <- __connman_iptables_append <- __connman_firewall_enable_nat
+  <- __connman_tethering_set_enabled
+
+xtables_merge_options() in iptables 1.8.13 frees xt_params->opts once it
+has copied it. connman's iptables_globals and ip6tables_globals start
+with opts pointing at the static iptables_opts[], and reset_xtables()
+points it back there after every rule, so the first rule that loads an
+extension frees a static array. systemd restarts connmand, the tethering
+request never completes, and the Wi-Fi client connection is dropped with
+it.
+
+Merge an extension's options through one helper that hands libxtables
+NULL instead of the static table. The merged list is the same, because
+libxtables puts orig_opts first in any case. A heap list from an earlier
+extension is still passed and freed by libxtables, which also closes the
+leak older iptables releases had here.
+
+Seen on a Q25 (MediaTek, aarch64): connmand core dump on "connmanctl
+tether wifi on". With this change the NAT rule is installed and mobile
+data carries the default route while tethering.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/iptables.c | 108 ++++++++++++++++++++++++-------------------------
+ 1 file changed, 52 insertions(+), 56 deletions(-)
+
+diff --git a/src/iptables.c b/src/iptables.c
+index a81a077..cf8e7d1 100644
+--- a/src/iptables.c
++++ b/src/iptables.c
+@@ -2659,6 +2659,50 @@ struct xtables_globals ip6tables_globals = {
+ #endif
+ };
+ 
++/*
++ * Add an extension's options to @globals->opts.
++ *
++ * xtables_merge_options(), which xtables_options_xfrm() also ends in,
++ * frees xt_params->opts once it has copied it (iptables 1.8.13 does).
++ * Here that pointer starts out as, and reset_xtables() returns it to,
++ * the static iptables_opts[], and freeing that aborts connmand with
++ * "free(): invalid pointer" on the first rule that loads an extension -
++ * the tethering NAT rule, for one. While opts is still the static array,
++ * hand libxtables NULL instead: the merged list comes out the same, as
++ * libxtables puts orig_opts first anyway, and there is nothing to free.
++ *
++ * An extension with no options of its own still goes through libxtables,
++ * as before: given no new options it hands the old list back untouched
++ * and frees nothing, so opts may stay the static array then.
++ *
++ * Returns NULL on failure, leaving opts as it was: libxtables only frees
++ * the old list once the new one is allocated.
++ */
++static struct option *merge_extension_opts(struct xtables_globals *globals,
++				const struct xt_option_entry *x6_options,
++				const struct option *extra_opts,
++				unsigned int *option_offset)
++{
++	struct option *old = globals->opts;
++	struct option *merged;
++
++	if (old == globals->orig_opts && (x6_options || extra_opts))
++		globals->opts = NULL;
++
++	if (x6_options)
++		merged = xtables_options_xfrm(globals->orig_opts,
++						globals->opts, x6_options,
++						option_offset);
++	else
++		merged = xtables_merge_options(globals->orig_opts,
++						globals->opts, extra_opts,
++						option_offset);
++
++	globals->opts = merged ? merged : old;
++
++	return merged;
++}
++
+ static struct xtables_target *prepare_target(struct connman_iptables *table,
+ 							const char *target_name)
+ {
+@@ -2746,44 +2790,20 @@ static struct xtables_target *prepare_target(struct connman_iptables *table,
+ 
+ 	switch (table->type) {
+ 	case AF_INET:
+-		if (xt_t->x6_options)
+-			iptables_globals.opts =
+-				xtables_options_xfrm(
+-					iptables_globals.orig_opts,
+-					iptables_globals.opts,
++		if (!merge_extension_opts(&iptables_globals,
+ 					xt_t->x6_options,
+-					&xt_t->option_offset);
+-		else
+-			iptables_globals.opts =
+-				xtables_merge_options(
+-					iptables_globals.orig_opts,
+-					iptables_globals.opts,
+ 					xt_t->extra_opts,
+-					&xt_t->option_offset);
+-
+-		if (!iptables_globals.opts) {
++					&xt_t->option_offset)) {
+ 			g_free(xt_t->t);
+ 			xt_t = NULL;
+ 		}
+ 
+ 		break;
+ 	case AF_INET6:
+-		if (xt_t->x6_options)
+-			ip6tables_globals.opts =
+-				xtables_options_xfrm(
+-					ip6tables_globals.orig_opts,
+-					ip6tables_globals.opts,
++		if (!merge_extension_opts(&ip6tables_globals,
+ 					xt_t->x6_options,
+-					&xt_t->option_offset);
+-		else
+-			ip6tables_globals.opts =
+-				xtables_merge_options(
+-					ip6tables_globals.orig_opts,
+-					ip6tables_globals.opts,
+ 					xt_t->extra_opts,
+-					&xt_t->option_offset);
+-
+-		if (!ip6tables_globals.opts) {
++					&xt_t->option_offset)) {
+ 			g_free(xt_t->t);
+ 			xt_t = NULL;
+ 		}
+@@ -2843,22 +2863,10 @@ static struct xtables_match *prepare_matches(struct connman_iptables *table,
+ 
+ 	switch (table->type) {
+ 	case AF_INET:
+-		if (xt_m->x6_options)
+-			iptables_globals.opts =
+-				xtables_options_xfrm(
+-					iptables_globals.orig_opts,
+-					iptables_globals.opts,
++		if (!merge_extension_opts(&iptables_globals,
+ 					xt_m->x6_options,
+-					&xt_m->option_offset);
+-		else
+-			iptables_globals.opts =
+-				xtables_merge_options(
+-					iptables_globals.orig_opts,
+-					iptables_globals.opts,
+ 					xt_m->extra_opts,
+-					&xt_m->option_offset);
+-
+-		if (!iptables_globals.opts) {
++					&xt_m->option_offset)) {
+ 			g_free(xt_m->m);
+ 
+ 			if (xt_m == xt_m->next)
+@@ -2869,22 +2877,10 @@ static struct xtables_match *prepare_matches(struct connman_iptables *table,
+ 
+ 		break;
+ 	case AF_INET6:
+-		if (xt_m->x6_options)
+-			ip6tables_globals.opts =
+-				xtables_options_xfrm(
+-					ip6tables_globals.orig_opts,
+-					ip6tables_globals.opts,
++		if (!merge_extension_opts(&ip6tables_globals,
+ 					xt_m->x6_options,
+-					&xt_m->option_offset);
+-		else
+-			ip6tables_globals.opts =
+-				xtables_merge_options(
+-					ip6tables_globals.orig_opts,
+-					ip6tables_globals.opts,
+ 					xt_m->extra_opts,
+-					&xt_m->option_offset);
+-
+-		if (!ip6tables_globals.opts) {
++					&xt_m->option_offset)) {
+ 			g_free(xt_m->m);
+ 
+ 			if (xt_m == xt_m->next)

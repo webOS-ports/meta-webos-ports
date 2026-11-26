@@ -1,0 +1,391 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 26 Nov 2026 06:34:53 +0100
+Subject: [PATCH] unit: test tethering clients, also when tethering is turned
+ off
+
+test-tethering runs src/tethering.c with what it drives (bridge, NAT,
+DHCP server, DNS proxy, rtnl, IPv6 prefix delegation) stubbed to
+succeed, and a fake D-Bus connection: dbus_connection_send() and
+dbus_connection_unref() are wrapped, so the test reads the
+TetheringClientsChanged signal.
+
+It registers and unregisters clients, and turns tethering off with three
+connected, which must announce all three as removed and leave none
+listed. Before "tethering: do not remove clients while walking the
+client table" that aborts on GLib's
+"g_hash_table_foreach: assertion 'version == hash_table->version'
+failed", which g_test_init() makes fatal.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ Makefile.am           |  13 ++
+ unit/test-tethering.c | 334 ++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 347 insertions(+)
+ create mode 100644 unit/test-tethering.c
+
+diff --git a/Makefile.am b/Makefile.am
+index f145c7d..db66854 100644
+--- a/Makefile.am
++++ b/Makefile.am
+@@ -341,6 +341,19 @@ unit_test_dhcp_server_LDFLAGS = -Wl,--wrap=dhcp_l3_socket \
+ 
+ TESTS += unit/test-dhcp-server
+ 
++noinst_PROGRAMS += unit/test-tethering
++
++# tethering.c as it is, with what it drives stubbed in the test and a fake
++# D-Bus connection whose signals the test reads.
++unit_test_tethering_SOURCES = $(backtrace_sources) src/log.c \
++				src/tethering.c unit/test-tethering.c
++unit_test_tethering_LDADD = gdbus/libgdbus-internal.la \
++				@GLIB_LIBS@ @DBUS_LIBS@ -ldl
++unit_test_tethering_LDFLAGS = -Wl,--wrap=dbus_connection_send \
++				-Wl,--wrap=dbus_connection_unref
++
++TESTS += unit/test-tethering
++
+ if WISPR
+ noinst_PROGRAMS += tools/wispr
+ 
+diff --git a/unit/test-tethering.c b/unit/test-tethering.c
+new file mode 100644
+index 0000000..7d8fe13
+--- /dev/null
++++ b/unit/test-tethering.c
+@@ -0,0 +1,334 @@
++/*
++ *
++ *  Connection Manager
++ *
++ *  Copyright (C) 2026  Herman van Hazendonk <github.com@herrie.org>
++ *
++ *  This program is free software; you can redistribute it and/or modify
++ *  it under the terms of the GNU General Public License version 2 as
++ *  published by the Free Software Foundation.
++ *
++ *  This program is distributed in the hope that it will be useful,
++ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *  GNU General Public License for more details.
++ *
++ *  You should have received a copy of the GNU General Public License
++ *  along with this program; if not, write to the Free Software
++ *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
++ *
++ */
++
++/*
++ * Tethering clients: registering, unregistering, and what turning
++ * tethering off does with the ones still connected.
++ *
++ * src/tethering.c runs as it is. What it drives - the bridge, NAT, the
++ * DHCP server, DNS proxy, IPv6 prefix delegation, rtnl - is stubbed
++ * below and always succeeds. Its D-Bus connection is a fake one: the
++ * test wraps dbus_connection_send() and dbus_connection_unref() (see
++ * Makefile.am) to catch the TetheringClientsChanged signal.
++ *
++ * g_test_init() makes GLib criticals fatal, so a hash table changed
++ * while it is walked fails the test outright.
++ */
++
++#ifdef HAVE_CONFIG_H
++#include <config.h>
++#endif
++
++#include <string.h>
++
++#include <glib.h>
++
++#include "src/connman.h"
++#include "gdhcp/gdhcp.h"
++
++static const char *clients[] = {
++	"02:00:00:00:00:01",
++	"02:00:00:00:00:02",
++	"02:00:00:00:00:03",
++};
++
++#define NUM_CLIENTS G_N_ELEMENTS(clients)
++
++/* Stand-ins for what tethering.c drives */
++
++int __connman_bridge_create(const char *name) { return 0; }
++int __connman_bridge_disable(const char *name) { return 0; }
++int __connman_bridge_enable(const char *name, const char *ip_address,
++			int prefix_len, const char *broadcast) { return 0; }
++int __connman_bridge_remove(const char *name) { return 0; }
++
++int __connman_dnsproxy_add_listener(int index) { return 0; }
++void __connman_dnsproxy_remove_listener(int index) { }
++
++int connman_inet_create_tunnel(char **iface) { return -EOPNOTSUPP; }
++int connman_inet_ifindex(const char *name) { return 42; }
++int connman_inet_ifup(int index) { return 0; }
++int __connman_inet_modify_address(int cmd, int flags, int index, int family,
++				const char *address, const char *peer,
++				unsigned char prefixlen, const char *broadcast,
++				bool is_p2p) { return 0; }
++int connman_inet_set_mtu(int index, int mtu) { return 0; }
++
++unsigned char connman_ipaddress_calc_netmask_len(const char *netmask)
++{
++	return 24;
++}
++
++struct connman_ippool *__connman_ippool_create(int index,
++					unsigned int start, unsigned int range,
++					ippool_collision_cb_t collision_cb,
++					void *user_data) { return NULL; }
++void __connman_ippool_deladdr(int index, const char *address,
++				unsigned char prefixlen) { }
++void __connman_ippool_free(struct connman_ippool *pool) { }
++const char *__connman_ippool_get_broadcast(struct connman_ippool *pool)
++{
++	return NULL;
++}
++const char *__connman_ippool_get_end_ip(struct connman_ippool *pool)
++{
++	return NULL;
++}
++const char *__connman_ippool_get_gateway(struct connman_ippool *pool)
++{
++	return NULL;
++}
++const char *__connman_ippool_get_start_ip(struct connman_ippool *pool)
++{
++	return NULL;
++}
++const char *__connman_ippool_get_subnet_mask(struct connman_ippool *pool)
++{
++	return NULL;
++}
++void __connman_ippool_newaddr(int index, const char *address,
++				unsigned char prefixlen) { }
++
++void __connman_ipv6pd_cleanup(void) { }
++int __connman_ipv6pd_setup(const char *bridge) { return 0; }
++
++void __connman_nat_disable(const char *name) { }
++int __connman_nat_enable(const char *name, const char *address,
++				unsigned char prefixlen) { return 0; }
++
++unsigned int connman_rtnl_add_newlink_watch(int index,
++			connman_rtnl_link_cb_t callback, void *user_data)
++{
++	return 1;
++}
++void connman_rtnl_remove_watch(unsigned int id) { }
++
++char **connman_setting_get_string_list(const char *key) { return NULL; }
++
++/* Stand-in objects; never looked into, only compared by address. */
++static struct { int unused; } fake_dhcp_server;
++
++GDHCPServer *g_dhcp_server_new(GDHCPType type, int ifindex,
++						GDHCPServerError *error)
++{
++	*error = G_DHCP_SERVER_ERROR_NONE;
++	return (GDHCPServer *) &fake_dhcp_server;
++}
++void g_dhcp_server_set_debug(GDHCPServer *server, GDHCPDebugFunc func,
++						gpointer user_data) { }
++int g_dhcp_server_set_ip_range(GDHCPServer *server, const char *start_ip,
++					const char *end_ip) { return 0; }
++void g_dhcp_server_set_lease_time(GDHCPServer *dhcp_server,
++					unsigned int lease_time) { }
++int g_dhcp_server_set_option(GDHCPServer *server,
++		unsigned char option_code, const char *option_value)
++{
++	return 0;
++}
++int g_dhcp_server_start(GDHCPServer *server) { return 0; }
++void g_dhcp_server_stop(GDHCPServer *server) { }
++void g_dhcp_server_unref(GDHCPServer *server) { }
++
++/* Only the private network D-Bus methods use these; no test does. */
++void connman_dbus_property_append_basic(DBusMessageIter *iter,
++					const char *key, int type, void *val)
++{
++	g_assert_not_reached();
++}
++
++DBusMessage *__connman_error_failed(DBusMessage *msg, int errnum)
++{
++	g_assert_not_reached();
++	return NULL;
++}
++
++/* The fake D-Bus connection */
++
++static struct { int unused; } fake_connection;
++#define FAKE_CONNECTION ((DBusConnection *) &fake_connection)
++
++static GPtrArray *signal_current;
++static GPtrArray *signal_removed;
++static int signals_sent;
++
++DBusConnection *connman_dbus_get_connection(void)
++{
++	return FAKE_CONNECTION;
++}
++
++dbus_bool_t __real_dbus_connection_send(DBusConnection *connection,
++				DBusMessage *message, dbus_uint32_t *serial);
++void __real_dbus_connection_unref(DBusConnection *connection);
++dbus_bool_t __wrap_dbus_connection_send(DBusConnection *connection,
++				DBusMessage *message, dbus_uint32_t *serial);
++void __wrap_dbus_connection_unref(DBusConnection *connection);
++
++static GPtrArray *read_string_array(DBusMessageIter *iter)
++{
++	GPtrArray *list = g_ptr_array_new_with_free_func(g_free);
++	DBusMessageIter array;
++
++	g_assert_cmpint(dbus_message_iter_get_arg_type(iter), ==,
++							DBUS_TYPE_ARRAY);
++	dbus_message_iter_recurse(iter, &array);
++
++	while (dbus_message_iter_get_arg_type(&array) == DBUS_TYPE_STRING) {
++		const char *str;
++
++		dbus_message_iter_get_basic(&array, &str);
++		g_ptr_array_add(list, g_strdup(str));
++		dbus_message_iter_next(&array);
++	}
++
++	return list;
++}
++
++dbus_bool_t __wrap_dbus_connection_send(DBusConnection *connection,
++				DBusMessage *message, dbus_uint32_t *serial)
++{
++	DBusMessageIter iter;
++
++	if (connection != FAKE_CONNECTION)
++		return __real_dbus_connection_send(connection, message, serial);
++
++	g_assert_cmpstr(dbus_message_get_member(message), ==,
++						"TetheringClientsChanged");
++
++	g_assert_true(dbus_message_iter_init(message, &iter));
++
++	if (signal_current)
++		g_ptr_array_unref(signal_current);
++	signal_current = read_string_array(&iter);
++
++	g_assert_true(dbus_message_iter_next(&iter));
++
++	if (signal_removed)
++		g_ptr_array_unref(signal_removed);
++	signal_removed = read_string_array(&iter);
++
++	signals_sent++;
++
++	return TRUE;
++}
++
++void __wrap_dbus_connection_unref(DBusConnection *connection)
++{
++	if (connection != FAKE_CONNECTION)
++		__real_dbus_connection_unref(connection);
++}
++
++/* Run the main loop until the debounced signal has gone out. */
++static void wait_for_signal(void)
++{
++	int sent = signals_sent;
++
++	while (signals_sent == sent)
++		g_main_context_iteration(NULL, TRUE);
++}
++
++static bool list_has(GPtrArray *list, const char *str)
++{
++	unsigned int i;
++
++	for (i = 0; i < list->len; i++)
++		if (!g_strcmp0(g_ptr_array_index(list, i), str))
++			return true;
++
++	return false;
++}
++
++static void register_all(void)
++{
++	unsigned int i;
++
++	for (i = 0; i < NUM_CLIENTS; i++)
++		__connman_tethering_client_register(clients[i]);
++
++	wait_for_signal();
++	g_assert_cmpuint(signal_current->len, ==, NUM_CLIENTS);
++	g_assert_cmpuint(signal_removed->len, ==, 0);
++}
++
++static void test_register_unregister(void)
++{
++	g_assert_cmpint(__connman_tethering_init(), ==, 0);
++
++	register_all();
++
++	__connman_tethering_client_unregister(clients[1]);
++	wait_for_signal();
++	g_assert_cmpuint(signal_current->len, ==, NUM_CLIENTS - 1);
++	g_assert_true(!list_has(signal_current, clients[1]));
++	g_assert_cmpuint(signal_removed->len, ==, 1);
++	g_assert_true(list_has(signal_removed, clients[1]));
++
++	__connman_tethering_cleanup();
++}
++
++/*
++ * Turning tethering off with clients connected drops every one of them:
++ * none is left listed, all are announced as removed.
++ */
++static void test_disable_drops_clients(void)
++{
++	unsigned int i;
++
++	g_assert_cmpint(__connman_tethering_init(), ==, 0);
++	g_assert_cmpint(__connman_tethering_set_enabled("192.168.0.1"), ==, 0);
++
++	register_all();
++
++	__connman_tethering_set_disabled();
++	wait_for_signal();
++
++	g_assert_cmpuint(signal_current->len, ==, 0);
++	g_assert_cmpuint(signal_removed->len, ==, NUM_CLIENTS);
++	for (i = 0; i < NUM_CLIENTS; i++)
++		g_assert_true(list_has(signal_removed, clients[i]));
++
++	__connman_tethering_cleanup();
++}
++
++int main(int argc, char *argv[])
++{
++	int ret;
++
++	g_test_init(&argc, &argv, NULL);
++
++	__connman_log_init(argv[0], NULL, false, false,
++			"Unit Tests Connection Manager", VERSION);
++
++	g_test_add_func("/tethering/register-unregister",
++					test_register_unregister);
++	g_test_add_func("/tethering/disable-drops-clients",
++					test_disable_drops_clients);
++
++	ret = g_test_run();
++
++	if (signal_current)
++		g_ptr_array_unref(signal_current);
++	if (signal_removed)
++		g_ptr_array_unref(signal_removed);
++
++	__connman_log_cleanup(false);
++
++	return ret;
++}

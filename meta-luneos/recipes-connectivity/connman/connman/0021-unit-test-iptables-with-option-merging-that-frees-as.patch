@@ -1,0 +1,203 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 26 Nov 2026 06:34:53 +0100
+Subject: [PATCH] unit: test-iptables with option merging that frees, as
+ libxtables does
+
+The xtables_merge_options() and xtables_options_xfrm() stand-ins
+returned orig_opts and freed nothing. libxtables 1.8.13 builds a new
+list and frees xt_params->opts, whatever it points at, and that is what
+aborted connmand on its first NAT rule while connman still had its
+static option table there.
+
+With TEST_CONFIG_MERGE_OPTIONS_FREES the stand-ins now do what the
+library does, and test_merge_options_frees inserts a rule whose match
+has x6 options and whose target has old-style options, twice, so both
+helpers run from the static table and from a merged list. Before
+"iptables: do not let libxtables free the static option table" it
+aborts with "free(): invalid size".
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ unit/test-iptables.c | 125 ++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 124 insertions(+), 1 deletion(-)
+
+diff --git a/unit/test-iptables.c b/unit/test-iptables.c
+index a96d867..927ee83 100644
+--- a/unit/test-iptables.c
++++ b/unit/test-iptables.c
+@@ -24,6 +24,8 @@
+ #include <stdlib.h>
+ #include <xtables.h>
+ #include <errno.h>
++#include <string.h>
++#include <getopt.h>
+ #include <sys/wait.h>
+ 
+ #include "src/connman.h"
+@@ -42,6 +44,7 @@ enum configtype {
+ 	TEST_CONFIG_COMPATIBLE_REV_FAIL =	0x0400,
+ 	TEST_CONFIG_OPTIONS_XFRM_FAIL =		0x0800,
+ 	TEST_CONFIG_MERGE_OPTIONS_FAIL =	0x1000,
++	TEST_CONFIG_MERGE_OPTIONS_FREES =	0x2000,
+ };
+ 
+ enum configtype test_config_type = TEST_CONFIG_PASS;
+@@ -266,14 +269,88 @@ int xtables_compatible_revision(const char *name, uint8_t revision, int opt)
+ 	return 1;
+ }
+ 
++/*
++ * With TEST_CONFIG_MERGE_OPTIONS_FREES the two option helpers do what
++ * libxtables 1.8.13 does: build a new list (orig_opts, the new options,
++ * then the old list less its orig_opts prefix) and free xt_params->opts,
++ * whatever it points at. connman must never leave its static option
++ * table there when it calls them, or the free() aborts.
++ */
++/* in xtables.h only for libxtables itself (XTABLES_INTERNAL) */
++#ifndef XT_OPTION_OFFSET_SCALE
++#define XT_OPTION_OFFSET_SCALE 256
++#endif
++
++static struct option *merge_options_freeing(struct option *orig_opts,
++			struct option *oldopts, const struct option *newopts,
++			unsigned int *option_offset)
++{
++	unsigned int num_oold = 0, num_old = 0, num_new = 0, i;
++	struct option *merge, *mp;
++
++	if (!newopts)
++		return oldopts;
++
++	while (orig_opts[num_oold].name)
++		num_oold++;
++	if (oldopts) {
++		while (oldopts[num_old].name)
++			num_old++;
++		/* an old list always starts with orig_opts, as libxtables assumes */
++		g_assert_cmpuint(num_old, >=, num_oold);
++		oldopts += num_oold;
++		num_old -= num_oold;
++	}
++	while (newopts[num_new].name)
++		num_new++;
++
++	merge = g_new0(struct option, num_oold + num_old + num_new + 1);
++	memcpy(merge, orig_opts, sizeof(*mp) * num_oold);
++	mp = merge + num_oold;
++
++	xt_params->option_offset += XT_OPTION_OFFSET_SCALE;
++	*option_offset = xt_params->option_offset;
++	memcpy(mp, newopts, sizeof(*mp) * num_new);
++	for (i = 0; i < num_new; i++, mp++)
++		mp->val += *option_offset;
++
++	if (oldopts)
++		memcpy(mp, oldopts, sizeof(*mp) * num_old);
++
++	/* xtables_free_opts() */
++	g_free(xt_params->opts);
++	xt_params->opts = NULL;
++
++	return merge;
++}
++
+ struct option *xtables_options_xfrm(struct option *opt1, struct option *opt2,
+ 					const struct xt_option_entry *entry,
+ 					unsigned int *dummy)
+ {
++	struct option *opts, *merged;
++	int num = 0, i;
++
+ 	if (test_config_type & TEST_CONFIG_OPTIONS_XFRM_FAIL)
+ 		call_error("xtables_options_xfrm");
+ 
+-	return opt1;
++	if (!(test_config_type & TEST_CONFIG_MERGE_OPTIONS_FREES))
++		return opt1;
++
++	while (entry[num].name)
++		num++;
++
++	opts = g_new0(struct option, num + 1);
++	for (i = 0; i < num; i++) {
++		opts[i].name = entry[i].name;
++		opts[i].has_arg = entry[i].type != XTTYPE_NONE;
++		opts[i].val = entry[i].id;
++	}
++
++	merged = merge_options_freeing(opt1, opt2, opts, dummy);
++	g_free(opts);
++
++	return merged;
+ }
+ 
+ struct option *xtables_merge_options(struct option *orig_opts,
+@@ -283,6 +360,10 @@ struct option *xtables_merge_options(struct option *orig_opts,
+ 	if (test_config_type & TEST_CONFIG_MERGE_OPTIONS_FAIL)
+ 		call_error("xtables_merge_options");
+ 
++	if (test_config_type & TEST_CONFIG_MERGE_OPTIONS_FREES)
++		return merge_options_freeing(orig_opts, oldopts, newopts,
++							option_offset);
++
+ 	return orig_opts;
+ }
+ 
+@@ -623,6 +704,46 @@ static void iptables_test_jmp_exit2()
+ 	g_assert_cmpint(WEXITSTATUS(cstatus), ==, PARAMETER_PROBLEM);
+ }
+ 
++/*
++ * A match with x6 options and a target with old-style options, so that
++ * one rule goes through both xtables_options_xfrm() and
++ * xtables_merge_options(), as the tethering NAT rule does.
++ */
++static const struct xt_option_entry test_match_x6_options[] = {
++	{ .name = "dport", .id = 1, .type = XTTYPE_STRING },
++	{ .name = NULL },
++};
++
++static const struct option test_target_extra_opts[] = {
++	{ .name = "to-ports", .has_arg = 1, .val = 1 },
++	{ .name = NULL },
++};
++
++static void iptables_test_merge_options_frees(void)
++{
++	int i;
++
++	set_test_config(TEST_CONFIG_MERGE_OPTIONS_FREES);
++
++	xt_match.x6_options = test_match_x6_options;
++	xt_target.extra_opts = test_target_extra_opts;
++
++	__connman_iptables_init();
++
++	g_assert_true(!__connman_iptables_new_chain(AF_INET, "filter", "INPUT"));
++
++	/* The second rule starts again from the static table. */
++	for (i = 0; i < 2; i++)
++		g_assert_cmpint(__connman_iptables_insert(AF_INET, "filter",
++				"INPUT", "-p tcp -m tcp --dport 42 -j ACCEPT"),
++				==, 0);
++
++	__connman_iptables_cleanup();
++
++	xt_match.x6_options = NULL;
++	xt_target.extra_opts = NULL;
++}
++
+ static gchar *option_debug = NULL;
+ 
+ static bool parse_debug(const char *key, const char *value,
+@@ -678,6 +799,8 @@ int main (int argc, char *argv[])
+ 	g_test_add_func("/iptables/test_jmp_exit0", iptables_test_jmp_exit0);
+ 	g_test_add_func("/iptables/test_jmp_exit1", iptables_test_jmp_exit1);
+ 	g_test_add_func("/iptables/test_jmp_exit2", iptables_test_jmp_exit2);
++	g_test_add_func("/iptables/test_merge_options_frees",
++					iptables_test_merge_options_frees);
+ 
+ 	return g_test_run();
+ }

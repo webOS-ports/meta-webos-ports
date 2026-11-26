@@ -36,6 +36,26 @@ do_install:append() {
     fi
 }
 
+# Emulators (qemu, VirtualBox): SSH on the NAT interface eth0 as well, after
+# the "# luneos-emulator-ssh" marker in both IPv4 rules files (see the comment
+# above it there). systemd_%.bbappend drops 99-default.link on qemuall, so the
+# interface is eth0 and not a predictable name.
+LUNEOS_EMULATOR_SSH_RULE = "-A INPUT -i eth+ -p tcp --dport 22 -j ACCEPT"
+
+do_install:append:qemuall() {
+    for f in iptables.rules iptables-fallback.rules; do
+        grep -qx '# luneos-emulator-ssh' ${D}${IPTABLES_RULES_DIR}/$f || \
+            bbfatal "$f has no '# luneos-emulator-ssh' marker line"
+        sed -i -e '/^# luneos-emulator-ssh$/a ${LUNEOS_EMULATOR_SSH_RULE}' \
+            ${D}${IPTABLES_RULES_DIR}/$f
+        grep -qxF -- '${LUNEOS_EMULATOR_SSH_RULE}' ${D}${IPTABLES_RULES_DIR}/$f || \
+            bbfatal "emulator SSH rule did not land in $f"
+    done
+}
+
+# The rules then differ per machine on qemu.
+PACKAGE_ARCH:qemuall = "${MACHINE_ARCH}"
+
 FILES:${PN} += " \
     ${sbindir}/luneos-devmode-firewall \
     ${systemd_system_unitdir}/iptables.service.d \
@@ -56,4 +76,4 @@ RDEPENDS:${PN} += " \
 # Bumped when the rules or scripts shipped from here change, so installed
 # images pick them up on upgrade: the base recipe's revision does not move
 # for it.
-PR = "r2"
+PR = "r3"

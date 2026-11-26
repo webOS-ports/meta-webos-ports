@@ -56,6 +56,68 @@ SRC_URI += "file://0013-ofono-let-cellular-enable-disable-switch-mobile-data.pat
 # at the passphrase or the AP refusing the station.
 SRC_URI += "file://0014-service-retry-a-saved-Wi-Fi-network-after-a-failed-a.patch"
 
+# Powering WiFi on handed wpa_supplicant the technology's regdom string,
+# which the reply then freed before copying it: the next power on sent
+# freed memory as the Country, and libdbus aborted connmand on it.
+SRC_URI += "file://0015-technology-do-not-free-the-regulatory-domain-it-is-s.patch"
+
+# Tethering aborted connmand ("free(): invalid pointer") when it added the
+# NAT rule: iptables 1.8.13's xtables_merge_options() frees the option
+# table it is given, and connman handed it its static one.
+SRC_URI += "file://0016-iptables-do-not-let-libxtables-free-the-static-optio.patch"
+
+# The Wi-Fi hotspot itself (tested on a Q25 with a PC, a FLX1s and a TouchPad
+# as clients):
+#  - 0017: the AP offered SAE and PSK-SHA256 next to WPA2-PSK, which MediaTek's
+#    AP firmware cannot do, so stations picking them were refused (status 43).
+#  - 0018: the DHCP server broadcast every OFFER/ACK; RFC 2131 wants unicast
+#    unless the client asks, and a MediaTek station on a MediaTek hotspot gets
+#    no broadcasts, so it never got a lease.
+#  - 0019: start the AP on a dedicated interface (WiFiTetheringInterfaces in
+#    connman-conf's main.conf, ap0 on MediaTek) so wlan0 stays connected.
+SRC_URI += " \
+    file://0017-gsupplicant-offer-plain-WPA2-PSK-on-an-access-point.patch \
+    file://0018-gdhcp-unicast-OFFER-and-ACK-as-RFC-2131-asks.patch \
+    file://0019-wifi-tether-on-a-dedicated-access-point-interface.patch \
+"
+
+# Switching the hotspot off with a client on it removed clients from the
+# client table while walking it: GLib warned "version == hash_table->version"
+# and could skip clients, which then stayed in TetheringClients.
+SRC_URI += "file://0020-tethering-do-not-remove-clients-while-walking-the-cl.patch"
+
+# Restarting connmand with mobile data up left the context's interface down:
+# connmand takes running interfaces down at startup and nothing brought the
+# cellular one up again, so the service stayed "ready" with no routes. With
+# its unit test, unit/test-ofono.
+SRC_URI += "file://0024-ofono-bring-the-interface-of-an-active-context-up.patch"
+
+# Unit tests for 0016, 0018 and 0020, each failing without its fix. They
+# are noinst programs, so every build compiles and links them for the
+# target; tests/host-check.sh runs them on the build host, under the
+# sanitizers and valgrind too (see tests/README.md).
+SRC_URI += " \
+    file://0021-unit-test-iptables-with-option-merging-that-frees-as.patch \
+    file://0022-unit-test-where-the-DHCP-server-sends-its-OFFER-and-.patch \
+    file://0023-unit-test-tethering-clients-also-when-tethering-is-t.patch \
+"
+
+# Leaving offline mode (airplane mode) judged the outcome by the last
+# technology it powered alone. Wired with only the kernel's gretap0/erspan0
+# stubs cannot be powered, so OfflineMode was read back as true although
+# WiFi and cellular had come back, and the shell kept showing airplane
+# mode. With its unit test, unit/test-offlinemode. connman-conf also keeps
+# connman off those two interfaces.
+SRC_URI += "file://0025-technology-leaving-offline-mode-must-not-depend-on-e.patch"
+
+# IPv6 hung on MediaTek phones: router advertisements on a data connection
+# oFono does not own (the VoLTE stack's IMS one, or a deactivated context's
+# interface left up) made it the IPv6 default route. connman-conf keeps
+# ccmni interfaces from taking default routes that way; this turns it on
+# for the active context's interface and off again when it disconnects.
+# With its unit tests, in unit/test-ofono.
+SRC_URI += "file://0026-ofono-take-IPv6-default-routes-only-on-an-active-con.patch"
+
 # See connman-vpn.service.d/luneos-caps.conf for why: upstream's
 # CapabilityBoundingSet on connman-vpn.service is missing CAP_SYS_ADMIN and
 # CAP_DAC_OVERRIDE, which the l2tp plugin's client-side pppd needs to open

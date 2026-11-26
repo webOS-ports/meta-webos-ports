@@ -79,6 +79,21 @@ do_install:append:halium() {
         ${D}${sysconfdir}/connman/main.conf
 }
 
+# IPv6 on MediaTek modems: no default route from the router advertisements
+# of ccmni interfaces, except the active internet context's, which connman
+# 0026 turns on. Without it the IMS connection of MediaTek's VoLTE stack
+# (Q25) or a deactivated context's interface left up (Radon) became the
+# IPv6 default route, and IPv6 connections hung instead of falling back to
+# IPv4 (IRC never logged in). systemd-sysctl applies the entry to each
+# ccmni interface as it appears (99-systemd.rules).
+SRC_URI:append:halium = " file://60-luneos-ccmni-ipv6.conf"
+FILES:${PN}:append:halium = " ${nonarch_libdir}/sysctl.d/60-luneos-ccmni-ipv6.conf"
+do_install:append:halium() {
+    install -d ${D}${nonarch_libdir}/sysctl.d
+    install -m 0644 ${UNPACKDIR}/60-luneos-ccmni-ipv6.conf \
+        ${D}${nonarch_libdir}/sysctl.d/60-luneos-ccmni-ipv6.conf
+}
+
 FILES:${PN} += " \
     ${sysconfdir}/connman \
     ${sysconfdir} \

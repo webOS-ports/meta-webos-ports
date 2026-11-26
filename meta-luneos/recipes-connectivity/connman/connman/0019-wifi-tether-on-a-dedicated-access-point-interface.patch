@@ -1,0 +1,595 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Thu, 26 Nov 2026 05:24:27 +0100
+Subject: [PATCH] wifi: tether on a dedicated access point interface
+
+Wi-Fi tethering takes a station interface away from wpa_supplicant and
+re-creates it as the access point. Some drivers will not put their
+station netdev in AP mode: MediaTek's gen4m refuses with
+"mtk_cfg_change_iface: resource invalid" and wpa_supplicant reports
+"Failed to start AP functionality", so tethering came up with no access
+point behind it. The same driver provides ap0, an AP netdev next to
+wlan0 that beacons while wlan0 stays associated.
+
+Add WiFiTetheringInterfaces to main.conf. When one of the listed
+interfaces exists, the access point is started on it as a wpa_supplicant
+interface of its own, bridged into the tethering bridge, and the station
+interfaces are left alone: the device stays on its Wi-Fi network while
+sharing it. Clients are registered as tethering clients as before. With
+no listed interface present, tethering works as it did.
+
+The interface is meant to be in NetworkInterfaceBlacklist as well, so it
+never becomes a station device. A leftover AP interface from an earlier
+connmand is removed when wpa_supplicant reports it, so a restart does
+not leave a hotspot beaconing with nothing behind it.
+
+Tested on a Q25 (MediaTek gen4m, ap0): hotspot up while wlan0 stays on
+its 5 GHz network, PC, FuriPhone FLX1s and TouchPad clients get a lease
+and internet over Wi-Fi and over mobile data, on/off cycles and a
+connmand restart while tethering leave no stray AP.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ doc/connman.conf.5.in |  11 ++
+ plugins/wifi.c        | 374 ++++++++++++++++++++++++++++++++++++++++++
+ src/main.c            |  16 ++
+ src/main.conf         |   6 +
+ 4 files changed, 407 insertions(+)
+
+diff --git a/doc/connman.conf.5.in b/doc/connman.conf.5.in
+index ad5eeb3..1aa5dbe 100644
+--- a/doc/connman.conf.5.in
++++ b/doc/connman.conf.5.in
+@@ -158,6 +158,17 @@ normal operation of these networks. Due to this ethernet is not
+ tethered by default. Do not activate ethernet tethering unless you
+ really know what you are doing.
+ .TP
++.BI WiFiTetheringInterfaces= interface\fR[,...]
++Wi-Fi interfaces that only ever act as a tethering access point, separated
++by ",". When one of them exists, Wi-Fi tethering starts the access point
++on the first one present and leaves the station interfaces as they are,
++so the device stays connected to its own Wi-Fi network while sharing it.
++Meant for drivers that provide a separate AP netdev next to the station
++one, such as MediaTek's ap0. List the same interfaces in
++NetworkInterfaceBlacklist so they are not managed as stations. Without a
++match, tethering takes over a station interface as before. Not set by
++default.
++.TP
+ .BI PersistentTetheringMode=true\ \fR|\fB\ false
+ Restore earlier tethering status when returning from offline mode,
+ re-enabling a technology, and after restarts and reboots.
+diff --git a/plugins/wifi.c b/plugins/wifi.c
+index cc329b9..89f4b95 100644
+--- a/plugins/wifi.c
++++ b/plugins/wifi.c
+@@ -198,6 +198,49 @@ static void start_autoscan(struct connman_device *device);
+ static int tech_set_tethering(struct connman_technology *technology,
+ 				const char *bridge, bool enabled);
+ 
++/*
++ * Wi-Fi tethering on an interface of its own.
++ *
++ * Upstream tethering takes a station interface away from wpa_supplicant
++ * and re-creates it as the access point. Some drivers will not switch
++ * their station netdev to AP mode at all: MediaTek's gen4m driver, for
++ * one, refuses with "resource invalid" and instead provides ap0, an AP
++ * netdev next to wlan0 that can beacon while wlan0 stays associated.
++ *
++ * WiFiTetheringInterfaces in main.conf lists such interfaces. When one
++ * of them exists, the access point is started on it and the station
++ * interfaces are left alone, so Wi-Fi stays connected while the
++ * connection is shared. The interface is expected to be in
++ * NetworkInterfaceBlacklist as well, so it never becomes a station
++ * device; it only ever exists as this wpa_supplicant interface.
++ */
++enum dedicated_ap_state {
++	DEDICATED_AP_IDLE,
++	DEDICATED_AP_CREATING,
++	DEDICATED_AP_STARTING,
++	DEDICATED_AP_RUNNING,
++	DEDICATED_AP_STOPPING,
++};
++
++static struct {
++	enum dedicated_ap_state state;
++	struct connman_technology *technology;
++	GSupplicantInterface *interface;
++	char *ifname;
++	char *bridge;
++	int index;
++	bool bridged;
++} dedicated_ap;
++
++static bool is_dedicated_ap(const GSupplicantInterface *interface)
++{
++	return interface && interface == dedicated_ap.interface;
++}
++
++static bool is_dedicated_ap_ifname(const char *ifname);
++static void dedicated_ap_failed(void);
++static void dedicated_ap_lost(void);
++
+ static int p2p_tech_probe(struct connman_technology *technology)
+ {
+ 	p2p_technology = technology;
+@@ -2803,6 +2846,18 @@ static void interface_added(GSupplicantInterface *interface)
+ 
+ 	wifi = g_supplicant_interface_get_data(interface);
+ 	if (!wifi) {
++		/*
++		 * A tethering interface wpa_supplicant still has from an
++		 * earlier connmand: it would keep beaconing with nothing
++		 * behind it. Leave the one being set up alone.
++		 */
++		if (is_dedicated_ap_ifname(ifname) &&
++				dedicated_ap.state == DEDICATED_AP_IDLE) {
++			DBG("removing stale tethering interface %s", ifname);
++			g_supplicant_interface_remove(interface, NULL, NULL);
++			return;
++		}
++
+ 		wifi = get_pending_wifi_data(ifname);
+ 		if (!wifi)
+ 			return;
+@@ -3174,6 +3229,11 @@ static void interface_removed(GSupplicantInterface *interface)
+ 
+ 	DBG("ifname %s", ifname);
+ 
++	if (is_dedicated_ap(interface)) {
++		dedicated_ap_lost();
++		return;
++	}
++
+ 	wifi = g_supplicant_interface_get_data(interface);
+ 
+ 	if (wifi)
+@@ -3260,6 +3320,16 @@ static void ap_create_fail(GSupplicantInterface *interface)
+ 	struct wifi_data *wifi = g_supplicant_interface_get_data(interface);
+ 	int ret;
+ 
++	if (is_dedicated_ap(interface)) {
++		connman_error("%s: could not start the access point",
++						dedicated_ap.ifname);
++		dedicated_ap_failed();
++		return;
++	}
++
++	if (!wifi)
++		return;
++
+ 	if ((wifi->tethering) && (wifi->tethering_param)) {
+ 		DBG("%s create AP fail \n",
+ 				g_supplicant_interface_get_ifname(wifi->interface));
+@@ -3582,6 +3652,11 @@ static void sta_authorized(GSupplicantInterface *interface,
+ 
+ 	DBG("wifi %p station %s authorized", wifi, addr);
+ 
++	if (is_dedicated_ap(interface)) {
++		__connman_tethering_client_register(addr);
++		return;
++	}
++
+ 	if (!wifi || !wifi->tethering)
+ 		return;
+ 
+@@ -3595,6 +3670,11 @@ static void sta_deauthorized(GSupplicantInterface *interface,
+ 
+ 	DBG("wifi %p station %s deauthorized", wifi, addr);
+ 
++	if (is_dedicated_ap(interface)) {
++		__connman_tethering_client_unregister(addr);
++		return;
++	}
++
+ 	if (!wifi || !wifi->tethering)
+ 		return;
+ 
+@@ -3971,6 +4051,283 @@ static void sta_remove_callback(int result,
+ 							info);
+ }
+ 
++static bool is_dedicated_ap_ifname(const char *ifname)
++{
++	char **names = connman_setting_get_string_list("WiFiTetheringInterfaces");
++	int i;
++
++	if (!ifname || !names)
++		return false;
++
++	for (i = 0; names[i]; i++)
++		if (g_str_equal(names[i], ifname))
++			return true;
++
++	return false;
++}
++
++/* The first configured tethering interface the kernel has. */
++static const char *find_dedicated_ap_ifname(void)
++{
++	char **names = connman_setting_get_string_list("WiFiTetheringInterfaces");
++	int i;
++
++	if (!names)
++		return NULL;
++
++	for (i = 0; names[i]; i++)
++		if (connman_inet_ifindex(names[i]) >= 0)
++			return names[i];
++
++	return NULL;
++}
++
++static void dedicated_ap_reset(void)
++{
++	if (dedicated_ap.bridged)
++		connman_inet_remove_from_bridge(dedicated_ap.index,
++						dedicated_ap.bridge);
++
++	g_free(dedicated_ap.ifname);
++	g_free(dedicated_ap.bridge);
++
++	memset(&dedicated_ap, 0, sizeof(dedicated_ap));
++	dedicated_ap.state = DEDICATED_AP_IDLE;
++}
++
++static void dedicated_ap_remove_callback(int result,
++				GSupplicantInterface *interface,
++					void *user_data)
++{
++	DBG("result %d", result);
++
++	/* interface_removed() may already have reset it. */
++	if (dedicated_ap.state == DEDICATED_AP_STOPPING)
++		dedicated_ap_reset();
++}
++
++/* Take the access point down; tethering itself is handled by the caller. */
++static void dedicated_ap_stop(void)
++{
++	GSupplicantInterface *interface = dedicated_ap.interface;
++
++	DBG("state %d", dedicated_ap.state);
++
++	switch (dedicated_ap.state) {
++	case DEDICATED_AP_IDLE:
++	case DEDICATED_AP_STOPPING:
++		return;
++	case DEDICATED_AP_CREATING:
++		/* dedicated_ap_create_callback() finishes the job. */
++		dedicated_ap.state = DEDICATED_AP_STOPPING;
++		return;
++	case DEDICATED_AP_STARTING:
++	case DEDICATED_AP_RUNNING:
++		break;
++	}
++
++	dedicated_ap.state = DEDICATED_AP_STOPPING;
++
++	if (dedicated_ap.bridged) {
++		connman_inet_remove_from_bridge(dedicated_ap.index,
++						dedicated_ap.bridge);
++		dedicated_ap.bridged = false;
++	}
++
++	if (!interface || g_supplicant_interface_remove(interface,
++				dedicated_ap_remove_callback, NULL) < 0)
++		dedicated_ap_reset();
++}
++
++/* Starting failed after tethering was announced: undo both. */
++static void dedicated_ap_failed(void)
++{
++	struct connman_technology *technology = dedicated_ap.technology;
++
++	DBG("state %d", dedicated_ap.state);
++
++	if (dedicated_ap.state == DEDICATED_AP_IDLE ||
++			dedicated_ap.state == DEDICATED_AP_STOPPING)
++		return;
++
++	dedicated_ap_stop();
++
++	if (technology)
++		connman_technology_tethering_notify(technology, false);
++}
++
++/* wpa_supplicant dropped the interface (or went away itself). */
++static void dedicated_ap_lost(void)
++{
++	struct connman_technology *technology = dedicated_ap.technology;
++	enum dedicated_ap_state state = dedicated_ap.state;
++
++	DBG("state %d", state);
++
++	dedicated_ap.interface = NULL;
++	dedicated_ap_reset();
++
++	if (state != DEDICATED_AP_STOPPING && technology)
++		connman_technology_tethering_notify(technology, false);
++}
++
++static void dedicated_ap_start_callback(int result,
++				GSupplicantInterface *interface,
++					void *user_data)
++{
++	DBG("result %d state %d", result, dedicated_ap.state);
++
++	if (dedicated_ap.state != DEDICATED_AP_STARTING)
++		return;
++
++	if (result < 0 && result != -EINPROGRESS) {
++		connman_error("%s: could not start the access point: %d",
++						dedicated_ap.ifname, result);
++		dedicated_ap_failed();
++		return;
++	}
++
++	dedicated_ap.state = DEDICATED_AP_RUNNING;
++
++	/*
++	 * wpa_supplicant only listens on the bridge for EAPOL; putting the
++	 * interface into it is ours to do, as for a station interface.
++	 */
++	if (connman_inet_add_to_bridge(dedicated_ap.index,
++					dedicated_ap.bridge) < 0) {
++		connman_error("%s: could not add to bridge %s",
++				dedicated_ap.ifname, dedicated_ap.bridge);
++		dedicated_ap_failed();
++		return;
++	}
++
++	dedicated_ap.bridged = true;
++
++	connman_info("%s: access point started", dedicated_ap.ifname);
++}
++
++static void dedicated_ap_create_callback(int result,
++				GSupplicantInterface *interface,
++					void *user_data)
++{
++	GSupplicantSSID *ssid;
++	int err;
++
++	DBG("result %d state %d", result, dedicated_ap.state);
++
++	if (dedicated_ap.state == DEDICATED_AP_STOPPING) {
++		/* Tethering was turned off while this was in flight. */
++		if (result < 0 || !interface ||
++				g_supplicant_interface_remove(interface,
++					dedicated_ap_remove_callback,
++					NULL) < 0)
++			dedicated_ap_reset();
++		return;
++	}
++
++	if (dedicated_ap.state != DEDICATED_AP_CREATING)
++		return;
++
++	if (result < 0 || !interface) {
++		connman_error("%s: wpa_supplicant could not take it: %d",
++						dedicated_ap.ifname, result);
++		dedicated_ap_failed();
++		return;
++	}
++
++	dedicated_ap.interface = interface;
++	dedicated_ap.state = DEDICATED_AP_STARTING;
++
++	if (g_supplicant_interface_set_apscan(interface, 2) < 0)
++		connman_error("Failed to set interface ap_scan property");
++
++	/*
++	 * gsupplicant owns the SSID from here: it frees it once the network
++	 * is removed again, and on its own failure paths that can be hit
++	 * now that the interface exists.
++	 */
++	ssid = ssid_ap_init(dedicated_ap.technology);
++	if (!ssid) {
++		dedicated_ap_failed();
++		return;
++	}
++
++	err = g_supplicant_interface_connect(interface, ssid,
++					dedicated_ap_start_callback, NULL);
++	if (err < 0 && err != -EINPROGRESS) {
++		connman_error("%s: could not start the access point: %d",
++						dedicated_ap.ifname, err);
++		dedicated_ap_failed();
++	}
++}
++
++/*
++ * Returns -ENODEV when no tethering interface is configured or present,
++ * so the caller can fall back to tethering on a station interface.
++ */
++static int dedicated_ap_start(struct connman_technology *technology,
++				const char *bridge)
++{
++	const char *driver = connman_setting_get_string("wifi");
++	GSupplicantSSID *ssid;
++	const char *ifname;
++	int index, err;
++
++	ifname = find_dedicated_ap_ifname();
++	if (!ifname)
++		return -ENODEV;
++
++	index = connman_inet_ifindex(ifname);
++	if (index < 0)
++		return -ENODEV;
++
++	DBG("ifname %s index %d state %d", ifname, index, dedicated_ap.state);
++
++	switch (dedicated_ap.state) {
++	case DEDICATED_AP_IDLE:
++		break;
++	case DEDICATED_AP_STOPPING:
++		return -EBUSY;
++	default:
++		return -EALREADY;
++	}
++
++	/* Refuse up front what ssid_ap_init() will refuse later. */
++	ssid = ssid_ap_init(technology);
++	if (!ssid)
++		return -EINVAL;
++
++	g_free((char *)ssid->ssid);
++	g_free((char *)ssid->passphrase);
++	g_free(ssid);
++
++	dedicated_ap.technology = technology;
++	dedicated_ap.ifname = g_strdup(ifname);
++	dedicated_ap.bridge = g_strdup(bridge);
++	dedicated_ap.index = index;
++
++	/* Bridge, DHCP server and NAT first, as upstream does. */
++	err = connman_technology_tethering_notify(technology, true);
++	if (err < 0 && err != -EALREADY) {
++		dedicated_ap_reset();
++		return err;
++	}
++
++	dedicated_ap.state = DEDICATED_AP_CREATING;
++
++	err = g_supplicant_interface_create(ifname, driver, bridge,
++					dedicated_ap_create_callback, NULL);
++	if (err < 0) {
++		dedicated_ap_reset();
++		connman_technology_tethering_notify(technology, false);
++		return err;
++	}
++
++	DBG("tethering on %s", ifname);
++
++	return 0;
++}
++
+ static int enable_wifi_tethering(struct connman_technology *technology,
+ 				const char *bridge, bool available)
+ {
+@@ -4083,6 +4440,8 @@ static int tech_set_tethering(struct connman_technology *technology,
+ 	DBG("");
+ 
+ 	if (!enabled) {
++		dedicated_ap_stop();
++
+ 		for (list = iface_list; list; list = list->next) {
+ 			wifi = list->data;
+ 
+@@ -4100,6 +4459,10 @@ static int tech_set_tethering(struct connman_technology *technology,
+ 		return 0;
+ 	}
+ 
++	err = dedicated_ap_start(technology, bridge);
++	if (err != -ENODEV)
++		return err;
++
+ 	DBG("trying tethering for available devices");
+ 	err = enable_wifi_tethering(technology, bridge, true);
+ 
+@@ -4166,6 +4529,17 @@ static void wifi_exit(void)
+ {
+ 	DBG();
+ 
++	/*
++	 * Best effort: the call may not leave before connmand does, and
++	 * interface_added() removes a leftover one on the next start.
++	 */
++	if (dedicated_ap.interface)
++		g_supplicant_interface_remove(dedicated_ap.interface,
++								NULL, NULL);
++	g_free(dedicated_ap.ifname);
++	g_free(dedicated_ap.bridge);
++	memset(&dedicated_ap, 0, sizeof(dedicated_ap));
++
+ 	connman_technology_driver_unregister(&tech_driver);
+ 
+ 	g_supplicant_unregister(&callbacks);
+diff --git a/src/main.c b/src/main.c
+index 5e2eb47..7944870 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -118,6 +118,7 @@ static struct {
+ 	bool allow_domainname_updates;
+ 	bool single_tech;
+ 	char **tethering_technologies;
++	char **wifi_tethering_interfaces;
+ 	bool persistent_tethering_mode;
+ 	bool enable_6to4;
+ 	char *vendor_class_id;
+@@ -156,6 +157,7 @@ static struct {
+ 	.allow_domainname_updates = true,
+ 	.single_tech = false,
+ 	.tethering_technologies = NULL,
++	.wifi_tethering_interfaces = NULL,
+ 	.persistent_tethering_mode = false,
+ 	.enable_6to4 = false,
+ 	.vendor_class_id = NULL,
+@@ -196,6 +198,7 @@ static struct {
+ #define CONF_ALLOW_DOMAINNAME_UPDATES   "AllowDomainnameUpdates"
+ #define CONF_SINGLE_TECH                "SingleConnectedTechnology"
+ #define CONF_TETHERING_TECHNOLOGIES      "TetheringTechnologies"
++#define CONF_WIFI_TETHERING_INTERFACES  "WiFiTetheringInterfaces"
+ #define CONF_PERSISTENT_TETHERING_MODE  "PersistentTetheringMode"
+ #define CONF_ENABLE_6TO4                "Enable6to4"
+ #define CONF_VENDOR_CLASS_ID            "VendorClassID"
+@@ -235,6 +238,7 @@ static const char *supported_options[] = {
+ 	CONF_ALLOW_DOMAINNAME_UPDATES,
+ 	CONF_SINGLE_TECH,
+ 	CONF_TETHERING_TECHNOLOGIES,
++	CONF_WIFI_TETHERING_INTERFACES,
+ 	CONF_PERSISTENT_TETHERING_MODE,
+ 	CONF_ENABLE_6TO4,
+ 	CONF_VENDOR_CLASS_ID,
+@@ -629,6 +633,14 @@ static void parse_config(GKeyFile *config, const char *file)
+ 
+ 	g_clear_error(&error);
+ 
++	str_list = __connman_config_get_string_list(config, GENERAL_GROUP,
++			CONF_WIFI_TETHERING_INTERFACES, &len, &error);
++
++	if (!error)
++		connman_settings.wifi_tethering_interfaces = str_list;
++
++	g_clear_error(&error);
++
+ 	boolean = __connman_config_get_bool(config, GENERAL_GROUP,
+ 					CONF_PERSISTENT_TETHERING_MODE,
+ 					&error);
+@@ -1161,6 +1173,9 @@ char **connman_setting_get_string_list(const char *key)
+ 	if (g_str_equal(key, CONF_TETHERING_TECHNOLOGIES))
+ 		return connman_settings.tethering_technologies;
+ 
++	if (g_str_equal(key, CONF_WIFI_TETHERING_INTERFACES))
++		return connman_settings.wifi_tethering_interfaces;
++
+ 	return NULL;
+ }
+ 
+@@ -1377,6 +1392,7 @@ int main(int argc, char *argv[])
+ 	g_strfreev(connman_settings.fallback_nameservers);
+ 	g_strfreev(connman_settings.blacklisted_interfaces);
+ 	g_strfreev(connman_settings.tethering_technologies);
++	g_strfreev(connman_settings.wifi_tethering_interfaces);
+ 	g_free(connman_settings.vendor_class_id);
+ 	g_free(connman_settings.dhcp_hostname);
+ 	g_free(connman_settings.online_check_ipv4_url);
+diff --git a/src/main.conf b/src/main.conf
+index 72bba4e..6ff10d5 100644
+--- a/src/main.conf
++++ b/src/main.conf
+@@ -126,6 +126,12 @@
+ # really know what you are doing.
+ # TetheringTechnologies = wifi,bluetooth,gadget
+ 
++# Wi-Fi interfaces that only ever act as a tethering access point, such as
++# MediaTek's ap0. When one exists, the hotspot runs on it and the station
++# interface stays connected. List them in NetworkInterfaceBlacklist too.
++# Not set by default.
++# WiFiTetheringInterfaces = ap0
++
+ # Restore earlier tethering status when returning from offline mode,
+ # re-enabling a technology, and after restarts and reboots.
+ # Default value is false.
