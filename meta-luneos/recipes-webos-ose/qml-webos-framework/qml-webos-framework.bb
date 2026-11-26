@@ -22,7 +22,7 @@ SRCREV = "0a8e10135db25281bb74404bddc50240fa393b8c"
 
 PV = "1.0.0-172"
 
-PR = "r45"
+PR = "r46"
 
 inherit webos_qmake6
 inherit pkgconfig
@@ -39,11 +39,60 @@ OE_QMAKE_PATH_HEADERS = "${OE_QMAKE_PATH_QT_HEADERS}"
 
 FILES:${PN} += "${OE_QMAKE_PATH_QML}/Eos/*"
 
-PACKAGES += "${PN}-examples"
+# The example apps' role and client-permission files, which
+# webos_app_generate_security_files writes for every app under
+# webos_applicationsdir, go with the apps. In ${PN} they were installed without
+# them, keyed on executables that are not (do_validate_ls2_wiring:
+# ROLE_EXE_MISSING). PACKAGE_BEFORE_PN, not PACKAGES +=, so -examples comes
+# before ${PN}, which would otherwise take them, and still after -dbg.
+QML_WEBOS_FRAMEWORK_EXAMPLE_LS2 = "com.webos.exampleapp.*.app.json eos.*.app.json"
+PACKAGE_BEFORE_PN += "${PN}-examples"
 FILES:${PN}-examples += " \
     ${webos_applicationsdir}/* \
     ${datadir}/qml/locales/${BPN}/ \
+    ${@' '.join('%s/%s %s/%s' % (d.getVar('webos_sysbus_rolesdir'), p, d.getVar('webos_sysbus_permissionsdir'), p) for p in d.getVar('QML_WEBOS_FRAMEWORK_EXAMPLE_LS2').split())} \
+    ${webos_sysbus_manifestsdir}/${BPN}-examples.manifest.json \
 "
+
+# ...and so do their manifest entries. The package manifest lists every ls2
+# file in ${D}, and ls-hubd rejects a whole manifest when one file it names
+# cannot be read (ManifestData::ProcessManifest), which would take the
+# booster's and qmlrunner's roles down with the examples' when -examples is not
+# installed. Move the examples' entries to a manifest of their own.
+python do_configure_manifest:append() {
+    import fnmatch, json, os
+
+    man_dir = d.getVar("D") + d.getVar("webos_sysbus_manifestsdir")
+    main_file = os.path.join(man_dir, d.getVar("BPN") + ".manifest.json")
+    if not os.path.exists(main_file):
+        return
+    with open(main_file) as f:
+        main = json.load(f)
+
+    patterns = d.getVar("QML_WEBOS_FRAMEWORK_EXAMPLE_LS2").split()
+    def is_example(path):
+        return any(fnmatch.fnmatch(os.path.basename(path), p) for p in patterns)
+
+    examples = {"id": d.getVar("BPN") + "-examples", "version": main["version"]}
+    for key in list(main.keys()):
+        if not isinstance(main[key], list):
+            continue
+        moved = [p for p in main[key] if is_example(p)]
+        if not moved:
+            continue
+        examples[key] = moved
+        main[key] = [p for p in main[key] if not is_example(p)]
+        if not main[key]:
+            del main[key]
+    if len(examples) == 2:
+        return
+
+    for name, manifest in ((main_file, main),
+                           (os.path.join(man_dir, examples["id"] + ".manifest.json"), examples)):
+        with open(name, "w") as f:
+            json.dump(manifest, f, indent=4, sort_keys=False)
+            f.write("\n")
+}
 
 # unit-tests
 PACKAGES =+ "${PN}-tests"
