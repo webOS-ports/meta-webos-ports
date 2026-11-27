@@ -1,0 +1,104 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] sim-auth: parse an AKA answer that ends in its status
+ word
+
+UmtsAuthenticate answered NotSupported to every challenge on
+ofono-binder-plugin, the real ones from an operator's ePDG too.
+
+The SIM's answer comes through the driver's logical_access, and drivers
+hand it back with SW1 SW2: the AT driver passes on what +CGLA returned,
+and ofono-binder-plugin appends the status word for an LPA, which has to
+see it. sim_parse_umts_authenticate() takes the data alone. After IK it
+accepts nothing but an 8 byte Kc, so the trailing 90 00 failed it, and
+handle_umts() answered NotSupported.
+
+sim_parse_umts_authenticate_apdu() parses the buffer as it is first, so
+a driver that leaves the status word out loses nothing, then without a
+trailing 90 00 or 91 xx (success with a proactive command pending). Any
+other status word stays a failure. handle_umts() uses it. The GSM
+parser does not look past Kc, so it needs nothing.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/sim-auth.c |  2 +-
+ src/simutil.c  | 36 ++++++++++++++++++++++++++++++++++++
+ src/simutil.h  |  5 +++++
+ 3 files changed, 42 insertions(+), 1 deletion(-)
+
+diff --git a/src/sim-auth.c b/src/sim-auth.c
+index 87f1b3e..c9b88b4 100644
+--- a/src/sim-auth.c
++++ b/src/sim-auth.c
+@@ -195,7 +195,7 @@ static void handle_umts(struct ofono_sim_auth *sa, const uint8_t *resp,
+ 	DBusMessageIter dict;
+ 	struct data_block res, ck, ik, auts, sres, kc;
+ 
+-	if (!sim_parse_umts_authenticate(resp, len, &res, &ck, &ik,
++	if (!sim_parse_umts_authenticate_apdu(resp, len, &res, &ck, &ik,
+ 			&auts, &sres, &kc))
+ 		goto umts_end;
+ 
+diff --git a/src/simutil.c b/src/simutil.c
+index 5dfc5e0..08d22c5 100644
+--- a/src/simutil.c
++++ b/src/simutil.c
+@@ -1788,6 +1788,42 @@ gboolean sim_parse_umts_authenticate(const unsigned char *buffer, int len,
+ 	return FALSE;
+ }
+ 
++/*
++ * The response of an AUTHENTICATE sent over a logical channel, as a driver's
++ * logical_access hands it back. The AT driver passes on what +CGLA returned
++ * and ofono-binder-plugin appends the status word too, for an LPA that has to
++ * see it, so the data may be followed by SW1 SW2. The parser above takes the
++ * data only: after IK it accepts nothing but an 8 byte Kc, so a trailing
++ * 90 00 failed every successful answer.
++ *
++ * Parse the buffer as it is first, so a driver that leaves the status word
++ * out loses nothing, then without a trailing 90 00 or 91 xx (success, with
++ * a proactive command pending). Any other status word is the card's refusal.
++ */
++gboolean sim_parse_umts_authenticate_apdu(const unsigned char *buffer,
++		int len, struct data_block *res, struct data_block *ck,
++		struct data_block *ik, struct data_block *auts,
++		struct data_block *sres, struct data_block *kc)
++{
++	unsigned char sw1, sw2;
++
++	if (sim_parse_umts_authenticate(buffer, len, res, ck, ik, auts,
++					sres, kc))
++		return TRUE;
++
++	if (!buffer || len < 2)
++		return FALSE;
++
++	sw1 = buffer[len - 2];
++	sw2 = buffer[len - 1];
++
++	if (!(sw1 == 0x90 && sw2 == 0x00) && sw1 != 0x91)
++		return FALSE;
++
++	return sim_parse_umts_authenticate(buffer, len - 2, res, ck, ik, auts,
++						sres, kc);
++}
++
+ gboolean sim_parse_gsm_authenticate(const unsigned char *buffer, int len,
+ 		const unsigned char **sres, const unsigned char **kc)
+ {
+diff --git a/src/simutil.h b/src/simutil.h
+index 77f7533..78a43e3 100644
+--- a/src/simutil.h
++++ b/src/simutil.h
+@@ -527,6 +527,11 @@ gboolean sim_parse_umts_authenticate(const unsigned char *buffer, int len,
+ 		struct data_block *ik, struct data_block *auts,
+ 		struct data_block *sres, struct data_block *kc);
+ 
++gboolean sim_parse_umts_authenticate_apdu(const unsigned char *buffer,
++		int len, struct data_block *res, struct data_block *ck,
++		struct data_block *ik, struct data_block *auts,
++		struct data_block *sres, struct data_block *kc);
++
+ gboolean sim_parse_gsm_authenticate(const unsigned char *buffer, int len,
+ 		const unsigned char **sres, const unsigned char **kc);
+ 

@@ -1,0 +1,121 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] unit: test AKA answers that end in their status word
+
+test-simutil gets /testsimutil/auth apdu: a 3G answer without a status
+word, with 90 00 (which the plain parser refuses), with 91 xx, with
+another status word, the card's refusal alone (98 62), 90 00 alone, and
+a synchronisation failure with 90 00.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ unit/test-simutil.c | 89 +++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 89 insertions(+)
+
+diff --git a/unit/test-simutil.c b/unit/test-simutil.c
+index c0a8751..098f51e 100644
+--- a/unit/test-simutil.c
++++ b/unit/test-simutil.c
+@@ -504,6 +504,94 @@ static void test_get_2g_path(void)
+ 	g_assert(!memcmp(path, path1, len));
+ }
+ 
++/* AUTHENTICATE answers as logical_access hands them back, status word and all */
++static void test_auth_apdu(void)
++{
++	static const unsigned char res[] = { 0x11, 0x22, 0x33, 0x44 };
++	static const unsigned char ck[] = { 0x01, 0x02, 0x03, 0x04, 0x05,
++		0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10 };
++	static const unsigned char ik[] = { 0xa1, 0xa2, 0xa3, 0xa4, 0xa5,
++		0xa6, 0xa7, 0xa8, 0xa9, 0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf, 0xb0 };
++	static const unsigned char auts[] = { 0xc1, 0xc2, 0xc3, 0xc4, 0xc5,
++		0xc6, 0xc7, 0xc8, 0xc9, 0xca, 0xcb, 0xcc, 0xcd, 0xce };
++	unsigned char buf[64];
++	struct data_block res_b, ck_b, ik_b, auts_b, sres_b, kc_b;
++	int n = 0, data_len;
++
++	buf[n++] = 0xdb;
++	buf[n++] = sizeof(res);
++	memcpy(buf + n, res, sizeof(res));
++	n += sizeof(res);
++	buf[n++] = sizeof(ck);
++	memcpy(buf + n, ck, sizeof(ck));
++	n += sizeof(ck);
++	buf[n++] = sizeof(ik);
++	memcpy(buf + n, ik, sizeof(ik));
++	n += sizeof(ik);
++	data_len = n;
++
++	/* Without a status word, as before */
++	g_assert(sim_parse_umts_authenticate_apdu(buf, data_len,
++			&res_b, &ck_b, &ik_b, &auts_b, &sres_b, &kc_b));
++	g_assert_cmpuint(res_b.len, == , sizeof(res));
++	g_assert(!memcmp(res_b.data, res, sizeof(res)));
++
++	/* With 90 00: the plain parser refuses it, this one does not */
++	buf[data_len] = 0x90;
++	buf[data_len + 1] = 0x00;
++	g_assert(!sim_parse_umts_authenticate(buf, data_len + 2,
++			&res_b, &ck_b, &ik_b, &auts_b, &sres_b, &kc_b));
++	g_assert(sim_parse_umts_authenticate_apdu(buf, data_len + 2,
++			&res_b, &ck_b, &ik_b, &auts_b, &sres_b, &kc_b));
++	g_assert_cmpuint(res_b.len, == , sizeof(res));
++	g_assert(!memcmp(res_b.data, res, sizeof(res)));
++	g_assert_cmpuint(ck_b.len, == , sizeof(ck));
++	g_assert(!memcmp(ck_b.data, ck, sizeof(ck)));
++	g_assert_cmpuint(ik_b.len, == , sizeof(ik));
++	g_assert(!memcmp(ik_b.data, ik, sizeof(ik)));
++	g_assert(!kc_b.len && !kc_b.data);
++
++	/* 91 xx is success as well, with a proactive command pending */
++	buf[data_len] = 0x91;
++	buf[data_len + 1] = 0x1a;
++	g_assert(sim_parse_umts_authenticate_apdu(buf, data_len + 2,
++			&res_b, &ck_b, &ik_b, &auts_b, &sres_b, &kc_b));
++
++	/* Any other status word is not stripped */
++	buf[data_len] = 0x62;
++	buf[data_len + 1] = 0x00;
++	g_assert(!sim_parse_umts_authenticate_apdu(buf, data_len + 2,
++			&res_b, &ck_b, &ik_b, &auts_b, &sres_b, &kc_b));
++
++	/* The card's refusal: only the status word, MAC failure */
++	buf[0] = 0x98;
++	buf[1] = 0x62;
++	g_assert(!sim_parse_umts_authenticate_apdu(buf, 2,
++			&res_b, &ck_b, &ik_b, &auts_b, &sres_b, &kc_b));
++
++	/* Only 90 00, no data */
++	buf[0] = 0x90;
++	buf[1] = 0x00;
++	g_assert(!sim_parse_umts_authenticate_apdu(buf, 2,
++			&res_b, &ck_b, &ik_b, &auts_b, &sres_b, &kc_b));
++	g_assert(!sim_parse_umts_authenticate_apdu(NULL, 0,
++			&res_b, &ck_b, &ik_b, &auts_b, &sres_b, &kc_b));
++
++	/* Synchronisation failure with 90 00 */
++	n = 0;
++	buf[n++] = 0xdc;
++	buf[n++] = sizeof(auts);
++	memcpy(buf + n, auts, sizeof(auts));
++	n += sizeof(auts);
++	buf[n++] = 0x90;
++	buf[n++] = 0x00;
++	g_assert(sim_parse_umts_authenticate_apdu(buf, n,
++			&res_b, &ck_b, &ik_b, &auts_b, &sres_b, &kc_b));
++	g_assert_cmpuint(auts_b.len, == , sizeof(auts));
++	g_assert(!memcmp(auts_b.data, auts, sizeof(auts)));
++	g_assert(!res_b.len && !res_b.data);
++}
++
+ static void test_auth_build_parse(void)
+ {
+ 	unsigned char auth_cmd[40];
+@@ -753,6 +841,7 @@ int main(int argc, char **argv)
+ 	g_test_add_func("/testsimutil/3G path", test_get_3g_path);
+ 	g_test_add_func("/testsimutil/2G path", test_get_2g_path);
+ 	g_test_add_func("/testsimutil/auth build parse", test_auth_build_parse);
++	g_test_add_func("/testsimutil/auth apdu", test_auth_apdu);
+ 
+ 	g_test_add_func("/testsimutil/parse_language_list",
+ 						test_parse_language_list);
