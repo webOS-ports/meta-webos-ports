@@ -15,8 +15,8 @@ inherit pkgconfig
 # Needs libhybris for the Android properties
 COMPATIBLE_MACHINE = "^halium$"
 
-SRC_URI = "git://github.com/Herrie82/ofono-binder-plugin-ext-mtk.git;branch=forky;protocol=https"
-SRCREV = "df131b17ffc868595d14354564a49b09b9f57334"
+SRC_URI = "git://github.com/Herrie82/ofono-binder-plugin-ext-mtk.git;branch=feature/forky/ubports-sync;protocol=https"
+SRCREV = "1ed8c190b3e500e2f3b21f46c88e19633289dc3d"
 
 PV = "1.2.1+git"
 PR = "r1"
