@@ -1,0 +1,232 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [unit] Test the bearers of the IMS and XCAP data
+ profiles
+
+IMS and XCAP profiles may use every bearer, IWLAN included, and the
+setupDataCall writers of HIDL 1.2, 1.4 and 1.5 send that. Any other
+profile still leaves it to the modem.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ unit/unit_data/unit_data.c | 122 +++++++++++++++++++++++++++++++++++++
+ unit/unit_util/unit_util.c |  38 ++++++++++++
+ 2 files changed, 160 insertions(+)
+
+diff --git a/unit/unit_data/unit_data.c b/unit/unit_data/unit_data.c
+index 0745759..d745863 100644
+--- a/unit/unit_data/unit_data.c
++++ b/unit/unit_data/unit_data.c
+@@ -34,6 +34,7 @@ static struct test_writer_log {
+     GString* calls;        /* What was appended, in order */
+     GSList* allocs;        /* gbinder_writer_malloc() memory */
+     GSList* buffers;       /* Contents of each buffer object, in order */
++    GSList* structs;       /* Contents of each appended struct, in order */
+ } test;
+ 
+ /*==========================================================================*
+@@ -125,6 +126,8 @@ gbinder_writer_append_struct(
+     const GBinderParent* parent)
+ {
+     test_call("struct(%u)", (guint) type->size);
++    test.structs = g_slist_append(test.structs,
++        g_bytes_new(ptr, type->size));
+ }
+ 
+ guint
+@@ -276,6 +279,7 @@ test_finish(
+     g_string_free(test.calls, TRUE);
+     g_slist_free_full(test.allocs, g_free);
+     g_slist_free_full(test.buffers, (GDestroyNotify) g_bytes_unref);
++    g_slist_free_full(test.structs, (GDestroyNotify) g_bytes_unref);
+ }
+ 
+ static
+@@ -354,6 +358,121 @@ test_setup_data_call_1_6(
+     test_finish();
+ }
+ 
++/* The profile struct the last setupDataCall wrote */
++static
++const void*
++test_profile(
++    gsize size)
++{
++    GBytes* bytes;
++
++    g_assert_cmpuint(g_slist_length(test.structs), == , 1);
++    bytes = test.structs->data;
++    g_assert_cmpuint(g_bytes_get_size(bytes), == , size);
++    return g_bytes_get_data(bytes, NULL);
++}
++
++/*
++ * An IMS profile may use any bearer, IWLAN included: a MediaTek RIL takes
++ * 0 as everything but IWLAN. The default one leaves it to the modem.
++ */
++static
++void
++test_bearer_bitmap_1_2(
++    void)
++{
++    BinderDataRequestSetup setup;
++    BinderDataProfileConfig config;
++    GBinderWriter writer;
++    const RadioDataProfile* dp;
++
++    test_start();
++    test_setup_init(&setup, &config);
++    setup.apn = "ims";
++    setup.profile_id = RADIO_DATA_PROFILE_IMS;
++    memset(&writer, 0, sizeof(writer));
++    binder_data_api_write_setup_data_call_args_hidl_1_2(&writer, &setup,
++        &config, RADIO_TECH_LTE);
++    dp = test_profile(sizeof(*dp));
++    g_assert_cmpuint(dp->supportedApnTypesBitmap, == , RADIO_APN_TYPE_IMS);
++    g_assert_cmpuint(dp->bearerBitmap & RAF_IWLAN, == , RAF_IWLAN);
++    test_finish();
++
++    test_start();
++    test_setup_init(&setup, &config);
++    memset(&writer, 0, sizeof(writer));
++    binder_data_api_write_setup_data_call_args_hidl_1_2(&writer, &setup,
++        &config, RADIO_TECH_LTE);
++    dp = test_profile(sizeof(*dp));
++    g_assert_cmpuint(dp->bearerBitmap, == , RAF_NONE);
++    test_finish();
++}
++
++static
++void
++test_bearer_bitmap_1_4(
++    void)
++{
++    BinderDataRequestSetup setup;
++    BinderDataProfileConfig config;
++    GBinderWriter writer;
++    const RadioDataProfile_1_4* dp;
++
++    test_start();
++    test_setup_init(&setup, &config);
++    setup.apn = "ims";
++    setup.profile_id = RADIO_DATA_PROFILE_IMS;
++    memset(&writer, 0, sizeof(writer));
++    binder_data_api_write_setup_data_call_args_hidl_1_4(&writer, &setup,
++        &config, RADIO_TECH_LTE);
++    dp = test_profile(sizeof(*dp));
++    g_assert_cmpuint(dp->supportedApnTypesBitmap, == , RADIO_APN_TYPE_IMS);
++    g_assert_cmpuint(dp->bearerBitmap & RAF_IWLAN, == , RAF_IWLAN);
++    g_assert_cmpuint(dp->bearerBitmap & RAF_LTE, == , RAF_LTE);
++    test_finish();
++
++    test_start();
++    test_setup_init(&setup, &config);
++    memset(&writer, 0, sizeof(writer));
++    binder_data_api_write_setup_data_call_args_hidl_1_4(&writer, &setup,
++        &config, RADIO_TECH_LTE);
++    dp = test_profile(sizeof(*dp));
++    g_assert_cmpuint(dp->bearerBitmap, == , RAF_NONE);
++    test_finish();
++}
++
++static
++void
++test_bearer_bitmap_1_5(
++    void)
++{
++    BinderDataRequestSetup setup;
++    BinderDataProfileConfig config;
++    GBinderWriter writer;
++    const RadioDataProfile_1_5* dp;
++
++    test_start();
++    test_setup_init(&setup, &config);
++    setup.apn = "hos";
++    setup.profile_id = BINDER_DATA_PROFILE_XCAP;
++    memset(&writer, 0, sizeof(writer));
++    binder_data_api_write_setup_data_call_args_hidl_1_5(&writer, &setup,
++        &config, RADIO_TECH_LTE);
++    dp = test_profile(sizeof(*dp));
++    g_assert_cmpuint(dp->supportedApnTypesBitmap, == , RADIO_APN_TYPE_XCAP);
++    g_assert_cmpuint(dp->bearerBitmap & RAF_IWLAN, == , RAF_IWLAN);
++    test_finish();
++
++    test_start();
++    test_setup_init(&setup, &config);
++    memset(&writer, 0, sizeof(writer));
++    binder_data_api_write_setup_data_call_args_hidl_1_5(&writer, &setup,
++        &config, RADIO_TECH_LTE);
++    dp = test_profile(sizeof(*dp));
++    g_assert_cmpuint(dp->bearerBitmap, == , RAF_NONE);
++    test_finish();
++}
++
+ int main(int argc, char* argv[])
+ {
+     g_test_init(&argc, &argv, NULL);
+@@ -362,6 +481,9 @@ int main(int argc, char* argv[])
+     gutil_log_timestamp = FALSE;
+     g_test_add_func(TEST_("setup_data_call_1_5"), test_setup_data_call_1_5);
+     g_test_add_func(TEST_("setup_data_call_1_6"), test_setup_data_call_1_6);
++    g_test_add_func(TEST_("bearer_bitmap_1_2"), test_bearer_bitmap_1_2);
++    g_test_add_func(TEST_("bearer_bitmap_1_4"), test_bearer_bitmap_1_4);
++    g_test_add_func(TEST_("bearer_bitmap_1_5"), test_bearer_bitmap_1_5);
+     return g_test_run();
+ }
+ 
+diff --git a/unit/unit_util/unit_util.c b/unit/unit_util/unit_util.c
+index f0c3884..17222f9 100644
+--- a/unit/unit_util/unit_util.c
++++ b/unit/unit_util/unit_util.c
+@@ -272,6 +272,42 @@ test_strv_from_hidl_link_address_vec(
+  *==========================================================================*/
+ 
+ #define TEST_PREFIX "/util/"
++/*==========================================================================*
++ * bearer_bitmap_for_apn_types
++ *==========================================================================*/
++
++#define TEST_ALL_BEARERS (RAF_GPRS | RAF_EDGE | RAF_UMTS | RAF_IS95A | \
++    RAF_IS95B | RAF_ONE_X_RTT | RAF_EVDO_0 | RAF_EVDO_A | RAF_HSDPA | \
++    RAF_HSUPA | RAF_HSPA | RAF_EVDO_B | RAF_EHRPD | RAF_LTE | RAF_HSPAP | \
++    RAF_GSM | RAF_TD_SCDMA | RAF_IWLAN | RAF_LTE_CA | RAF_NR)
++
++static
++void
++test_bearer_bitmap_for_apn_types(
++    void)
++{
++    /* IMS and XCAP may use any bearer, IWLAN included */
++    g_assert_cmpuint(binder_radio_bearer_bitmap_for_apn_types(
++        RADIO_APN_TYPE_IMS), == , TEST_ALL_BEARERS);
++    g_assert_cmpuint(binder_radio_bearer_bitmap_for_apn_types(
++        RADIO_APN_TYPE_XCAP), == , TEST_ALL_BEARERS);
++    g_assert_cmpuint(binder_radio_bearer_bitmap_for_apn_types(
++        RADIO_APN_TYPE_IMS | RADIO_APN_TYPE_MMS), == , TEST_ALL_BEARERS);
++
++    /* The same bits Android sends for network types 1 to 20 */
++    g_assert_cmpuint(binder_radio_bearer_bitmap_for_apn_types(
++        RADIO_APN_TYPE_IMS), == , 0x1ffffe);
++
++    /* Anything else is left to the modem */
++    g_assert_cmpuint(binder_radio_bearer_bitmap_for_apn_types(
++        RADIO_APN_TYPE_DEFAULT | RADIO_APN_TYPE_SUPL | RADIO_APN_TYPE_IA),
++        == , RAF_NONE);
++    g_assert_cmpuint(binder_radio_bearer_bitmap_for_apn_types(
++        RADIO_APN_TYPE_MMS), == , RAF_NONE);
++    g_assert_cmpuint(binder_radio_bearer_bitmap_for_apn_types(
++        RADIO_APN_TYPE_NONE), == , RAF_NONE);
++}
++
+ /*==========================================================================*
+  * apn_types_for_profile
+  *==========================================================================*/
+@@ -330,6 +366,8 @@ int main(int argc, char* argv[])
+     g_test_add_func(TEST_("default_ims_context"), test_default_ims_context);
+     g_test_add_func(TEST_("apn_types_for_profile"),
+         test_apn_types_for_profile);
++    g_test_add_func(TEST_("bearer_bitmap_for_apn_types"),
++        test_bearer_bitmap_for_apn_types);
+     g_test_add_func(TEST_("array_count"), test_array_count);
+     g_test_add_func(TEST_("copy_hidl_string"), test_copy_hidl_string);
+     g_test_add_func(TEST_("strv_from_hidl_link_address_vec"),

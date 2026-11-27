@@ -48,10 +48,12 @@ SRC_URI = "git://github.com/mer-hybris/ofono-binder-plugin.git;branch=master;pro
            file://0034-unit-Test-the-APN-types-of-the-XCAP-data-profile.patch \
            file://0035-ofono-binder-Tell-oFono-which-calls-are-carried-over.patch \
            file://0036-unit-Test-which-calls-oFono-hears-are-IMS.patch \
+           file://0037-ofono-binder-Let-IMS-and-XCAP-data-profiles-use-IWLA.patch \
+           file://0038-unit-Test-the-bearers-of-the-IMS-and-XCAP-data-profi.patch \
 "
 
 PV = "1.1.41"
-PR = "r7"
+PR = "r8"
 SRCREV = "204dea1593be95e60bad9f2c0282c35a9f8ba272"
 
 CFLAGS += "--sysroot=${RECIPE_SYSROOT} "

@@ -1,0 +1,157 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [ofono-binder] Let IMS and XCAP data profiles use IWLAN
+
+Every data profile went to the modem with bearerBitmap 0. A MediaTek
+RIL (RmcDcCommonReqHandler::syncApnItem in libmtk-ril) takes 0 as every
+bearer except IWLAN, and since isWifiApnExplicitlyConfigured() returns
+true it never widens that, so the modem refuses the IMS PDN over Wi-Fi
+and Wi-Fi calling can't start.
+
+Android sends the APN's network_type_bitmask instead, and MediaTek's
+APN list gives IMS and XCAP APNs every network type from GPRS to NR.
+Send the same for profiles of those types, in setDataProfile and
+setupDataCall alike. Other profiles keep 0, as for an APN without a
+network_type_bitmask.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/binder_data.c    | 10 +++++++++-
+ src/binder_network.c | 10 +++++++++-
+ src/binder_util.c    | 22 ++++++++++++++++++++++
+ src/binder_util.h    |  5 +++++
+ 4 files changed, 45 insertions(+), 2 deletions(-)
+
+diff --git a/src/binder_data.c b/src/binder_data.c
+index 29a2d9f..b3602d2 100644
+--- a/src/binder_data.c
++++ b/src/binder_data.c
+@@ -1690,6 +1690,8 @@ binder_data_write_radio_data_profile_new(
+     dp->enabled = TRUE;
+     dp->supportedApnTypesBitmap =
+         binder_radio_apn_types_for_profile(setup->profile_id, config);
++    dp->bearerBitmap = binder_radio_bearer_bitmap_for_apn_types(
++        dp->supportedApnTypesBitmap);
+     binder_copy_hidl_string(writer, &dp->mvnoMatchData, NULL);
+     return dp;
+ }
+@@ -1970,6 +1972,8 @@ binder_data_api_write_setup_data_call_args_hidl_1_4(
+     dp->enabled = TRUE;
+     dp->supportedApnTypesBitmap =
+         binder_radio_apn_types_for_profile(setup->profile_id, config);
++    dp->bearerBitmap = binder_radio_bearer_bitmap_for_apn_types(
++        dp->supportedApnTypesBitmap);
+     gbinder_writer_append_struct(args, dp, &binder_data_profile_1_4_type, NULL);
+ 
+     gbinder_writer_append_bool(args, TRUE); /* roamingAllowed */
+@@ -2146,6 +2150,8 @@ binder_data_api_write_setup_data_call_args_hidl_1_5(
+     dp->enabled = TRUE;
+     dp->supportedApnTypesBitmap =
+         binder_radio_apn_types_for_profile(setup->profile_id, config);
++    dp->bearerBitmap = binder_radio_bearer_bitmap_for_apn_types(
++        dp->supportedApnTypesBitmap);
+     gbinder_writer_append_struct(args, dp, &binder_data_profile_1_5_type, NULL);
+ 
+     gbinder_writer_append_bool(args, TRUE); /* roamingAllowed */
+@@ -2630,7 +2636,9 @@ binder_data_api_write_setup_data_call_args_aidl(
+     gbinder_writer_append_bool(&dp, TRUE);  /* enabled */
+     gbinder_writer_append_int32(&dp,        /* supportedApnTypesBitmap */
+         binder_radio_apn_types_for_profile(setup->profile_id, config));
+-    gbinder_writer_append_int32(&dp, 0);    /* bearerBitmap */
++    gbinder_writer_append_int32(&dp,        /* bearerBitmap */
++        binder_radio_bearer_bitmap_for_apn_types(
++            binder_radio_apn_types_for_profile(setup->profile_id, config)));
+     gbinder_writer_append_int32(&dp, 0);    /* mtuV4 */
+     gbinder_writer_append_int32(&dp, 0);    /* mtuV6 */
+     gbinder_writer_append_bool(&dp, FALSE); /* preferred */
+diff --git a/src/binder_network.c b/src/binder_network.c
+index 7461497..c667d1d 100644
+--- a/src/binder_network.c
++++ b/src/binder_network.c
+@@ -1733,6 +1733,8 @@ binder_network_fill_radio_data_profile_hidl(
+     dp->authType = binder_radio_auth_from_ofono_method(src->auth_method);
+     dp->supportedApnTypesBitmap = binder_radio_apn_types_for_profile(src->id,
+         dpc);
++    dp->bearerBitmap = binder_radio_bearer_bitmap_for_apn_types(
++        dp->supportedApnTypesBitmap);
+     dp->enabled = TRUE;
+     return dp;
+ }
+@@ -2270,6 +2272,8 @@ binder_network_fill_radio_data_profile_hidl_1_4(
+     dp->authType = binder_radio_auth_from_ofono_method(src->auth_method);
+     dp->supportedApnTypesBitmap = binder_radio_apn_types_for_profile(src->id,
+         dpc);
++    dp->bearerBitmap = binder_radio_bearer_bitmap_for_apn_types(
++        dp->supportedApnTypesBitmap);
+     dp->enabled = TRUE;
+     dp->preferred = TRUE;
+     return dp;
+@@ -2365,6 +2369,8 @@ binder_network_fill_radio_data_profile_1_5(
+     dp->authType = binder_radio_auth_from_ofono_method(src->auth_method);
+     dp->supportedApnTypesBitmap = binder_radio_apn_types_for_profile(src->id,
+         dpc);
++    dp->bearerBitmap = binder_radio_bearer_bitmap_for_apn_types(
++        dp->supportedApnTypesBitmap);
+     dp->enabled = TRUE;
+     dp->preferred = TRUE;
+     return dp;
+@@ -2592,7 +2598,9 @@ binder_network_fill_radio_data_profile_aidl(
+     gbinder_writer_append_bool(&info, TRUE);  /* enabled */
+     gbinder_writer_append_int32(&info,        /* supportedApnTypesBitmap */
+         binder_radio_apn_types_for_profile(src->id, dpc));
+-    gbinder_writer_append_int32(&info, 0);    /* bearerBitmap */
++    gbinder_writer_append_int32(&info,        /* bearerBitmap */
++        binder_radio_bearer_bitmap_for_apn_types(
++            binder_radio_apn_types_for_profile(src->id, dpc)));
+     gbinder_writer_append_int32(&info, 0);    /* mtuV4 */
+     gbinder_writer_append_int32(&info, 0);    /* mtuV6 */
+     gbinder_writer_append_bool(&info, TRUE);  /* preferred */
+diff --git a/src/binder_util.c b/src/binder_util.c
+index 9810e87..77f7916 100644
+--- a/src/binder_util.c
++++ b/src/binder_util.c
+@@ -104,6 +104,28 @@ binder_default_ims_context(
+     ctx->auth_method = OFONO_GPRS_AUTH_METHOD_NONE;
+ }
+ 
++/*
++ * The bearers a profile may use. 0 leaves it to the modem, and a MediaTek
++ * RIL takes 0 as every bearer except IWLAN, so IMS and XCAP could never go
++ * over Wi-Fi (ePDG). Android sends what the APN's network_type_bitmask
++ * says, and MediaTek's APN list gives IMS and XCAP APNs every network type
++ * from GPRS to NR; send the same for those. Other profiles keep 0, as for
++ * an APN without network_type_bitmask.
++ */
++RADIO_ACCESS_FAMILY
++binder_radio_bearer_bitmap_for_apn_types(
++    RADIO_APN_TYPES apn_types)
++{
++    if (apn_types & (RADIO_APN_TYPE_IMS | RADIO_APN_TYPE_XCAP)) {
++        return RAF_GPRS | RAF_EDGE | RAF_UMTS | RAF_IS95A | RAF_IS95B |
++            RAF_ONE_X_RTT | RAF_EVDO_0 | RAF_EVDO_A | RAF_HSDPA |
++            RAF_HSUPA | RAF_HSPA | RAF_EVDO_B | RAF_EHRPD | RAF_LTE |
++            RAF_HSPAP | RAF_GSM | RAF_TD_SCDMA | RAF_IWLAN | RAF_LTE_CA |
++            RAF_NR;
++    }
++    return RAF_NONE;
++}
++
+ RADIO_APN_TYPES
+ binder_radio_apn_types_for_profile(
+     guint profile_id,
+diff --git a/src/binder_util.h b/src/binder_util.h
+index d634005..8006f88 100644
+--- a/src/binder_util.h
++++ b/src/binder_util.h
+@@ -77,6 +77,11 @@ binder_radio_apn_types_for_profile(
+     const BinderDataProfileConfig* config)
+     BINDER_INTERNAL;
+ 
++RADIO_ACCESS_FAMILY
++binder_radio_bearer_bitmap_for_apn_types(
++    RADIO_APN_TYPES apn_types)
++    BINDER_INTERNAL;
++
+ RADIO_PDP_PROTOCOL_TYPE
+ binder_proto_from_ofono_proto(
+     enum ofono_gprs_proto proto)
