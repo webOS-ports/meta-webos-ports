@@ -67,6 +67,7 @@ FILES:${PN} += " \
 # fallback without conntrack needs tcp, udp and icmp too).
 RDEPENDS:${PN} += " \
     ${PN}-module-xt-conntrack \
+    ${PN}-module-xt-policy \
     ${PN}-module-xt-tcp \
     ${PN}-module-xt-udp \
     ${PN}-module-ipt-icmp \
@@ -76,4 +77,4 @@ RDEPENDS:${PN} += " \
 # Bumped when the rules or scripts shipped from here change, so installed
 # images pick them up on upgrade: the base recipe's revision does not move
 # for it.
-PR = "r3"
+PR = "r4"

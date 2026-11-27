@@ -87,6 +87,21 @@ apply() {
     "$_t" -w -A "$CHAIN" -p tcp --dport 22 -j ACCEPT || return 1
 }
 
+# Let in what came through an IPsec security association: Wi-Fi calling's
+# SIP signalling (VoWiFi), which the modem's IMS stack sends inside IPsec
+# to the operator's P-CSCF. The P-CSCF answers from a port of its own to
+# ours, and its requests (an incoming SMS, the network's report on one
+# sent) open flows of their own, so conntrack calls them NEW and the
+# policy drops them: an SMS over Wi-Fi was sent over and over and never
+# confirmed. Only packets the IPsec keys authenticated get in.
+# Added here and not in the rules files, so that a kernel without the
+# policy match (no XFRM) still loads them; it then just has no VoWiFi.
+# $1: iptables or ip6tables
+accept_ipsec() {
+    "$1" -w -A INPUT -m policy --dir in --pol ipsec -j ACCEPT 2>/dev/null ||
+        echo "${0##*/}: $1: no policy match, IPsec traffic (VoWiFi) not let in" >&2
+}
+
 # $1: 4 or 6. Fails closed: the policies are DROP before anything is loaded.
 load() {
     case "$1" in
@@ -99,11 +114,13 @@ load() {
     "$_t" -w -P INPUT DROP
     "$_t" -w -P FORWARD DROP
     if "$_t-restore" -w -- "$RULESDIR/$_t.rules"; then
+        accept_ipsec "$_t"
         echo full > "$RUNDIR/ipv$1" 2>/dev/null
         return 0
     fi
     echo "${0##*/}: $RULESDIR/$_t.rules refused (no conntrack in the kernel?), loading $_t-fallback.rules" >&2
     if "$_t-restore" -w -- "$RULESDIR/$_t-fallback.rules"; then
+        accept_ipsec "$_t"
         echo fallback > "$RUNDIR/ipv$1" 2>/dev/null
         return 0
     fi
