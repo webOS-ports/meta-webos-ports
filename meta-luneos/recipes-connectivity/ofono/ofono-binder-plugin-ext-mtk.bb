@@ -16,9 +16,9 @@ inherit pkgconfig
 COMPATIBLE_MACHINE = "^halium$"
 
 SRC_URI = "git://github.com/Herrie82/ofono-binder-plugin-ext-mtk.git;branch=feature/forky/ubports-sync;protocol=https"
-SRCREV = "14eda40bab4d130787ac3ab295d1bf4d6dcd9e05"
+SRCREV = "6d941e8e835bde3a3dbb98c063f7cc7f7210aa00"
 
-PV = "1.2.2+git"
+PV = "1.2.3+git"
 PR = "r1"
 
 CFLAGS += "--sysroot=${RECIPE_SYSROOT} "
