@@ -5,7 +5,7 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "1.0.0+git"
 PE = "1"
-SRCREV = "5366f5801e5dab9e36e9c74a7c948fd0fd1982fb"
+SRCREV = "dcc66ce7bfe0d9466205d0d6f2ef969086676274"
 
 # The QML plugin (MusicApp) links TagLib for tags and covers.
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native taglib"

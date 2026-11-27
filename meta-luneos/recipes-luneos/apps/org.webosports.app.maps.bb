@@ -12,7 +12,7 @@ inherit webos_app
 
 PE = "1"
 PV = "0.0.1+git"
-SRCREV = "a5ac5a7ed7679bd07f3e0405b46a30b1a1b19725"
+SRCREV = "a74c24077b05dd81025e2fc3cf246e9e8fdab629"
 
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 

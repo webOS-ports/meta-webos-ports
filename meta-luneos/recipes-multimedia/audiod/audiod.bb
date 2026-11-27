@@ -46,7 +46,7 @@ RDEPENDS:${PN} += "pulseaudio-module-combine-sink"
 #WEBOS_VERSION = "1.0.0-78_127c6cd6c9247979b4ead42d9b8fc8b5c48b47a2"
 PE = "1"
 PV = "1.0.0-79+git"
-SRCREV = "e489c1e78c37d9dd3cf4815feb2845675c90b10d"
+SRCREV = "07237d1fce1d4e0148e5a8a895c3dd226974e092"
 PR = "r39"
 
 inherit webos_component

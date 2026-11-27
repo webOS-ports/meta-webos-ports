@@ -4,7 +4,7 @@ LICENSE = "GPL-3.0-only"
 LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "1.0.0+git"
-SRCREV = "d48fdd9f03276891d97bc5c5cb5c537913b5f724"
+SRCREV = "bd525d37bf182708e177a14fe8394b01af256140"
 
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native qtmultimedia"
 
