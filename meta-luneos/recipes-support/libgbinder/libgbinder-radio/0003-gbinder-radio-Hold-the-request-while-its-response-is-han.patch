@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Herman van Hazendonk <github.com@herrie.org>
+Date: Fri, 27 Nov 2026 13:36:52 +0100
+Subject: [PATCH] [gbinder-radio] Hold the request while its response is
+ handled
+
+radio_base_handle_resp() takes the request out of the pending table
+before completing it. If that drops what was left of its references,
+radio_request_free() runs from there: it drops the request from the
+active table and completes it as failed, though the response said it
+succeeded. On a Qualcomm HIDL RIL this made every
+iccTransmitApduLogicalChannel reply, and so oFono's UmtsAuthenticate,
+fail (mer-hybris/libgbinder-radio#44).
+
+Hold a reference for the length of the handler, as the issue proposes
+and as upstream has taken into PR #39.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Submitted [https://github.com/mer-hybris/libgbinder-radio/pull/39]
+---
+ src/radio_base.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/src/radio_base.c b/src/radio_base.c
+index 9af0252..56f11ca 100644
+--- a/src/radio_base.c
++++ b/src/radio_base.c
+@@ -834,7 +834,13 @@ radio_base_handle_resp(
+     if (req) {
+         RadioRequestRetryFunc retry = req->retry;
+ 
+-        /* Temporary ref */
++        /*
++         * Temporary refs. Taking the request out of the pending table
++         * below may drop what would otherwise be its last reference, and
++         * freeing it from here completes it as failed, the response
++         * notwithstanding.
++         */
++        radio_request_ref(req);
+         g_object_ref(self);
+ 
+         /* It's no longer pending */
+@@ -879,6 +885,7 @@ radio_base_handle_resp(
+ 
+         radio_base_submit_queued_requests(self);
+         radio_base_reset_timeout(self);
++        radio_request_unref(req);
+         g_object_unref(self);
+         return TRUE;
+     }
