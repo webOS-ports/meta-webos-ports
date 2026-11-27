@@ -1,0 +1,73 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] dummy_netd: Refuse getaddrinfo hints that are not numbers
+
+The four hint fields went through atoi(), which turns anything that is
+not a number into 0 and is undefined for a value outside int. Parse them
+with g_ascii_strtoll() and answer 401 to a field that is not one whole
+int. The -1 bionic sends when it has no hints still means 0.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ dns_proxy.c | 30 ++++++++++++++++++++++--------
+ 1 file changed, 22 insertions(+), 8 deletions(-)
+
+diff --git a/dns_proxy.c b/dns_proxy.c
+index 75f86cb..08859b0 100644
+--- a/dns_proxy.c
++++ b/dns_proxy.c
+@@ -9,6 +9,7 @@
+ 
+ #include <arpa/inet.h>
+ #include <errno.h>
++#include <limits.h>
+ #include <netdb.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -169,13 +170,22 @@ read_command(
+ }
+ 
+ static
+-int
++gboolean
+ hint_field(
+-    const char* text)
++    const char* text,
++    int* value)
+ {
+-    int value = atoi(text);
++    char* end = NULL;
++    gint64 parsed;
++
++    errno = 0;
++    parsed = g_ascii_strtoll(text, &end, 10);
++    if (errno || end == text || *end || parsed < INT_MIN || parsed > INT_MAX)
++        return FALSE;
+ 
+-    return value == -1 ? 0 : value;
++    /* bionic sends -1 for each field when the caller passed no hints */
++    *value = (parsed == -1) ? 0 : (int) parsed;
++    return TRUE;
+ }
+ 
+ static
+@@ -234,10 +244,14 @@ proxy_getaddrinfo(
+     host = optional_name(argv[1]);
+     serv = optional_name(argv[2]);
+     memset(&hints, 0, sizeof(hints));
+-    hints.ai_flags = convert_from_bionic_ai_flags(hint_field(argv[3]));
+-    hints.ai_family = hint_field(argv[4]);
+-    hints.ai_socktype = hint_field(argv[5]);
+-    hints.ai_protocol = hint_field(argv[6]);
++    if (!hint_field(argv[3], &hints.ai_flags) ||
++        !hint_field(argv[4], &hints.ai_family) ||
++        !hint_field(argv[5], &hints.ai_socktype) ||
++        !hint_field(argv[6], &hints.ai_protocol)) {
++        send_code(fd, DNS_PROXY_OPERATION_FAILED);
++        return;
++    }
++    hints.ai_flags = convert_from_bionic_ai_flags(hints.ai_flags);
+ 
+     rc = getaddrinfo(host, serv, &hints, &res);
+     if (rc != 0) {

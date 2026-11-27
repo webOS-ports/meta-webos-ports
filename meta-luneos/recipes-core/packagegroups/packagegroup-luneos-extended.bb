@@ -200,6 +200,7 @@ LIBHYBRIS_RDEPENDS = " \
     \
     ofono-binder-plugin \
     ofono-binder-plugin-ext-mtk \
+    dummy-netd \
     wlan-suspend-mode \
     wlan-dynamic-start \
 "

@@ -1,0 +1,49 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] dummy_netd: Create the DNS proxy socket with its mode already
+ set
+
+The socket was bound with the process umask and then chmod()ed to 0660
+by name. chmod() acts on whatever the path names by then and follows
+symlinks. Bind it under a 0117 umask instead, so it is created 0660,
+and put the mask back right after.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ dns_proxy.c | 14 +++++++++++---
+ 1 file changed, 11 insertions(+), 3 deletions(-)
+
+diff --git a/dns_proxy.c b/dns_proxy.c
+index dc66f32..325ae12 100644
+--- a/dns_proxy.c
++++ b/dns_proxy.c
+@@ -337,7 +337,9 @@ int
+ open_listener(void)
+ {
+     struct sockaddr_un addr;
++    mode_t mask;
+     int fd;
++    int err;
+ 
+     if (strlen(DNS_PROXY_PATH) >= sizeof(addr.sun_path)) {
+         GERR("%s: path too long for a socket", DNS_PROXY_PATH);
+@@ -354,9 +356,15 @@ open_listener(void)
+     addr.sun_family = AF_UNIX;
+     strncpy(addr.sun_path, DNS_PROXY_PATH, sizeof(addr.sun_path) - 1);
+     unlink(DNS_PROXY_PATH);
+-    if (bind(fd, (struct sockaddr*) &addr, sizeof(addr)) != 0 ||
+-        chmod(DNS_PROXY_PATH, 0660) != 0 ||
+-        listen(fd, 8) != 0) {
++    /*
++     * bind() creates the socket 0660 straight away. A chmod() afterwards
++     * would act on whatever the path names by then, symlinks followed.
++     * The mask is the process's: nothing else creates files at this point.
++     */
++    mask = umask(0117);
++    err = bind(fd, (struct sockaddr*) &addr, sizeof(addr));
++    umask(mask);
++    if (err != 0 || listen(fd, 8) != 0) {
+         GERR("%s: %s", DNS_PROXY_PATH, g_strerror(errno));
+         close(fd);
+         unlink(DNS_PROXY_PATH);

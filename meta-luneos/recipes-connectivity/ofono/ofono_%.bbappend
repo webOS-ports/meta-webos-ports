@@ -3,7 +3,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 # oe-core's ofono_2.19.bb sets no PR. Without one here, a rebuilt package
 # carries the same version as the installed one and opkg won't upgrade it.
 # Bump it whenever the patches below change what is built.
-PR = "r6"
+PR = "r7"
 
 DEPENDS += "dbus-glib libmce-glib"
 # The modem stack differs per machine class. The default is the mainline
@@ -12,7 +12,10 @@ DEPENDS += "dbus-glib libmce-glib"
 # the mainline stack. Everything else is identical, so one oFono now serves
 # both; ofono-halium is retired.
 OFONO_MODEM_STACK_RDEPENDS = "libsmdpkt-wrapper libqmi libmbim libqrtr-glib"
-OFONO_MODEM_STACK_RDEPENDS:halium = "ofono-ext ofono-ext-plugin ofono-binder-plugin libgbinder-tools"
+# dummy-netd answers bionic's getaddrinfo() for the vendor side: without it no
+# vendor daemon resolves a name, and on MediaTek epdg_wod never finds its ePDG
+# (no VoWiFi). Its unit orders itself before ofono.
+OFONO_MODEM_STACK_RDEPENDS:halium = "ofono-ext ofono-ext-plugin ofono-binder-plugin libgbinder-tools dummy-netd"
 RDEPENDS:${PN} += "mobile-broadband-provider-info ofono-conf ${OFONO_MODEM_STACK_RDEPENDS}"
 
 SRC_URI:append = " \
