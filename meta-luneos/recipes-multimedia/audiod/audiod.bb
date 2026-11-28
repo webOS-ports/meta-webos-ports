@@ -46,7 +46,9 @@ RDEPENDS:${PN} += "pulseaudio-module-combine-sink"
 #WEBOS_VERSION = "1.0.0-78_127c6cd6c9247979b4ead42d9b8fc8b5c48b47a2"
 PE = "1"
 PV = "1.0.0-79+git"
-SRCREV = "07237d1fce1d4e0148e5a8a895c3dd226974e092"
+SRCREV = "a5edda41d64022aeca02e191231f12cef312bd71"
+# a5edda41 is on herrie/pending-prs (audiod-pro PR #29 merged with webOS-ports/webOS-OSE so #28 stays in), not yet merged into webOS-ports/webOS-OSE; back to that branch once it is.
+WEBOS_GIT_PARAM_BRANCH = "herrie/pending-prs"
 PR = "r39"
 
 inherit webos_component

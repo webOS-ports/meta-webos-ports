@@ -7,7 +7,9 @@ DEPENDS = "luna-service2 json-c glib-2.0 luna-prefs glib-2.0-native python3-pack
 RRECOMMENDS:${PN} += "${VIRTUAL-RUNTIME_ofono} mmsd-tng"
 
 PV = "0.1.0-1+git"
-SRCREV = "f14b15d48c22d372cd5c55850885573163f0688c"
+SRCREV = "8fc2cc5f08f8b8342adf6a2f96c4cc470eca072c"
+# 8fc2cc5f is on herrie/vowifi (webos-telephonyd PR #45), not yet merged into webOS-ports/webOS-OSE; back to that branch once it is.
+WEBOS_GIT_PARAM_BRANCH = "herrie/vowifi"
 
 inherit webos_ports_ose_repo
 inherit webos_filesystem_paths

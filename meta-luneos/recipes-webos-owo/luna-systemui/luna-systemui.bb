@@ -7,7 +7,9 @@ LIC_FILES_CHKSUM = "file://${COMMON_LICENSE_DIR}/Apache-2.0;md5=89aea4e17d99a7ca
 
 PE = "3"
 PV = "2.0.1-2+git"
-SRCREV = "99b8a028f55c94e457d96fb2edc87d8d407cd4f3"
+SRCREV = "139b38dd3db8815fb86e65f91cfa830cc89cc509"
+# 139b38dd is on herrie/popup-height-in-wam (luna-systemui PR #42), not yet merged into webOS-ports/master; back to that branch once it is.
+WEBOS_GIT_PARAM_BRANCH = "herrie/popup-height-in-wam"
 PR = "r2"
 
 inherit allarch

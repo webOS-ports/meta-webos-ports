@@ -5,13 +5,14 @@ LIC_FILES_CHKSUM = "file://COPYING;md5=d32239bcb673463ab874e80d47fae504"
 
 PV = "1.0.0+git"
 PE = "1"
-SRCREV = "dcc66ce7bfe0d9466205d0d6f2ef969086676274"
+SRCREV = "0d72b56a6bc73bdc78e3e667fccafe8eb3004f7f"
+# 0d72b56a is on herrie/music-lockscreen-dashboard (org.webosports.app.music PR #24), not yet merged into main; back to that branch once it is.
+WEBOS_GIT_PARAM_BRANCH = "herrie/music-lockscreen-dashboard"
 
 # The QML plugin (MusicApp) links TagLib for tags and covers.
 DEPENDS = "qtbase qtdeclarative qtdeclarative-native taglib"
 
 inherit webos_ports_repo
-WEBOS_GIT_PARAM_BRANCH = "main"
 SRC_URI = "${WEBOS_PORTS_GIT_REPO_COMPLETE}"
 
 inherit webos_application

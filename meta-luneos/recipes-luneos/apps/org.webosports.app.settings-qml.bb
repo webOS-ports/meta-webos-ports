@@ -15,10 +15,11 @@ inherit pkgconfig
 
 PE = "5"
 PV = "0.4.0-1+git"
-SRCREV = "ee826582cca6c44212514e87fed6d77341311763"
+SRCREV = "80f56cd0b4e36459be7f07cd8cc1243959090b95"
+# 80f56cd0 is on herrie/vowifi (org.webosports.app.settings PR #190), not yet merged into qml-based; back to that branch once it is.
+WEBOS_GIT_PARAM_BRANCH = "herrie/vowifi"
 
 # This app is developed on qml-based, not master.
-WEBOS_GIT_PARAM_BRANCH = "qml-based"
 
 WEBOS_REPO_NAME = "org.webosports.app.settings"
 

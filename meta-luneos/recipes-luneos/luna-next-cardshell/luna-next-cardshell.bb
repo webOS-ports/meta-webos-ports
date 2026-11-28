@@ -17,7 +17,9 @@ RDEPENDS:${PN} += " \
 PE = "7"
 PV = "0.6-0+git"
 
-SRCREV = "dcf0bd78a32063e2362cf0ac274424f989106db8"
+SRCREV = "56ec5158135330b3d192240c237daf6a982e03aa"
+# 56ec5158 is on herrie/pending-prs (luna-next-cardshell PRs #513 and #514 merged together), not yet merged into master; back to that branch once they are.
+WEBOS_GIT_PARAM_BRANCH = "herrie/pending-prs"
 PR = "r1"
 
 inherit webos_ports_repo

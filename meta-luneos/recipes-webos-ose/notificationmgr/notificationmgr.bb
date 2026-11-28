@@ -12,7 +12,9 @@ LIC_FILES_CHKSUM = " \
 
 DEPENDS = "glib-2.0 luna-service2 libpbnjson pmloglib boost libxml++-5.0 glibmm"
 
-SRCREV = "0d25e736750204e0c34e36c4159e8d6c3031e395"
+SRCREV = "297f154061fe448189433ad8f68e65871740eb35"
+# 297f1540 is on herrie/toast-replay (notificationmgr PR #8), not yet merged into webOS-ports/webOS-OSE; back to that branch once it is.
+WEBOS_GIT_PARAM_BRANCH = "herrie/toast-replay"
 
 PV = "1.0.0-29"
 
