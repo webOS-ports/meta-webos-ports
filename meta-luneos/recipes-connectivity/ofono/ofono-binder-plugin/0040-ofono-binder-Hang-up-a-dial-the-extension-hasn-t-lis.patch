@@ -1,0 +1,111 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [ofono-binder] Hang up a dial the extension hasn't listed
+ yet
+
+A dial that goes through a call extension is in oFono as soon as the
+extension takes it: oFono's core makes the call up under the next free
+id. The extension may list it only once it rings, though. The MediaTek
+one does since it stopped listing a dial at +ECPI 130, so as not to
+shadow a dial the modem moves to CS. Until then neither IRadio nor the
+extension lists the call, and binder_voicecall_hangup() found nothing
+to hang up. It answered the hangup with success and sent nothing.
+
+Seen on the Radon on 28 Nov 2026: an outgoing IMS call over Wi-Fi got
+no further than 100 Trying for two minutes. The Phone app's hangup
+changed nothing; the call stayed dialing until the network ended it.
+
+Keep the id oFono gives the dial when the extension's dial completes,
+and drop it once the call is listed or another dial starts. A hangup
+that takes in dialing calls (hangup_active, hangup_all) also hangs up
+that dial: through the extension, or by id over IRadio if the
+extension won't.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/binder_voicecall.c | 44 ++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 44 insertions(+)
+
+diff --git a/src/binder_voicecall.c b/src/binder_voicecall.c
+index 26d405f..f849010 100644
+--- a/src/binder_voicecall.c
++++ b/src/binder_voicecall.c
+@@ -101,6 +101,7 @@ typedef struct binder_voicecall {
+     gboolean clcc_wanted; /* A poll was held and is yet to be sent */
+     guint ext_send_dtmf_id;
+     guint ext_req_id;
++    guint ext_dial_id; /* oFono's id of a dial the extension hasn't listed */
+     GSList* ext_hangups;
+     gulong ext_event[VOICECALL_EXT_EVENT_COUNT];
+     gulong voice_event[VOICECALL_EVENT_COUNT];
+@@ -712,6 +713,12 @@ binder_voicecall_set_calls(
+ 
+     g_slist_free_full(self->calls, binder_voicecall_info_free);
+     self->calls = list;
++
++    if (self->ext_dial_id &&
++        binder_voicecall_find_call_link_with_id(self, self->ext_dial_id)) {
++        /* The dial is listed now, it's hung up like any other call */
++        self->ext_dial_id = 0;
++    }
+ }
+ 
+ static
+@@ -1122,6 +1129,14 @@ binder_voicecall_ext_dial_cb(
+         self->cb = NULL;
+         self->data = NULL;
+         if (result == BINDER_EXT_CALL_RESULT_OK) {
++            /*
++             * Nothing lists the call yet, or the listing would have
++             * completed the dial. The extension may list it only once it
++             * rings; until then oFono holds the dial under the next free
++             * call id. Keep that id to be able to hang the dial up.
++             */
++            self->ext_dial_id =
++                (guint)ofono_voicecall_get_next_callid(self->vc);
+             cb(binder_error_ok(&err), cbdata);
+         } else {
+             cb(binder_error_failure(&err), cbdata);
+@@ -1175,6 +1190,8 @@ binder_voicecall_dial(
+     ofono_info("dialing \"%s\"", phstr);
+     DBG_(self, "%s,%d,0", phstr, clir);
+ 
++    self->ext_dial_id = 0;
++
+     binder_ext_call_cancel(self->ext, self->ext_req_id);
+     if (binder_voicecall_can_ext_dial(self)) {
+         self->ext_req_id = binder_ext_call_dial(self->ext, phstr, ph->type,
+@@ -1369,6 +1386,33 @@ binder_voicecall_hangup(
+         }
+     }
+ 
++    if (self->ext_dial_id) {
++        const guint id = self->ext_dial_id;
++        BinderVoiceCallInfo dial;
++
++        /*
++         * oFono has a call dialing that neither IRadio nor the extension
++         * lists yet. An extension may only list a dial once it rings.
++         * Hang it up all the same, or the hangup ends nothing.
++         */
++        memset(&dial, 0, sizeof(dial));
++        dial.oc.id = id;
++        dial.oc.status = OFONO_CALL_STATUS_DIALING;
++        dial.oc.direction = OFONO_CALL_DIRECTION_MOBILE_ORIGINATED;
++        dial.ext = self->ext;
++        if (!filter || filter(&dial)) {
++            if (!cbd) {
++                cbd = binder_voicecall_cbd_new(self, cb, data);
++            }
++            DBG_(self, "hanging up unlisted ext dial id %u", id);
++            if (!binder_voicecall_ext_hangup(self, &dial,
++                BINDER_EXT_CALL_HANGUP_TERMINATE, cbd)) {
++                DBG_(self, "hanging up call with id %u", id);
++                binder_voicecall_submit_hangup_req(vc, id, cbd);
++            }
++        }
++    }
++
+     if (cbd) {
+         /* Release our reference (if any) */
+         binder_voicecall_cbd_unref(cbd);

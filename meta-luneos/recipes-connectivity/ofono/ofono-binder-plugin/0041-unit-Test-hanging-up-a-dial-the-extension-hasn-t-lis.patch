@@ -1,0 +1,554 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] [unit] Test hanging up a dial the extension hasn't listed
+
+With a call extension that lists a dial only when told to: a dial
+nothing lists is hung up through the extension by hangup_active and
+hangup_all, and by id over IRadio when the extension won't. Once
+listed, whether before or after the dial completes, it's hung up once,
+as any listed call. Releasing the held calls leaves it alone, and a
+dial that failed leaves nothing behind to hang up.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ unit/unit_voicecall/unit_voicecall.c | 488 ++++++++++++++++++++++++++-
+ 1 file changed, 486 insertions(+), 2 deletions(-)
+
+diff --git a/unit/unit_voicecall/unit_voicecall.c b/unit/unit_voicecall/unit_voicecall.c
+index 1772761..27295eb 100644
+--- a/unit/unit_voicecall/unit_voicecall.c
++++ b/unit/unit_voicecall/unit_voicecall.c
+@@ -30,6 +30,9 @@ gboolean test_source_remove(guint id);
+ 
+ #include "binder_voicecall.c"
+ 
++#include "binder_ext_call_impl.h"
++#include "binder_ext_slot_impl.h"
++
+ #include <radio_client.h>
+ 
+ GLOG_MODULE_DEFINE("unit_voicecall");
+@@ -859,6 +862,14 @@ ofono_voicecall_ringback_tone_notify(
+ {
+ }
+ 
++int
++ofono_voicecall_get_next_callid(
++    struct ofono_voicecall* vc)
++{
++    /* oFono's core gives a dial it has to make up the lowest free id */
++    return 1;
++}
++
+ void
+ ofono_voicecall_en_list_notify(
+     struct ofono_voicecall* vc,
+@@ -1018,12 +1029,13 @@ test_state_changed(
+ 
+ static
+ void
+-test_start(
+-    void)
++test_start_with(
++    BinderExtSlot* ext)
+ {
+     memset(&test, 0, sizeof(test));
+     test.vc = (struct ofono_voicecall*) &test;
+     test.ofono = (struct ofono_modem*) &test;
++    test.modem.ext = ext;
+     test.modem.clients.voice_client = &test.client;
+     test.modem.clients.network_client = &test.client;
+     test.modem.log_prefix = "";
+@@ -1039,6 +1051,14 @@ test_start(
+     test.polls = 0;
+ }
+ 
++static
++void
++test_start(
++    void)
++{
++    test_start_with(NULL);
++}
++
+ static
+ void
+ test_finish(
+@@ -1792,6 +1812,460 @@ test_ext_call_ims(
+     }
+ }
+ 
++/*==========================================================================*
++ * A call extension that lists a dial only when the test says so, the way
++ * the MediaTek one lists an IMS dial only once it rings
++ *==========================================================================*/
++
++typedef GObjectClass TestExtCallClass;
++typedef struct test_ext_call {
++    GObject parent;
++    const BinderExtCallInfo* calls[TEST_MAX_CALLS + 1];
++    BinderExtCallInfo info[TEST_MAX_CALLS];
++    BinderExtCallFunc calls_changed;
++    void* calls_changed_data;
++    gboolean refuse_hangup;
++    guint dials;
++    guint hangups;
++    guint last_hangup_id;  /* The call id of the last hangup */
++    guint last_req_id;
++    /* The one request in flight */
++    guint req_id;
++    BinderExtCallResultFunc complete;
++    GDestroyNotify destroy;
++    void* user_data;
++} TestExtCall;
++
++typedef BinderExtSlotClass TestExtSlotClass;
++typedef struct test_ext_slot {
++    BinderExtSlot parent;
++    TestExtCall* call;
++} TestExtSlot;
++
++static void test_ext_call_iface_init(BinderExtCallInterface* iface);
++G_DEFINE_TYPE_WITH_CODE(TestExtCall, test_ext_call, G_TYPE_OBJECT,
++G_IMPLEMENT_INTERFACE(BINDER_EXT_TYPE_CALL, test_ext_call_iface_init))
++G_DEFINE_TYPE(TestExtSlot, test_ext_slot, BINDER_EXT_TYPE_SLOT)
++
++#define TEST_TYPE_EXT_CALL test_ext_call_get_type()
++#define TEST_EXT_CALL(obj) G_TYPE_CHECK_INSTANCE_CAST(obj, \
++    TEST_TYPE_EXT_CALL, TestExtCall)
++#define TEST_TYPE_EXT_SLOT test_ext_slot_get_type()
++#define TEST_EXT_SLOT(obj) G_TYPE_CHECK_INSTANCE_CAST(obj, \
++    TEST_TYPE_EXT_SLOT, TestExtSlot)
++
++static
++const BinderExtCallInfo* const*
++test_ext_call_get_calls(
++    BinderExtCall* ext)
++{
++    return TEST_EXT_CALL(ext)->calls;
++}
++
++static
++guint
++test_ext_call_start(
++    TestExtCall* self,
++    BinderExtCallResultFunc complete,
++    GDestroyNotify destroy,
++    void* user_data)
++{
++    g_assert(!self->req_id);
++    self->req_id = ++self->last_req_id;
++    self->complete = complete;
++    self->destroy = destroy;
++    self->user_data = user_data;
++    return self->req_id;
++}
++
++static
++guint
++test_ext_call_dial(
++    BinderExtCall* ext,
++    const char* number,
++    BINDER_EXT_TOA toa,
++    BINDER_EXT_CALL_CLIR clir,
++    BINDER_EXT_CALL_DIAL_FLAGS flags,
++    BinderExtCallResultFunc complete,
++    GDestroyNotify destroy,
++    void* user_data)
++{
++    TestExtCall* self = TEST_EXT_CALL(ext);
++
++    self->dials++;
++    return test_ext_call_start(self, complete, destroy, user_data);
++}
++
++static
++guint
++test_ext_call_hangup(
++    BinderExtCall* ext,
++    guint call_id,
++    BINDER_EXT_CALL_HANGUP_REASON reason,
++    BINDER_EXT_CALL_HANGUP_FLAGS flags,
++    BinderExtCallResultFunc complete,
++    GDestroyNotify destroy,
++    void* user_data)
++{
++    TestExtCall* self = TEST_EXT_CALL(ext);
++
++    self->hangups++;
++    self->last_hangup_id = call_id;
++    return self->refuse_hangup ? 0 :
++        test_ext_call_start(self, complete, destroy, user_data);
++}
++
++static
++void
++test_ext_call_cancel(
++    BinderExtCall* ext,
++    guint id)
++{
++    TestExtCall* self = TEST_EXT_CALL(ext);
++
++    if (self->req_id == id) {
++        GDestroyNotify destroy = self->destroy;
++
++        self->req_id = 0;
++        self->complete = NULL;
++        self->destroy = NULL;
++        if (destroy) {
++            destroy(self->user_data);
++        }
++    }
++}
++
++static
++gulong
++test_ext_call_add_calls_changed_handler(
++    BinderExtCall* ext,
++    BinderExtCallFunc handler,
++    void* user_data)
++{
++    TestExtCall* self = TEST_EXT_CALL(ext);
++
++    self->calls_changed = handler;
++    self->calls_changed_data = user_data;
++    return 1;
++}
++
++static
++void
++test_ext_call_remove_handler(
++    BinderExtCall* ext,
++    gulong id)
++{
++    TestExtCall* self = TEST_EXT_CALL(ext);
++
++    if (id == 1) {
++        self->calls_changed = NULL;
++        self->calls_changed_data = NULL;
++    }
++}
++
++static
++void
++test_ext_call_iface_init(
++    BinderExtCallInterface* iface)
++{
++    iface->version = BINDER_EXT_CALL_INTERFACE_VERSION;
++    iface->get_calls = test_ext_call_get_calls;
++    iface->dial = test_ext_call_dial;
++    iface->hangup = test_ext_call_hangup;
++    iface->cancel = test_ext_call_cancel;
++    iface->add_calls_changed_handler = test_ext_call_add_calls_changed_handler;
++    iface->remove_handler = test_ext_call_remove_handler;
++}
++
++static
++void
++test_ext_call_init(
++    TestExtCall* self)
++{
++}
++
++static
++void
++test_ext_call_class_init(
++    TestExtCallClass* klass)
++{
++}
++
++static
++gpointer
++test_ext_slot_get_interface(
++    BinderExtSlot* slot,
++    GType type)
++{
++    TestExtSlot* self = TEST_EXT_SLOT(slot);
++
++    return (type == BINDER_EXT_TYPE_CALL) ? self->call : NULL;
++}
++
++static
++void
++test_ext_slot_init(
++    TestExtSlot* self)
++{
++    self->call = g_object_new(TEST_TYPE_EXT_CALL, NULL);
++}
++
++static
++void
++test_ext_slot_finalize(
++    GObject* object)
++{
++    g_object_unref(TEST_EXT_SLOT(object)->call);
++    G_OBJECT_CLASS(test_ext_slot_parent_class)->finalize(object);
++}
++
++static
++void
++test_ext_slot_class_init(
++    TestExtSlotClass* klass)
++{
++    klass->get_interface = test_ext_slot_get_interface;
++    G_OBJECT_CLASS(klass)->finalize = test_ext_slot_finalize;
++}
++
++/* The extension answers the request in flight */
++static
++void
++test_ext_complete(
++    TestExtCall* ext,
++    BINDER_EXT_CALL_RESULT result)
++{
++    BinderExtCallResultFunc complete = ext->complete;
++    GDestroyNotify destroy = ext->destroy;
++    void* user_data = ext->user_data;
++
++    g_assert(ext->req_id);
++    ext->req_id = 0;
++    ext->complete = NULL;
++    ext->destroy = NULL;
++    if (complete) {
++        complete(BINDER_EXT_CALL(ext), result, user_data);
++    }
++    if (destroy) {
++        destroy(user_data);
++    }
++}
++
++/* The extension lists `count` calls, with ids from 1 */
++static
++void
++test_ext_list(
++    TestExtCall* ext,
++    guint count,
++    BINDER_EXT_CALL_STATE state)
++{
++    guint i;
++
++    g_assert_cmpuint(count, <= , TEST_MAX_CALLS);
++    memset(ext->calls, 0, sizeof(ext->calls));
++    for (i = 0; i < count; i++) {
++        BinderExtCallInfo* ci = ext->info + i;
++
++        memset(ci, 0, sizeof(*ci));
++        ci->call_id = i + 1;
++        ci->type = BINDER_EXT_CALL_TYPE_VOICE;
++        ci->state = state;
++        ci->flags = BINDER_EXT_CALL_FLAG_IMS;
++        ci->number = "0612345678";
++        ext->calls[i] = ci;
++    }
++    g_assert(ext->calls_changed);
++    ext->calls_changed(BINDER_EXT_CALL(ext), ext->calls_changed_data);
++}
++
++/* Starts the driver with the extension, which has dialed and listed none */
++static
++TestExtSlot*
++test_start_ext_dial(
++    void)
++{
++    TestExtSlot* slot = g_object_new(TEST_TYPE_EXT_SLOT, NULL);
++    struct ofono_phone_number ph;
++
++    memset(&ph, 0, sizeof(ph));
++    test_start_with((BinderExtSlot*)slot);
++    g_assert(slot->call->calls_changed);
++
++    test.driver->dial(test.vc, &ph, OFONO_CLIR_OPTION_DEFAULT, test_cb, NULL);
++    g_assert_cmpuint(slot->call->dials, == , 1);
++    g_assert(!test_find_pending(RADIO_REQ_DIAL));
++    test_ext_complete(slot->call, BINDER_EXT_CALL_RESULT_OK);
++    g_assert_cmpuint(test.cb_ok, == , 1);
++    test.cb_ok = 0;
++    return slot;
++}
++
++static
++void
++test_finish_ext(
++    TestExtSlot* slot)
++{
++    g_assert(!slot->call->req_id);
++    test_finish();
++    g_object_unref(slot);
++}
++
++/*==========================================================================*
++ * ext_dial_hangup: a dial the extension doesn't list yet can be hung up
++ *==========================================================================*/
++
++static
++void
++test_ext_dial_hangup(
++    gconstpointer data)
++{
++    const gboolean all = GPOINTER_TO_INT(data);
++    TestExtSlot* slot = test_start_ext_dial();
++    TestExtCall* ext = slot->call;
++
++    /* Nothing lists the dial, oFono's core holds it as call 1 */
++    if (all) {
++        test.driver->hangup_all(test.vc, test_cb, NULL);
++    } else {
++        test.driver->hangup_active(test.vc, test_cb, NULL);
++    }
++
++    /* It goes to the extension, and the hangup waits for it */
++    g_assert_cmpuint(ext->hangups, == , 1);
++    g_assert_cmpuint(ext->last_hangup_id, == , 1);
++    g_assert_cmpuint(test.cb_ok, == , 0);
++    g_assert(!test_find_pending(RADIO_REQ_HANGUP));
++    test_ext_complete(ext, BINDER_EXT_CALL_RESULT_OK);
++    g_assert_cmpuint(test.cb_ok, == , 1);
++    g_assert_cmpuint(test.cb_failed, == , 0);
++    test_finish_ext(slot);
++}
++
++/*==========================================================================*
++ * ext_dial_listed: once listed, the dial is hung up once, as listed
++ *==========================================================================*/
++
++static
++void
++test_ext_dial_listed(
++    void)
++{
++    TestExtSlot* slot = test_start_ext_dial();
++    TestExtCall* ext = slot->call;
++
++    test_ext_list(ext, 1, BINDER_EXT_CALL_STATE_ALERTING);
++    g_assert_cmpuint(test.last_status, == , OFONO_CALL_STATUS_ALERTING);
++    test.driver->hangup_active(test.vc, test_cb, NULL);
++    g_assert_cmpuint(ext->hangups, == , 1);
++    g_assert_cmpuint(ext->last_hangup_id, == , 1);
++    test_ext_complete(ext, BINDER_EXT_CALL_RESULT_OK);
++    g_assert_cmpuint(test.cb_ok, == , 1);
++
++    /* Gone from the list, it's not hung up again */
++    test_ext_list(ext, 0, BINDER_EXT_CALL_STATE_INVALID);
++    test_fail_last_cause();
++    g_assert_cmpuint(test.disconnected, == , 1);
++    test.driver->hangup_all(test.vc, test_cb, NULL);
++    g_assert_cmpuint(ext->hangups, == , 1);
++    g_assert_cmpuint(test.cb_ok, == , 2);
++    test_finish_ext(slot);
++}
++
++/*==========================================================================*
++ * ext_dial_refused: the extension won't, IRadio hangs the dial up by id
++ *==========================================================================*/
++
++static
++void
++test_ext_dial_refused(
++    void)
++{
++    TestExtSlot* slot = test_start_ext_dial();
++    TestExtCall* ext = slot->call;
++
++    ext->refuse_hangup = TRUE;
++    test.driver->hangup_active(test.vc, test_cb, NULL);
++    g_assert_cmpuint(ext->hangups, == , 1);
++    g_assert(test_find_pending(RADIO_REQ_HANGUP));
++    g_assert_cmpuint(test.cb_ok, == , 0);
++    test_respond_ok(RADIO_REQ_HANGUP);
++    g_assert_cmpuint(test.cb_ok, == , 1);
++    test_answer_poll();
++    test_finish_ext(slot);
++}
++
++/*==========================================================================*
++ * ext_dial_held: releasing the held calls leaves the dial alone
++ *==========================================================================*/
++
++static
++void
++test_ext_dial_held(
++    void)
++{
++    TestExtSlot* slot = test_start_ext_dial();
++    TestExtCall* ext = slot->call;
++
++    /* The one hangup that filters the dial out */
++    binder_voicecall_hangup(test.vc, binder_voicecall_hangup_filter_held,
++        test_cb, NULL);
++    g_assert_cmpuint(ext->hangups, == , 0);
++    g_assert(!test_find_pending(RADIO_REQ_HANGUP));
++    g_assert_cmpuint(test.cb_ok, == , 1);
++    test_finish_ext(slot);
++}
++
++/*==========================================================================*
++ * ext_dial_listed_first: listed before the dial completes, hung up once
++ *==========================================================================*/
++
++static
++void
++test_ext_dial_listed_first(
++    void)
++{
++    TestExtSlot* slot = g_object_new(TEST_TYPE_EXT_SLOT, NULL);
++    TestExtCall* ext = slot->call;
++    struct ofono_phone_number ph;
++
++    memset(&ph, 0, sizeof(ph));
++    test_start_with((BinderExtSlot*)slot);
++    test.driver->dial(test.vc, &ph, OFONO_CLIR_OPTION_DEFAULT, test_cb, NULL);
++    test_ext_list(ext, 1, BINDER_EXT_CALL_STATE_DIALING);
++    test_ext_complete(ext, BINDER_EXT_CALL_RESULT_OK);
++    test.driver->hangup_active(test.vc, test_cb, NULL);
++    g_assert_cmpuint(ext->hangups, == , 1);
++    g_assert(!test_find_pending(RADIO_REQ_HANGUP));
++    test_ext_complete(ext, BINDER_EXT_CALL_RESULT_OK);
++    g_assert_cmpuint(test.cb_ok, == , 2);
++    test_finish_ext(slot);
++}
++
++/*==========================================================================*
++ * ext_dial_failed: a dial that failed leaves nothing to hang up
++ *==========================================================================*/
++
++static
++void
++test_ext_dial_failed(
++    void)
++{
++    TestExtSlot* slot = test_start_ext_dial();
++    TestExtCall* ext = slot->call;
++    struct ofono_phone_number ph;
++
++    /* The next dial fails. The earlier one isn't oFono's any more. */
++    memset(&ph, 0, sizeof(ph));
++    test.driver->dial(test.vc, &ph, OFONO_CLIR_OPTION_DEFAULT, test_cb, NULL);
++    test_ext_complete(ext, BINDER_EXT_CALL_RESULT_ERROR);
++    g_assert_cmpuint(test.cb_failed, == , 1);
++
++    test.driver->hangup_all(test.vc, test_cb, NULL);
++    g_assert_cmpuint(ext->hangups, == , 0);
++    g_assert_cmpuint(test.cb_ok, == , 1);
++    test_finish_ext(slot);
++}
++
+ int main(int argc, char* argv[])
+ {
+     char** paths = g_new0(char*, G_N_ELEMENTS(test_ops) + 1);
+@@ -1833,6 +2307,16 @@ int main(int argc, char* argv[])
+     g_test_add_func(TEST_("remote_hangup"), test_remote_hangup);
+     g_test_add_func(TEST_("api"), test_api);
+     g_test_add_func(TEST_("ext_call_ims"), test_ext_call_ims);
++    g_test_add_data_func(TEST_("ext_dial_hangup_active"),
++        GINT_TO_POINTER(FALSE), test_ext_dial_hangup);
++    g_test_add_data_func(TEST_("ext_dial_hangup_all"),
++        GINT_TO_POINTER(TRUE), test_ext_dial_hangup);
++    g_test_add_func(TEST_("ext_dial_listed"), test_ext_dial_listed);
++    g_test_add_func(TEST_("ext_dial_refused"), test_ext_dial_refused);
++    g_test_add_func(TEST_("ext_dial_held"), test_ext_dial_held);
++    g_test_add_func(TEST_("ext_dial_failed"), test_ext_dial_failed);
++    g_test_add_func(TEST_("ext_dial_listed_first"),
++        test_ext_dial_listed_first);
+     ret = g_test_run();
+     g_strfreev(paths);
+     return ret;
