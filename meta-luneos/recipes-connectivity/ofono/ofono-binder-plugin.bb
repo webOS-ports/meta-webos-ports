@@ -50,10 +50,11 @@ SRC_URI = "git://github.com/mer-hybris/ofono-binder-plugin.git;branch=master;pro
            file://0036-unit-Test-which-calls-oFono-hears-are-IMS.patch \
            file://0037-ofono-binder-Let-IMS-and-XCAP-data-profiles-use-IWLA.patch \
            file://0038-unit-Test-the-bearers-of-the-IMS-and-XCAP-data-profi.patch \
+           file://0039-ofono-binder-Keep-the-IMS-atom-while-the-modem-is-of.patch \
 "
 
 PV = "1.1.41"
-PR = "r8"
+PR = "r9"
 SRCREV = "204dea1593be95e60bad9f2c0282c35a9f8ba272"
 
 CFLAGS += "--sysroot=${RECIPE_SYSROOT} "
