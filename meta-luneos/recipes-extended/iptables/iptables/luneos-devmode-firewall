@@ -102,6 +102,26 @@ accept_ipsec() {
         echo "${0##*/}: $1: no policy match, IPsec traffic (VoWiFi) not let in" >&2
 }
 
+# The oem_in chain Android's netd keeps for vendor rules, jumped to from
+# INPUT. MediaTek's WPFA (libwpfa.so, in the RIL) creates oem_wpfa with
+# NFQUEUE rules for the ePDG's Wi-Fi calling packets that land here
+# instead of reaching the modem directly, and hooks it in with
+# "-A oem_in -j oem_wpfa". Without oem_in that fails, the policy drops
+# those packets, and a Wi-Fi call hangs at dialing (radon, 28 Nov 2026).
+# The firewall loads before the Android container; should oem_wpfa be
+# there already (a reload), the jump to it is added here.
+# $1: iptables or ip6tables
+oem_in() {
+    "$1" -w -N oem_in 2>/dev/null || :
+    "$1" -w -C INPUT -j oem_in 2>/dev/null ||
+        "$1" -w -A INPUT -j oem_in || return 1
+    if "$1" -w -n -L oem_wpfa >/dev/null 2>&1; then
+        "$1" -w -C oem_in -j oem_wpfa 2>/dev/null ||
+            "$1" -w -A oem_in -j oem_wpfa
+    fi
+    return 0
+}
+
 # $1: 4 or 6. Fails closed: the policies are DROP before anything is loaded.
 load() {
     case "$1" in
@@ -115,12 +135,14 @@ load() {
     "$_t" -w -P FORWARD DROP
     if "$_t-restore" -w -- "$RULESDIR/$_t.rules"; then
         accept_ipsec "$_t"
+        oem_in "$_t"
         echo full > "$RUNDIR/ipv$1" 2>/dev/null
         return 0
     fi
     echo "${0##*/}: $RULESDIR/$_t.rules refused (no conntrack in the kernel?), loading $_t-fallback.rules" >&2
     if "$_t-restore" -w -- "$RULESDIR/$_t-fallback.rules"; then
         accept_ipsec "$_t"
+        oem_in "$_t"
         echo fallback > "$RUNDIR/ipv$1" 2>/dev/null
         return 0
     fi
