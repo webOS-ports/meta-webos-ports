@@ -1,0 +1,107 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] voicecall: dial over IMS while the modem is offline
+
+Airplane mode takes the modem offline, and voicecall then refused every
+Dial with -ENETDOWN. A MediaTek modem keeps IMS registered over Wi-Fi
+with the radio off, so a call could still go out.
+
+Offline the radio is off, so an IMS registration that is still up is
+over Wi-Fi. Let Dial through then, when that registration carries voice.
+An emergency number still gets -ENETDOWN offline, as before: it needs
+the radio. Online nothing changes.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/ims.c                       | 28 ++++++++++++++++++++++++++++
+ src/ofono.h                     |  7 +++++++
+ src/voicecall.c                 |  5 ++++-
+ unit/test-emulator-multimodem.c |  5 +++++
+ 4 files changed, 44 insertions(+), 1 deletion(-)
+
+diff --git a/src/ims.c b/src/ims.c
+index b3e3520..7c7bcb4 100644
+--- a/src/ims.c
++++ b/src/ims.c
+@@ -255,6 +255,34 @@ static void ims_remove(struct ofono_atom *atom)
+ 	g_free(ims);
+ }
+ 
++static ofono_bool_t ims_offline_capable(struct ofono_modem *modem, int flag)
++{
++	struct ofono_atom *atom;
++	const struct ofono_ims *ims;
++
++	if (ofono_modem_get_online(modem))
++		return FALSE;
++
++	atom = __ofono_modem_find_atom(modem, OFONO_ATOM_TYPE_IMS);
++	if (atom == NULL)
++		return FALSE;
++
++	ims = __ofono_atom_get_data(atom);
++
++	return ims->reg_info && ims->ext_info != -1 &&
++						(ims->ext_info & flag);
++}
++
++ofono_bool_t __ofono_ims_offline_voice(struct ofono_modem *modem)
++{
++	return ims_offline_capable(modem, VOICE_CAPABLE_FLAG);
++}
++
++ofono_bool_t __ofono_ims_offline_sms(struct ofono_modem *modem)
++{
++	return ims_offline_capable(modem, SMS_CAPABLE_FLAG);
++}
++
+ OFONO_DEFINE_ATOM_CREATE(ims, OFONO_ATOM_TYPE_IMS, {
+ 	atom->reg_info = 0;
+ 	atom->ext_info = -1;
+diff --git a/src/ofono.h b/src/ofono.h
+index ddfdc72..16a11e5 100644
+--- a/src/ofono.h
++++ b/src/ofono.h
+@@ -678,3 +678,10 @@ ofono_bool_t __ofono_private_network_request(ofono_private_network_cb_t cb,
+ #include <ofono/netmon.h>
+ #include <ofono/lte.h>
+ #include <ofono/ims.h>
++
++/*
++ * Offline the radio is off, so an IMS registration that is still up is
++ * over Wi-Fi. These say whether it carries voice or SMS then.
++ */
++ofono_bool_t __ofono_ims_offline_voice(struct ofono_modem *modem);
++ofono_bool_t __ofono_ims_offline_sms(struct ofono_modem *modem);
+diff --git a/src/voicecall.c b/src/voicecall.c
+index 76917a0..74a5ec6 100644
+--- a/src/voicecall.c
++++ b/src/voicecall.c
+@@ -1498,7 +1498,10 @@ static int voicecall_dial(struct ofono_voicecall *vc, const char *number,
+ 	if (!valid_long_phone_number_format(number))
+ 		return -EINVAL;
+ 
+-	if (ofono_modem_get_online(modem) == FALSE)
++	/* Offline, only over IMS on Wi-Fi; an emergency call needs the radio */
++	if (ofono_modem_get_online(modem) == FALSE &&
++			(is_emergency_number(vc, number) ||
++				!__ofono_ims_offline_voice(modem)))
+ 		return -ENETDOWN;
+ 
+ 	if (vc->driver->dial == NULL)
+diff --git a/unit/test-emulator-multimodem.c b/unit/test-emulator-multimodem.c
+index 69f5d6c..bd7faea 100644
+--- a/unit/test-emulator-multimodem.c
++++ b/unit/test-emulator-multimodem.c
+@@ -345,6 +345,11 @@ ofono_bool_t ofono_modem_get_online(struct ofono_modem *modem)
+ 	return TRUE;
+ }
+ 
++ofono_bool_t __ofono_ims_offline_voice(struct ofono_modem *modem)
++{
++	return FALSE;
++}
++
+ void ofono_modem_add_interface(struct ofono_modem *modem,
+ 				const char *interface)
+ {

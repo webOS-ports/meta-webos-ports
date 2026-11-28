@@ -1,0 +1,140 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] sms: send over IMS while the modem is offline
+
+In airplane mode the modem is offline and netreg gone, so every SMS
+waited for the radio to come back. A MediaTek modem keeps IMS registered
+over Wi-Fi with the radio off, and could send it.
+
+Offline the radio is off, so an IMS registration that is still up is
+over Wi-Fi. Send then when it carries SMS. When IMS reports a change,
+send what waits, as netreg does when it registers. Online nothing
+changes.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ src/ims.c                    |  7 +++++++
+ src/ofono.h                  |  1 +
+ src/sms.c                    | 23 ++++++++++++++++++-----
+ unit/test-dbus-queue-atoms.c |  5 +++++
+ 4 files changed, 31 insertions(+), 5 deletions(-)
+
+diff --git a/src/ims.c b/src/ims.c
+index 7c7bcb4..e2af478 100644
+--- a/src/ims.c
++++ b/src/ims.c
+@@ -128,6 +128,7 @@ void ofono_ims_status_notify(struct ofono_ims *ims, int reg_info, int ext_info)
+ {
+ 	dbus_bool_t new_reg_info;
+ 	dbus_bool_t new_voice_capable, new_sms_capable;
++	struct ofono_atom *atom;
+ 
+ 	if (ims == NULL)
+ 		return;
+@@ -153,6 +154,12 @@ void ofono_ims_status_notify(struct ofono_ims *ims, int reg_info, int ext_info)
+ skip:
+ 	ims->reg_info = reg_info;
+ 	ims->ext_info = ext_info;
++
++	/* An SMS queued while offline can go over IMS now */
++	atom = __ofono_modem_find_atom(__ofono_atom_get_modem(ims->atom),
++						OFONO_ATOM_TYPE_SMS);
++	if (atom)
++		__ofono_sms_resume(__ofono_atom_get_data(atom));
+ }
+ 
+ static void registration_status_cb(const struct ofono_error *error,
+diff --git a/src/ofono.h b/src/ofono.h
+index 16a11e5..65acadc 100644
+--- a/src/ofono.h
++++ b/src/ofono.h
+@@ -685,3 +685,4 @@ ofono_bool_t __ofono_private_network_request(ofono_private_network_cb_t cb,
+  */
+ ofono_bool_t __ofono_ims_offline_voice(struct ofono_modem *modem);
+ ofono_bool_t __ofono_ims_offline_sms(struct ofono_modem *modem);
++void __ofono_sms_resume(struct ofono_sms *sms);
+diff --git a/src/sms.c b/src/sms.c
+index 86c3209..5af01b5 100644
+--- a/src/sms.c
++++ b/src/sms.c
+@@ -703,6 +703,13 @@ done:
+ 	tx_queue_entry_destroy(entry);
+ }
+ 
++/* Registered, or offline with SMS over IMS on Wi-Fi */
++static gboolean sms_can_send(struct ofono_sms *sms)
++{
++	return sms->registered ||
++		__ofono_ims_offline_sms(__ofono_atom_get_modem(sms->atom));
++}
++
+ static void tx_finished(const struct ofono_error *error, int mr, void *data)
+ {
+ 	struct ofono_sms *sms = data;
+@@ -717,7 +724,7 @@ static void tx_finished(const struct ofono_error *error, int mr, void *data)
+ 	if (ok == FALSE) {
+ 		/* Retry again when back in online mode */
+ 		/* Note this does not increment retry count */
+-		if (sms->registered == FALSE)
++		if (!sms_can_send(sms))
+ 			return;
+ 
+ 		tx_state = MESSAGE_STATE_FAILED;
+@@ -770,7 +777,7 @@ next_q:
+ 	sms_tx_queue_remove_entry(sms, g_queue_peek_head_link(sms->txq),
+ 					tx_state);
+ 
+-	if (sms->registered == FALSE)
++	if (!sms_can_send(sms))
+ 		return;
+ 
+ 	if (g_queue_peek_head(sms->txq)) {
+@@ -790,7 +797,7 @@ static gboolean tx_next(gpointer user_data)
+ 
+ 	sms->tx_source = 0;
+ 
+-	if (sms->registered == FALSE)
++	if (!sms_can_send(sms))
+ 		return FALSE;
+ 
+ 	if (g_queue_get_length(sms->txq) > 1
+@@ -823,7 +830,13 @@ static void netreg_status_watch(int status, int lac, int ci, int tech,
+ 		break;
+ 	}
+ 
+-	if (sms->registered == FALSE)
++	__ofono_sms_resume(sms);
++}
++
++/* Sends what waits, once it can go */
++void __ofono_sms_resume(struct ofono_sms *sms)
++{
++	if (!sms_can_send(sms))
+ 		return;
+ 
+ 	if (sms->tx_source > 0)
+@@ -2062,7 +2075,7 @@ int __ofono_sms_txq_submit(struct ofono_sms *sms, GSList *list,
+ 
+ 	g_queue_push_tail(sms->txq, entry);
+ 
+-	if (sms->registered && g_queue_get_length(sms->txq) == 1)
++	if (sms_can_send(sms) && g_queue_get_length(sms->txq) == 1)
+ 		sms->tx_source = g_timeout_add(0, tx_next, sms);
+ 
+ 	if (uuid)
+diff --git a/unit/test-dbus-queue-atoms.c b/unit/test-dbus-queue-atoms.c
+index b986450..5384e02 100644
+--- a/unit/test-dbus-queue-atoms.c
++++ b/unit/test-dbus-queue-atoms.c
+@@ -223,6 +223,11 @@ ofono_bool_t ofono_modem_get_online(struct ofono_modem *modem)
+ 	return TRUE;
+ }
+ 
++ofono_bool_t __ofono_ims_offline_sms(struct ofono_modem *modem)
++{
++	return FALSE;
++}
++
+ void ofono_modem_add_interface(struct ofono_modem *modem,
+ 				const char *interface)
+ {

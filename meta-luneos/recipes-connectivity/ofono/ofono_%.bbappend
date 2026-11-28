@@ -3,7 +3,7 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 # oe-core's ofono_2.19.bb sets no PR. Without one here, a rebuilt package
 # carries the same version as the installed one and opkg won't upgrade it.
 # Bump it whenever the patches below change what is built.
-PR = "r8"
+PR = "r9"
 
 DEPENDS += "dbus-glib libmce-glib"
 # The modem stack differs per machine class. The default is the mainline
@@ -99,6 +99,10 @@ SRC_URI:append = " \
   file://0153-unit-test-the-IMS-property-of-a-call.patch \
   file://0154-sim-auth-parse-an-AKA-answer-that-ends-in-its-status.patch \
   file://0155-unit-test-AKA-answers-that-end-in-their-status-word.patch \
+  file://0156-voicecall-dial-over-IMS-while-the-modem-is-offline.patch \
+  file://0157-unit-test-dialling-over-IMS-while-the-modem-is-offli.patch \
+  file://0158-sms-send-over-IMS-while-the-modem-is-offline.patch \
+  file://0159-unit-test-sending-an-SMS-over-IMS-while-the-modem-is.patch \
 "
 
 # The XCAP access point of each network, which oFono's own provider data

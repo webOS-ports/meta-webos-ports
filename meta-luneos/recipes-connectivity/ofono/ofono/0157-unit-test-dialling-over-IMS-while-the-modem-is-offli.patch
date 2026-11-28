@@ -1,0 +1,113 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] unit: test dialling over IMS while the modem is offline
+
+Offline a headset's ATD fails with +CME ERROR: 30 without IMS and is
+dialled with it. An emergency number fails offline even with IMS, and
+dials online as before.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ unit/test-emulator-multimodem.c | 69 ++++++++++++++++++++++++++++++++-
+ 1 file changed, 67 insertions(+), 2 deletions(-)
+
+diff --git a/unit/test-emulator-multimodem.c b/unit/test-emulator-multimodem.c
+index bd7faea..6a17861 100644
+--- a/unit/test-emulator-multimodem.c
++++ b/unit/test-emulator-multimodem.c
+@@ -340,14 +340,19 @@ void __ofono_modem_dec_emergency_mode(struct ofono_modem *modem)
+ {
+ }
+ 
++/* Airplane mode: offline, with or without IMS over Wi-Fi */
++static ofono_bool_t test_offline;
++static ofono_bool_t test_ims_voice;
++
+ ofono_bool_t ofono_modem_get_online(struct ofono_modem *modem)
+ {
+-	return TRUE;
++	return !test_offline;
+ }
+ 
+ ofono_bool_t __ofono_ims_offline_voice(struct ofono_modem *modem)
+ {
+-	return FALSE;
++	assert(test_offline);
++	return test_ims_voice;
+ }
+ 
+ void ofono_modem_add_interface(struct ofono_modem *modem,
+@@ -1333,6 +1338,62 @@ static void test_ims_property(void)
+ }
+ 
+ /* A handover out of IMS (SRVCC) changes the property and signals it once */
++/* Offline the radio is off: a call goes over IMS on Wi-Fi, or not at all */
++static void test_dial_offline(void)
++{
++	struct phone *p = phone_new(1);
++
++	/* Numbered errors: 30 is "no network service" */
++	hf_send(&p->hf, "AT+CMEE=1");
++	assert(hf_expect(&p->hf, "OK"));
++	test_offline = TRUE;
++	test_ims_voice = FALSE;
++	hf_send(&p->hf, "ATD+31600000003;");
++	assert(hf_expect(&p->hf, "+CME ERROR: 30"));
++	assert(p->fvc[0].dialled == 0);
++
++	test_ims_voice = TRUE;
++	hf_send(&p->hf, "ATD+31600000003;");
++	assert(hf_expect(&p->hf, "OK"));
++	assert(p->fvc[0].dialled == 1);
++	call_notify(p, 0, 1, CALL_STATUS_DIALING,
++			CALL_DIRECTION_MOBILE_ORIGINATED, "+31600000003");
++	call_gone(p, 0, 1);
++	hf_flush(&p->hf);
++
++	test_offline = FALSE;
++	test_ims_voice = FALSE;
++	phone_free(p);
++}
++
++/* An emergency call never goes the offline way: it needs the radio on */
++static void test_dial_offline_emergency(void)
++{
++	struct phone *p = phone_new(1);
++
++	/* Numbered errors: 30 is "no network service" */
++	hf_send(&p->hf, "AT+CMEE=1");
++	assert(hf_expect(&p->hf, "OK"));
++	test_offline = TRUE;
++	test_ims_voice = TRUE;
++	hf_send(&p->hf, "ATD112;");
++	assert(hf_expect(&p->hf, "+CME ERROR: 30"));
++	assert(p->fvc[0].dialled == 0);
++
++	/* Online it dials as before */
++	test_offline = FALSE;
++	test_ims_voice = FALSE;
++	hf_send(&p->hf, "ATD112;");
++	assert(hf_expect(&p->hf, "OK"));
++	assert(p->fvc[0].dialled == 1);
++	assert(!strcmp(p->fvc[0].dialled_number, "112"));
++	call_notify(p, 0, 1, CALL_STATUS_DIALING,
++			CALL_DIRECTION_MOBILE_ORIGINATED, "112");
++	call_gone(p, 0, 1);
++	hf_flush(&p->hf);
++	phone_free(p);
++}
++
+ static void test_ims_property_changes(void)
+ {
+ 	struct phone *p = phone_new(1);
+@@ -1398,6 +1459,10 @@ int main(int argc, char **argv)
+ 
+ 	g_test_add_func("/emulator-multimodem/ims-property",
+ 				test_ims_property);
++	g_test_add_func("/emulator-multimodem/dial-offline",
++				test_dial_offline);
++	g_test_add_func("/emulator-multimodem/dial-offline-emergency",
++				test_dial_offline_emergency);
+ 	g_test_add_func("/emulator-multimodem/ims-property-changes",
+ 				test_ims_property_changes);
+ 

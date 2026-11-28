@@ -1,0 +1,168 @@
+From: Herman van Hazendonk <github.com@herrie.org>
+Subject: [PATCH] unit: test sending an SMS over IMS while the modem is offline
+
+Online and not registered an SMS waits, IMS or not. Offline it waits
+without IMS, and with it everything queued goes, then the next one at
+once.
+
+Signed-off-by: Herman van Hazendonk <github.com@herrie.org>
+Upstream-Status: Pending
+---
+ unit/test-dbus-queue-atoms.c | 84 ++++++++++++++++++++++++++++++++++--
+ 1 file changed, 81 insertions(+), 3 deletions(-)
+
+diff --git a/unit/test-dbus-queue-atoms.c b/unit/test-dbus-queue-atoms.c
+index 5384e02..e5f1e87 100644
+--- a/unit/test-dbus-queue-atoms.c
++++ b/unit/test-dbus-queue-atoms.c
+@@ -218,14 +218,18 @@ void __ofono_modem_foreach_registered_atom(struct ofono_modem *modem,
+ {
+ }
+ 
++/* Airplane mode: offline, with or without SMS over IMS on Wi-Fi */
++static ofono_bool_t test_offline;
++static ofono_bool_t test_ims_sms;
++
+ ofono_bool_t ofono_modem_get_online(struct ofono_modem *modem)
+ {
+-	return TRUE;
++	return !test_offline;
+ }
+ 
+ ofono_bool_t __ofono_ims_offline_sms(struct ofono_modem *modem)
+ {
+-	return FALSE;
++	return test_offline && test_ims_sms;
+ }
+ 
+ void ofono_modem_add_interface(struct ofono_modem *modem,
+@@ -434,6 +438,7 @@ enum op_kind {
+ 	OP_SCA_QUERY,
+ 	OP_SCA_SET,
+ 	OP_CF_QUERY,
++	OP_SMS_SUBMIT,
+ };
+ 
+ struct op {
+@@ -502,6 +507,9 @@ static void op_run(struct op *op, gboolean ok)
+ 		((ofono_call_forwarding_query_cb_t) op->cb)(e, 0, NULL,
+ 								op->data);
+ 		break;
++	case OP_SMS_SUBMIT:
++		((ofono_sms_submit_cb_t) op->cb)(e, 1, op->data);
++		break;
+ 	}
+ }
+ 
+@@ -649,11 +657,19 @@ static void sms_sca_set(struct ofono_sms *sms,
+ 	op_add(OP_SCA_SET, cb, data, 0);
+ }
+ 
++static void sms_submit(struct ofono_sms *sms, const unsigned char *pdu,
++			int pdu_len, int tpdu_len, int mms,
++			ofono_sms_submit_cb_t cb, void *data)
++{
++	op_add(OP_SMS_SUBMIT, cb, data, 0);
++}
++
+ static const struct ofono_sms_driver test_sms_driver = {
+ 	.probe = sms_probe,
+ 	.remove = sms_remove_driver,
+ 	.sca_query = sms_sca_query,
+ 	.sca_set = sms_sca_set,
++	.submit = sms_submit,
+ };
+ 
+ OFONO_ATOM_DRIVER_BUILTIN(sms, test, &test_sms_driver)
+@@ -749,6 +765,8 @@ static void test_begin(void)
+ 	sync_fail_kind = -1;
+ 	fail_ops_on_remove = FALSE;
+ 	test_ussd_busy = FALSE;
++	test_offline = FALSE;
++	test_ims_sms = FALSE;
+ 
+ 	timeout_id = g_timeout_add_seconds(30, test_timeout, NULL);
+ 
+@@ -1424,7 +1442,7 @@ static void test_radio_removed_driver_answers(void)
+ #define MM OFONO_MESSAGE_MANAGER_INTERFACE
+ #define SCA "ServiceCenterAddress"
+ 
+-static void sms_setup(void)
++static struct ofono_sms *sms_setup(void)
+ {
+ 	struct ofono_sms *sms;
+ 
+@@ -1432,6 +1450,65 @@ static void sms_setup(void)
+ 	sms = ofono_sms_create(&modem, 0, "test", NULL);
+ 	assert(sms);
+ 	ofono_sms_register(sms);
++	return sms;
++}
++
++static void sms_send(struct call *call)
++{
++	DBusMessage *msg = test_dbus_new_call(&dbus, MODEM_PATH, MM,
++							"SendMessage");
++	const char *to = "+31600000003";
++	const char *text = "hi";
++
++	assert(dbus_message_append_args(msg, DBUS_TYPE_STRING, &to,
++					DBUS_TYPE_STRING, &text,
++					DBUS_TYPE_INVALID));
++	test_dbus_send(&dbus, msg, on_reply, call);
++}
++
++/*
++ * Not registered, an SMS waits. Offline with SMS over IMS on Wi-Fi it
++ * goes: all that waits when IMS comes up, and the next one at once.
++ */
++static void test_sms_offline(void)
++{
++	struct ofono_sms *sms = sms_setup();
++	struct call a = { 0 }, b = { 0 }, c = { 0 };
++
++	/* Online and not registered: IMS changes nothing */
++	test_ims_sms = TRUE;
++	sms_send(&a);
++	sms_send(&c);
++	flush();
++	assert_ok(&a);
++	assert_ok(&c);
++	g_assert_cmpuint(ops_started, ==, 0);
++
++	test_offline = TRUE;
++	test_ims_sms = FALSE;
++	__ofono_sms_resume(sms);
++	flush();
++	g_assert_cmpuint(ops_started, ==, 0);
++
++	test_ims_sms = TRUE;
++	__ofono_sms_resume(sms);
++	flush();
++	g_assert_cmpuint(ops_started, ==, 1);
++	op_finish(OP_SMS_SUBMIT, TRUE);
++	flush();
++	g_assert_cmpuint(ops_started, ==, 2);
++	op_finish(OP_SMS_SUBMIT, TRUE);
++
++	sms_send(&b);
++	flush();
++	assert_ok(&b);
++	g_assert_cmpuint(ops_started, ==, 3);
++	op_finish(OP_SMS_SUBMIT, TRUE);
++
++	test_end();
++	call_done(&a);
++	call_done(&b);
++	call_done(&c);
+ }
+ 
+ static void sms_get(struct call *call)
+@@ -1775,6 +1852,7 @@ int main(int argc, char **argv)
+ 	T(sms_set_and_get);
+ 	T(sms_removed);
+ 	T(sms_removed_driver_answers);
++	T(sms_offline);
+ 	T(cf_single);
+ 	T(cf_get_shared);
+ 	T(cf_set_during_get);
